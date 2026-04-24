@@ -9,6 +9,11 @@ Thumbs.db
 *.key
 credentials.*
 
+# Firebase 本地實際 config（即使列入也安全，但保持與 example 分離）
+**/firebase-config.js
+**/.firebaserc
+**/firebase-debug.log
+
 # Claude Code 本地設定（含 permissions、可能記錄 token，絕不上雲）
 .claude/
 

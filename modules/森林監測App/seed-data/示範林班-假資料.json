@@ -1,0 +1,45 @@
+{
+  "_comment": "示範資料快照（v1 假資料，蓮華池附近虛構座標）。Seed 邏輯在 pwa/js/forms.js seedDemoData() 函式內，這份 JSON 僅作參考紀錄。",
+  "project": {
+    "code": "DEMO",
+    "name": "示範林班",
+    "description": "v1 MVP 示範用案件",
+    "coordinateSystem": "TWD97_TM2"
+  },
+  "plots": [
+    {
+      "code": "DEMO-001",
+      "forestUnit": "示範-1",
+      "shape": "circle",
+      "area_m2": 500,
+      "wgs84": [120.8838, 23.9176],
+      "twd97": [241480, 2645080],
+      "notes": "柳杉人工林"
+    },
+    {
+      "code": "DEMO-002",
+      "forestUnit": "示範-2",
+      "shape": "square",
+      "area_m2": 400,
+      "wgs84": [120.8856, 23.9192],
+      "twd97": [241662, 2645257],
+      "notes": "天然闊葉林"
+    },
+    {
+      "code": "DEMO-003",
+      "forestUnit": "示範-1",
+      "shape": "circle",
+      "area_m2": 500,
+      "wgs84": [120.8821, 23.9158],
+      "twd97": [241308, 2644881],
+      "notes": "混合林"
+    }
+  ],
+  "trees_per_plot": "8-12 株（隨機 from 12 種常見樹種）",
+  "regeneration_per_plot": "5-8 筆（隨機苗高分級）",
+  "instructions": [
+    "1. 在 App 設定頁按「灌入示範樣區」按鈕觸發 seed",
+    "2. seed 邏輯由 pwa/js/forms.js 的 seedDemoData() 執行，會用上述座標但 trees/regen 數值為隨機",
+    "3. 如需重新 seed，請先在 Firebase Console 手動清除 /projects/{id}/plots 子集合"
+  ]
+}

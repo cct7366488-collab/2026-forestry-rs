@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== Helpers =====
+    function isSignedIn() { return request.auth != null; }
+    function userRole(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data.members[request.auth.uid];
+    }
+    function isPi(projectId)       { return userRole(projectId) == 'pi'; }
+    function isSurveyor(projectId) { return userRole(projectId) == 'surveyor'; }
+    function isReviewer(projectId) { return userRole(projectId) == 'reviewer'; }
+    function isMember(projectId)   { return userRole(projectId) != null; }
+    function isOwner()             { return resource.data.createdBy == request.auth.uid; }
+    function willOwn()             { return request.resource.data.createdBy == request.auth.uid; }
+
+    // ===== Users =====
+    match /users/{uid} {
+      allow read:  if isSignedIn() && request.auth.uid == uid;
+      allow write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ===== Projects =====
+    match /projects/{projectId} {
+      allow read:   if isSignedIn() && isMember(projectId);
+      allow update: if isSignedIn() && isPi(projectId);
+      allow create: if isSignedIn() &&
+        request.resource.data.members[request.auth.uid] == 'pi';
+      allow delete: if false;
+
+      // Plots
+      match /plots/{plotId} {
+        allow read: if isSignedIn() && (
+          isPi(projectId) ||
+          isReviewer(projectId) ||
+          (isSurveyor(projectId) && isOwner())
+        );
+        allow create: if isSignedIn() &&
+          (isSurveyor(projectId) || isPi(projectId)) && willOwn();
+        allow update: if isSignedIn() && (
+          isPi(projectId) ||
+          (isSurveyor(projectId) && isOwner())
+        );
+        allow delete: if isSignedIn() && isPi(projectId);
+
+        // Trees & Regeneration
+        match /{subColl}/{docId} {
+          allow read: if isSignedIn() && subColl in ['trees', 'regeneration'] && (
+            isPi(projectId) ||
+            isReviewer(projectId) ||
+            (isSurveyor(projectId) &&
+             get(/databases/$(database)/documents/projects/$(projectId)/plots/$(plotId)).data.createdBy == request.auth.uid)
+          );
+          allow create: if isSignedIn() && subColl in ['trees', 'regeneration'] &&
+            (isSurveyor(projectId) || isPi(projectId)) && willOwn();
+          allow update: if isSignedIn() && subColl in ['trees', 'regeneration'] && (
+            isPi(projectId) ||
+            (isSurveyor(projectId) && isOwner())
+          );
+          allow delete: if isSignedIn() && subColl in ['trees', 'regeneration'] && (
+            isPi(projectId) ||
+            (isSurveyor(projectId) && isOwner())
+          );
+        }
+      }
+    }
+
+    // ===== Lookups =====
+    match /lookups/{collection}/{docId} {
+      allow read:  if isSignedIn();
+      allow write: if false;
+    }
+  }
+}

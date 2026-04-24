@@ -1,0 +1,454 @@
+// ===== forms.js — 表單：專案 / 樣區 / 立木 / 更新 / Seed =====
+
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, wgs84ToTwd97 } from './app.js';
+
+// ===== 內建樹種字典（v1：30 個常見種；v2 對接 species-conservation-lookup）=====
+const SPECIES = [
+  { zh: '台灣杉', sci: 'Taiwania cryptomerioides', cons: null },
+  { zh: '紅檜', sci: 'Chamaecyparis formosensis', cons: null },
+  { zh: '台灣扁柏', sci: 'Chamaecyparis obtusa var. formosana', cons: null },
+  { zh: '台灣肖楠', sci: 'Calocedrus macrolepis var. formosana', cons: null },
+  { zh: '台灣二葉松', sci: 'Pinus taiwanensis', cons: null },
+  { zh: '台灣五葉松', sci: 'Pinus morrisonicola', cons: null },
+  { zh: '杉木', sci: 'Cunninghamia lanceolata', cons: null },
+  { zh: '柳杉', sci: 'Cryptomeria japonica', cons: null },
+  { zh: '台灣鐵杉', sci: 'Tsuga chinensis var. formosana', cons: null },
+  { zh: '台灣冷杉', sci: 'Abies kawakamii', cons: null },
+  { zh: '台灣雲杉', sci: 'Picea morrisonicola', cons: null },
+  { zh: '香杉', sci: 'Cunninghamia konishii', cons: null },
+  { zh: '台灣油杉', sci: 'Keteleeria davidiana var. formosana', cons: 'I' },
+  { zh: '台灣穗花杉', sci: 'Amentotaxus formosana', cons: 'I' },
+  { zh: '櫸木', sci: 'Zelkova serrata', cons: null },
+  { zh: '牛樟', sci: 'Cinnamomum kanehirae', cons: 'II' },
+  { zh: '樟樹', sci: 'Cinnamomum camphora', cons: null },
+  { zh: '台灣赤楊', sci: 'Alnus formosana', cons: null },
+  { zh: '楓香', sci: 'Liquidambar formosana', cons: null },
+  { zh: '青剛櫟', sci: 'Cyclobalanopsis glauca', cons: null },
+  { zh: '長尾尖葉櫧', sci: 'Castanopsis cuspidata var. carlesii', cons: null },
+  { zh: '台灣赤楠', sci: 'Syzygium formosanum', cons: null },
+  { zh: '無患子', sci: 'Sapindus mukorossi', cons: null },
+  { zh: '光蠟樹', sci: 'Fraxinus formosana', cons: null },
+  { zh: '相思樹', sci: 'Acacia confusa', cons: null },
+  { zh: '台灣櫸', sci: 'Zelkova serrata', cons: null },
+  { zh: '九芎', sci: 'Lagerstroemia subcostata', cons: null },
+  { zh: '茄苳', sci: 'Bischofia javanica', cons: null },
+  { zh: '香桂', sci: 'Cinnamomum subavenium', cons: null },
+  { zh: '小西氏石櫟', sci: 'Lithocarpus konishii', cons: null }
+];
+
+const PEST_OPTIONS = ['葉斑', '潰瘍', '蟲孔', '空洞', '菌害', '枯梢', '無'];
+
+// ===== 共用：欄位工廠 =====
+function field({ label, name, type = 'text', required = false, value = '', placeholder = '', options = null, step, min, max, rows }) {
+  const id = `f-${name}`;
+  const lab = el('label', { for: id }, label, required ? el('span', { class: 'req' }, ' *') : null);
+  let input;
+  if (options) {
+    input = el('select', { id, name, ...(required ? { required: 'true' } : {}) },
+      ...options.map(o => {
+        const v = typeof o === 'string' ? o : o.value;
+        const t = typeof o === 'string' ? o : o.label;
+        const opt = el('option', { value: v }, t);
+        if (String(v) === String(value)) opt.setAttribute('selected', 'true');
+        return opt;
+      })
+    );
+  } else if (type === 'textarea') {
+    input = el('textarea', { id, name, rows: rows || 3, placeholder }, value);
+  } else {
+    const attrs = { id, name, type, value: value ?? '', placeholder };
+    if (required) attrs.required = 'true';
+    if (step != null) attrs.step = step;
+    if (min != null) attrs.min = min;
+    if (max != null) attrs.max = max;
+    input = el('input', attrs);
+  }
+  return el('div', { class: 'field' }, lab, input);
+}
+
+// ===== 專案表單 =====
+export function openProjectForm(existing = null) {
+  const f = el('form', { class: 'space-y-2' },
+    field({ label: '案件代碼', name: 'code', required: true, value: existing?.code || '', placeholder: 'DEMO / LHC-2026' }),
+    field({ label: '專案名稱', name: 'name', required: true, value: existing?.name || '', placeholder: '示範林班' }),
+    field({ label: '描述', name: 'description', type: 'textarea', value: existing?.description || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const data = {
+      code: fd.get('code').trim(),
+      name: fd.get('name').trim(),
+      description: fd.get('description').trim() || '',
+      coordinateSystem: 'TWD97_TM2',
+      members: { [state.user.uid]: 'pi' },
+      createdBy: state.user.uid,
+      createdAt: fb.serverTimestamp()
+    };
+    try {
+      const ref = await fb.addDoc(fb.collection(fb.db, 'projects'), data);
+      toast('已建立');
+      closeModal();
+      location.hash = `#/p/${ref.id}`;
+    } catch (e) { toast('建立失敗：' + e.message); }
+  });
+  openModal(existing ? '編輯專案' : '新專案', f);
+}
+
+// ===== 樣區表單 =====
+export function openPlotForm(project, existing = null) {
+  const loc = existing?.location;
+  const t97 = existing?.locationTWD97;
+
+  const gpsBtn = el('button', { type: 'button', class: 'gps-btn' }, '📍 抓取 GPS');
+  const gpsStatus = el('span', { class: 'text-xs text-stone-600 ml-2' }, loc ? `WGS84: ${loc.latitude.toFixed(6)}, ${loc.longitude.toFixed(6)}` : '尚未定位');
+  const lngInput = el('input', { type: 'hidden', name: 'lng', value: loc?.longitude || '' });
+  const latInput = el('input', { type: 'hidden', name: 'lat', value: loc?.latitude || '' });
+  const accInput = el('input', { type: 'hidden', name: 'accuracy', value: existing?.locationAccuracy_m || '' });
+
+  gpsBtn.addEventListener('click', () => {
+    if (!navigator.geolocation) { toast('此裝置不支援 GPS'); return; }
+    gpsBtn.disabled = true;
+    gpsBtn.textContent = '⏳ 定位中...';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { longitude, latitude, accuracy } = pos.coords;
+        lngInput.value = longitude;
+        latInput.value = latitude;
+        accInput.value = accuracy;
+        const t = wgs84ToTwd97(longitude, latitude);
+        gpsStatus.innerHTML = `WGS84: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>TWD97: (${t.x}, ${t.y}) ｜ ±${Math.round(accuracy)}m`;
+        gpsBtn.disabled = false;
+        gpsBtn.textContent = '📍 重新定位';
+      },
+      (err) => {
+        toast('GPS 失敗：' + err.message);
+        gpsBtn.disabled = false;
+        gpsBtn.textContent = '📍 抓取 GPS';
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+
+  const f = el('form', { class: 'space-y-2' },
+    field({ label: '樣區編號', name: 'code', required: true, value: existing?.code || '', placeholder: `${project.code}-001` }),
+    field({ label: '林班-小班', name: 'forestUnit', value: existing?.forestUnit || '', placeholder: '123-2' }),
+    el('div', { class: 'field' },
+      el('label', {}, 'GPS 座標 ', el('span', { class: 'req' }, '*')),
+      el('div', { class: 'flex items-center flex-wrap gap-2' }, gpsBtn, gpsStatus),
+      lngInput, latInput, accInput
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '形狀', name: 'shape', options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }], value: existing?.shape || 'circle', required: true }),
+      field({ label: '面積 (m²)', name: 'area_m2', type: 'number', step: '1', min: '1', value: existing?.area_m2 || 500, required: true })
+    ),
+    field({ label: '設置日期', name: 'establishedAt', type: 'date', required: true, value: existing?.establishedAt ? (existing.establishedAt.toDate ? existing.establishedAt.toDate() : new Date(existing.establishedAt)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
+    field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      existing ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-red-600', onclick: () => deletePlot(project, existing) }, '刪除') : null,
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const lng = parseFloat(fd.get('lng'));
+    const lat = parseFloat(fd.get('lat'));
+    if (!lng || !lat) { toast('請先抓取 GPS'); return; }
+    const t97 = wgs84ToTwd97(lng, lat);
+    const data = {
+      code: fd.get('code').trim(),
+      forestUnit: fd.get('forestUnit').trim() || null,
+      location: new fb.GeoPoint(lat, lng),
+      locationTWD97: { x: t97.x, y: t97.y },
+      locationAccuracy_m: parseFloat(fd.get('accuracy')) || null,
+      shape: fd.get('shape'),
+      area_m2: parseInt(fd.get('area_m2'), 10),
+      establishedAt: new Date(fd.get('establishedAt')),
+      notes: fd.get('notes').trim() || null,
+      updatedAt: fb.serverTimestamp(),
+      insideBoundary: true  // v2: 對林班界做點面套疊
+    };
+    try {
+      if (existing) {
+        await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', existing.id), data);
+        toast('已更新');
+      } else {
+        data.createdBy = state.user.uid;
+        data.createdAt = fb.serverTimestamp();
+        await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), data);
+        toast('已建立');
+      }
+      closeModal();
+    } catch (e) { toast('儲存失敗：' + e.message); }
+  });
+  openModal(existing ? '編輯樣區' : '新樣區', f);
+}
+
+async function deletePlot(project, plot) {
+  if (!confirm(`確定刪除樣區 ${plot.code}？子項立木與更新記錄會殘留（v1 限制）`)) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id));
+    toast('已刪除');
+    closeModal();
+    location.hash = `#/p/${project.id}`;
+  } catch (e) { toast('刪除失敗：' + e.message); }
+}
+
+// ===== 立木表單 =====
+export function openTreeForm(project, plot, existing = null) {
+  // 樹種 autocomplete（datalist）
+  const speciesList = el('datalist', { id: 'dl-species' },
+    ...SPECIES.map(s => el('option', { value: s.zh }, `${s.sci}${s.cons ? ` [${s.cons}]` : ''}`))
+  );
+
+  const speciesInput = el('input', {
+    type: 'text', name: 'speciesZh', required: 'true',
+    list: 'dl-species', placeholder: '輸入或選擇',
+    value: existing?.speciesZh || '',
+    autocomplete: 'off'
+  });
+  const consWarn = el('div', { class: 'text-xs mt-1' });
+  function updateConsWarn() {
+    const s = SPECIES.find(x => x.zh === speciesInput.value);
+    if (s?.cons) consWarn.innerHTML = `<span class="cons-warn">⚠ 保育類 第 ${s.cons} 級</span>`;
+    else consWarn.innerHTML = '';
+  }
+  speciesInput.addEventListener('input', updateConsWarn);
+  updateConsWarn();
+
+  // DBH / H 即時計算顯示
+  const calcOut = el('div', { class: 'bg-stone-50 rounded p-2 text-xs text-stone-700 my-2' });
+  function updateCalc() {
+    const dbh = parseFloat(f.querySelector('[name=dbh_cm]').value);
+    const h = parseFloat(f.querySelector('[name=height_m]').value);
+    const sci = SPECIES.find(x => x.zh === speciesInput.value)?.sci || '';
+    if (!dbh || !h) { calcOut.textContent = '輸入 DBH 與樹高即時試算'; return; }
+    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesSci: sci });
+    calcOut.innerHTML = `斷面積 ${m.basalArea_m2} m² ｜ 材積 ${m.volume_m3} m³ ｜ 碳量 ${m.carbon_kg} kg`;
+  }
+
+  // 病蟲害 checkbox
+  const existingPests = new Set(existing?.pestSymptoms || []);
+  const pestBox = el('div', { class: 'flex flex-wrap gap-2 text-sm' },
+    ...PEST_OPTIONS.map(p => el('label', { class: 'flex items-center gap-1' },
+      el('input', { type: 'checkbox', name: 'pest', value: p, ...(existingPests.has(p) ? { checked: 'true' } : {}) }),
+      p
+    ))
+  );
+
+  const f = el('form', { class: 'space-y-2' },
+    speciesList,
+    field({ label: '個體編號', name: 'treeNum', type: 'number', step: '1', min: '1', required: true,
+      value: existing?.treeNum ?? '' }),
+    el('div', { class: 'field' },
+      el('label', {}, '樹種 ', el('span', { class: 'req' }, '*')),
+      speciesInput,
+      consWarn
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: 'DBH (cm)', name: 'dbh_cm', type: 'number', step: '0.1', min: '0', required: true, value: existing?.dbh_cm ?? '' }),
+      field({ label: '樹高 H (m)', name: 'height_m', type: 'number', step: '0.1', min: '0', required: true, value: existing?.height_m ?? '' })
+    ),
+    field({ label: '枝下高 (m)', name: 'branchHeight_m', type: 'number', step: '0.1', min: '0', value: existing?.branchHeight_m ?? '' }),
+    calcOut,
+    field({ label: '活力', name: 'vitality', required: true,
+      options: [
+        { value: 'healthy', label: '健康' },
+        { value: 'weak', label: '衰弱' },
+        { value: 'standing-dead', label: '枯立' },
+        { value: 'fallen', label: '倒伏' }
+      ], value: existing?.vitality || 'healthy' }),
+    el('div', { class: 'field' },
+      el('label', {}, '病蟲害症狀（複選）'),
+      pestBox
+    ),
+    field({ label: '標記方式', name: 'marking',
+      options: [
+        { value: 'none', label: '無' },
+        { value: 'paint', label: '噴漆' },
+        { value: 'tag', label: '號牌' }
+      ], value: existing?.marking || 'none' }),
+    field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      existing ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-red-600', onclick: () => deleteSubdoc(project, plot, 'trees', existing) }, '刪除') : null,
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+  // 即時計算
+  f.querySelector('[name=dbh_cm]').addEventListener('input', updateCalc);
+  f.querySelector('[name=height_m]').addEventListener('input', updateCalc);
+  speciesInput.addEventListener('input', updateCalc);
+  updateCalc();
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const speciesZh = fd.get('speciesZh').trim();
+    const sp = SPECIES.find(x => x.zh === speciesZh) || {};
+    const dbh = parseFloat(fd.get('dbh_cm'));
+    const h = parseFloat(fd.get('height_m'));
+    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesSci: sp.sci });
+    const data = {
+      treeNum: parseInt(fd.get('treeNum'), 10),
+      speciesZh,
+      speciesSci: sp.sci || null,
+      conservationGrade: sp.cons || null,
+      dbh_cm: dbh,
+      height_m: h,
+      branchHeight_m: parseFloat(fd.get('branchHeight_m')) || null,
+      vitality: fd.get('vitality'),
+      pestSymptoms: fd.getAll('pest'),
+      marking: fd.get('marking'),
+      notes: fd.get('notes').trim() || null,
+      ...m,
+      updatedAt: fb.serverTimestamp()
+    };
+    try {
+      const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees');
+      if (existing) {
+        await fb.updateDoc(fb.doc(colRef, existing.id), data);
+        toast('已更新');
+      } else {
+        data.createdBy = state.user.uid;
+        data.createdAt = fb.serverTimestamp();
+        await fb.addDoc(colRef, data);
+        toast('已建立');
+      }
+      closeModal();
+    } catch (e) { toast('儲存失敗：' + e.message); }
+  });
+  openModal(existing ? `編輯立木 #${existing.treeNum}` : '新立木', f);
+}
+
+// ===== 自然更新表單 =====
+export function openRegenForm(project, plot, existing = null) {
+  const f = el('form', { class: 'space-y-2' },
+    field({ label: '樹種', name: 'speciesZh', required: true, value: existing?.speciesZh || '' }),
+    field({ label: '苗高分級', name: 'heightClass', required: true,
+      options: [
+        { value: '<30', label: '< 30 cm' },
+        { value: '30-130', label: '30 – 130 cm' },
+        { value: '>130', label: '> 130 cm' }
+      ], value: existing?.heightClass || '<30' }),
+    field({ label: '株數', name: 'count', type: 'number', step: '1', min: '0', required: true, value: existing?.count ?? '' }),
+    field({ label: '競爭植被覆蓋度 (%)', name: 'competitionCover_pct', type: 'number', step: '5', min: '0', max: '100', value: existing?.competitionCover_pct ?? '' }),
+    field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      existing ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-red-600', onclick: () => deleteSubdoc(project, plot, 'regeneration', existing) }, '刪除') : null,
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const speciesZh = fd.get('speciesZh').trim();
+    const sp = SPECIES.find(x => x.zh === speciesZh) || {};
+    const data = {
+      speciesZh,
+      speciesSci: sp.sci || null,
+      heightClass: fd.get('heightClass'),
+      count: parseInt(fd.get('count'), 10),
+      competitionCover_pct: fd.get('competitionCover_pct') ? parseInt(fd.get('competitionCover_pct'), 10) : null,
+      notes: fd.get('notes').trim() || null
+    };
+    try {
+      const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'regeneration');
+      if (existing) {
+        await fb.updateDoc(fb.doc(colRef, existing.id), data);
+        toast('已更新');
+      } else {
+        data.createdBy = state.user.uid;
+        data.createdAt = fb.serverTimestamp();
+        await fb.addDoc(colRef, data);
+        toast('已建立');
+      }
+      closeModal();
+    } catch (e) { toast('儲存失敗：' + e.message); }
+  });
+  openModal(existing ? '編輯更新記錄' : '新更新記錄', f);
+}
+
+async function deleteSubdoc(project, plot, subColl, existing) {
+  if (!confirm('確定刪除？')) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, subColl, existing.id));
+    toast('已刪除');
+    closeModal();
+  } catch (e) { toast('刪除失敗：' + e.message); }
+}
+
+// ===== Seed Demo Data =====
+export async function seedDemoData(project) {
+  if (!confirm('將灌入 3 個示範樣區（蓮華池附近虛構座標）+ 約 30 株立木 + 約 20 筆更新。繼續？')) return;
+  toast('灌入中...');
+  try {
+    // 三個示範樣區（蓮華池研究中心附近）
+    const demoPlots = [
+      { code: `${project.code}-001`, lat: 23.9176, lng: 120.8838, forestUnit: '示範-1', shape: 'circle', area_m2: 500, notes: '柳杉人工林' },
+      { code: `${project.code}-002`, lat: 23.9192, lng: 120.8856, forestUnit: '示範-2', shape: 'square', area_m2: 400, notes: '天然闊葉林' },
+      { code: `${project.code}-003`, lat: 23.9158, lng: 120.8821, forestUnit: '示範-1', shape: 'circle', area_m2: 500, notes: '混合林' }
+    ];
+    for (const p of demoPlots) {
+      const t97 = wgs84ToTwd97(p.lng, p.lat);
+      const plotRef = await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), {
+        code: p.code,
+        forestUnit: p.forestUnit,
+        location: new fb.GeoPoint(p.lat, p.lng),
+        locationTWD97: { x: t97.x, y: t97.y },
+        shape: p.shape,
+        area_m2: p.area_m2,
+        establishedAt: new Date(),
+        notes: p.notes,
+        insideBoundary: true,
+        createdBy: state.user.uid,
+        createdAt: fb.serverTimestamp(),
+        updatedAt: fb.serverTimestamp()
+      });
+      // 每個樣區 8-12 株假立木
+      const n = 8 + Math.floor(Math.random() * 5);
+      for (let i = 1; i <= n; i++) {
+        const sp = SPECIES[Math.floor(Math.random() * 12)];
+        const dbh = +(15 + Math.random() * 50).toFixed(1);
+        const h = +(8 + Math.random() * 15).toFixed(1);
+        const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesSci: sp.sci });
+        const vitOpts = ['healthy', 'healthy', 'healthy', 'weak', 'standing-dead'];
+        await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots', plotRef.id, 'trees'), {
+          treeNum: i,
+          speciesZh: sp.zh, speciesSci: sp.sci, conservationGrade: sp.cons || null,
+          dbh_cm: dbh, height_m: h,
+          vitality: vitOpts[Math.floor(Math.random() * vitOpts.length)],
+          pestSymptoms: Math.random() < 0.2 ? ['葉斑'] : [],
+          marking: 'paint',
+          ...m,
+          createdBy: state.user.uid,
+          createdAt: fb.serverTimestamp(),
+          updatedAt: fb.serverTimestamp()
+        });
+      }
+      // 更新記錄 5-8 筆
+      const rn = 5 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < rn; i++) {
+        const sp = SPECIES[Math.floor(Math.random() * 12)];
+        const hc = ['<30', '30-130', '>130'][Math.floor(Math.random() * 3)];
+        await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots', plotRef.id, 'regeneration'), {
+          speciesZh: sp.zh, speciesSci: sp.sci,
+          heightClass: hc,
+          count: Math.floor(Math.random() * 30) + 1,
+          competitionCover_pct: Math.floor(Math.random() * 80),
+          createdBy: state.user.uid,
+          createdAt: fb.serverTimestamp()
+        });
+      }
+    }
+    toast('示範資料已灌入！');
+  } catch (e) { toast('灌入失敗：' + e.message); }
+}

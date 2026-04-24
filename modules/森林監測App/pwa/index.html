@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#15803d">
+  <title>森林監測 App</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%F0%9F%8C%B2%3C/text%3E%3C/svg%3E">
+
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { forest: { 700: '#15803d', 800: '#166534', 900: '#14532d' } } } }
+    };
+  </script>
+
+  <!-- Leaflet (地圖) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Chart.js (圖表) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- SheetJS (Excel 匯出) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- proj4 (TWD97 ↔ WGS84) -->
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-stone-50 text-stone-900 min-h-screen">
+
+<!-- ===== Header ===== -->
+<header id="topbar" class="bg-forest-800 text-white sticky top-0 z-50 shadow">
+  <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+    <a href="#/" class="text-lg font-bold flex items-center gap-2">
+      🌲 <span>森林監測</span>
+    </a>
+    <nav id="topnav" class="flex items-center gap-3 text-sm"></nav>
+  </div>
+  <div id="offline-banner" class="hidden bg-amber-500 text-white text-center text-sm py-1">
+    📵 離線模式 — 資料已暫存，回連時自動同步
+  </div>
+</header>
+
+<!-- ===== Main ===== -->
+<main id="app" class="max-w-5xl mx-auto px-4 py-6"></main>
+
+<!-- ===== Toast ===== -->
+<div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 hidden bg-stone-900 text-white px-4 py-2 rounded-lg shadow-lg z-50"></div>
+
+<!-- ===== View Templates ===== -->
+
+<template id="view-login">
+  <div class="max-w-sm mx-auto bg-white rounded-2xl shadow p-6 mt-8">
+    <h1 class="text-2xl font-bold mb-1">登入</h1>
+    <p class="text-sm text-stone-600 mb-6">森林監測資料收集平台</p>
+    <button id="btn-google" class="w-full bg-white border border-stone-300 hover:bg-stone-50 rounded-lg px-4 py-2 font-medium flex items-center justify-center gap-2 mb-3">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5h-1.9V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.5-4.5 2.4-7.2 2.4-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.6l6.2 5.2c-.4.4 6.6-4.8 6.6-14.8 0-1.3-.1-2.4-.4-4z"/></svg>
+      使用 Google 登入
+    </button>
+    <details class="text-sm">
+      <summary class="cursor-pointer text-stone-600">用 Email/密碼登入</summary>
+      <form id="form-email-login" class="mt-3 space-y-2">
+        <input name="email" type="email" required placeholder="email" class="w-full border rounded px-3 py-2">
+        <input name="password" type="password" required placeholder="密碼" class="w-full border rounded px-3 py-2">
+        <div class="flex gap-2">
+          <button type="submit" class="flex-1 bg-forest-700 text-white rounded px-3 py-2">登入</button>
+          <button type="button" id="btn-signup" class="flex-1 border rounded px-3 py-2">註冊</button>
+        </div>
+      </form>
+    </details>
+  </div>
+</template>
+
+<template id="view-projects">
+  <div class="space-y-4">
+    <div class="flex justify-between items-center">
+      <h1 class="text-2xl font-bold">我的專案</h1>
+      <button id="btn-new-project" class="bg-forest-700 text-white px-4 py-2 rounded-lg">＋ 新專案</button>
+    </div>
+    <div id="project-list" class="grid sm:grid-cols-2 gap-3"></div>
+  </div>
+</template>
+
+<template id="view-project-home">
+  <div class="space-y-6">
+    <div>
+      <a href="#/" class="text-sm text-stone-600">← 我的專案</a>
+      <h1 class="text-2xl font-bold mt-1" data-bind="project.name"></h1>
+      <p class="text-sm text-stone-600" data-bind="project.code"></p>
+    </div>
+
+    <nav class="flex gap-2 border-b">
+      <a href="#" data-tab="plots" class="tab-link px-4 py-2 border-b-2 border-forest-700 font-medium">樣區</a>
+      <a href="#" data-tab="dashboard" class="tab-link px-4 py-2 border-b-2 border-transparent text-stone-600">儀表板</a>
+      <a href="#" data-tab="map" class="tab-link px-4 py-2 border-b-2 border-transparent text-stone-600">地圖</a>
+      <a href="#" data-tab="export" class="tab-link px-4 py-2 border-b-2 border-transparent text-stone-600">匯出</a>
+      <a href="#" data-tab="settings" class="tab-link px-4 py-2 border-b-2 border-transparent text-stone-600">設定</a>
+    </nav>
+
+    <section data-tab-content="plots">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">樣區清單</h2>
+        <button id="btn-new-plot" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm">＋ 新樣區</button>
+      </div>
+      <div id="plot-list" class="grid sm:grid-cols-2 gap-3"></div>
+    </section>
+
+    <section data-tab-content="dashboard" class="hidden space-y-4">
+      <div id="dashboard-summary" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-2">直徑分布</h3>
+        <canvas id="chart-dbh"></canvas>
+      </div>
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-2">樹種重要值（Importance Value）</h3>
+        <canvas id="chart-iv"></canvas>
+      </div>
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-2">健康狀態</h3>
+        <canvas id="chart-vitality"></canvas>
+      </div>
+    </section>
+
+    <section data-tab-content="map" class="hidden">
+      <div id="map" class="h-[500px] rounded-lg shadow"></div>
+    </section>
+
+    <section data-tab-content="export" class="hidden space-y-3">
+      <p class="text-sm text-stone-600">匯出本專案全部資料供後續 R/Python/QGIS 分析。</p>
+      <div class="flex gap-2">
+        <button id="btn-export-xlsx" class="bg-forest-700 text-white px-4 py-2 rounded">匯出 Excel</button>
+        <button id="btn-export-csv-plots" class="border px-4 py-2 rounded">CSV: 樣區</button>
+        <button id="btn-export-csv-trees" class="border px-4 py-2 rounded">CSV: 立木</button>
+        <button id="btn-export-csv-regen" class="border px-4 py-2 rounded">CSV: 更新</button>
+      </div>
+    </section>
+
+    <section data-tab-content="settings" class="hidden space-y-4">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-2">成員與角色</h3>
+        <div id="member-list" class="text-sm space-y-1"></div>
+        <form id="form-add-member" class="mt-3 flex gap-2 text-sm">
+          <input name="email" type="email" placeholder="新成員 email" required class="flex-1 border rounded px-2 py-1">
+          <select name="role" class="border rounded px-2 py-1">
+            <option value="surveyor">調查員</option>
+            <option value="pi">主持人</option>
+            <option value="reviewer">審查委員</option>
+          </select>
+          <button type="submit" class="bg-forest-700 text-white px-3 py-1 rounded">加入</button>
+        </form>
+        <p class="text-xs text-stone-500 mt-2">v1：必須先讓對方登入過一次（建立 /users/{uid}），主持人才能加。</p>
+      </div>
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-2">示範資料</h3>
+        <button id="btn-seed" class="bg-amber-600 text-white px-4 py-2 rounded text-sm">灌入示範樣區（DEMO）</button>
+        <p class="text-xs text-stone-500 mt-2">會建立 3 個示範樣區、約 30 筆立木、約 20 筆更新。請只在新專案執行一次。</p>
+      </div>
+    </section>
+  </div>
+</template>
+
+<template id="view-plot-detail">
+  <div class="space-y-6">
+    <div>
+      <a href="#" data-back-to-project class="text-sm text-stone-600">← 樣區清單</a>
+      <h1 class="text-2xl font-bold mt-1" data-bind="plot.code"></h1>
+      <p class="text-sm text-stone-600">
+        <span data-bind="plot.forestUnit"></span> · 形狀 <span data-bind="plot.shape"></span> · 面積 <span data-bind="plot.area_m2"></span> m²
+      </p>
+      <p class="text-xs text-stone-500 mt-1">
+        WGS84: <span data-bind="plot.wgs84"></span> ｜ TWD97 TM2: <span data-bind="plot.twd97"></span>
+      </p>
+    </div>
+
+    <nav class="flex gap-2 border-b">
+      <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">立木調查</a>
+      <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">自然更新</a>
+      <a href="#" data-subtab="info" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">樣區資訊</a>
+    </nav>
+
+    <section data-subtab-content="trees">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">立木列表 <span id="tree-count" class="text-sm text-stone-500"></span></h2>
+        <button id="btn-new-tree" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm">＋ 新立木</button>
+      </div>
+      <div id="tree-summary" class="bg-white rounded-lg shadow p-3 mb-3 text-sm grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
+      <div id="tree-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
+    <section data-subtab-content="regen" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">自然更新記錄</h2>
+        <button id="btn-new-regen" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm">＋ 新記錄</button>
+      </div>
+      <div id="regen-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
+    <section data-subtab-content="info" class="hidden">
+      <div class="bg-white rounded-lg shadow p-4 space-y-2 text-sm">
+        <div><span class="text-stone-500">設置日期</span>：<span data-bind="plot.establishedAt"></span></div>
+        <div><span class="text-stone-500">建立者</span>：<span data-bind="plot.createdBy"></span></div>
+        <div><span class="text-stone-500">在計畫範圍內</span>：<span data-bind="plot.insideBoundary"></span></div>
+        <div><span class="text-stone-500">備註</span>：<span data-bind="plot.notes"></span></div>
+        <div class="pt-2"><button id="btn-edit-plot" class="border px-3 py-1 rounded text-sm">編輯樣區資訊</button></div>
+      </div>
+    </section>
+  </div>
+</template>
+
+<!-- Modal 殼 -->
+<div id="modal-backdrop" class="hidden fixed inset-0 bg-black/40 z-40"></div>
+<div id="modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <div class="flex justify-between items-center px-4 py-3 border-b">
+      <h3 id="modal-title" class="font-semibold"></h3>
+      <button id="modal-close" class="text-2xl leading-none">&times;</button>
+    </div>
+    <div id="modal-body" class="p-4"></div>
+  </div>
+</div>
+
+<!-- ===== Scripts ===== -->
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

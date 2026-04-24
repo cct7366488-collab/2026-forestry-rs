@@ -1,0 +1,25 @@
+{
+  "type": "FeatureCollection",
+  "name": "示範林班_DEMO_boundary",
+  "crs": { "type": "name", "properties": { "name": "EPSG:4326" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "code": "DEMO",
+        "name": "示範林班",
+        "remark": "v1 假資料 — 蓮華池研究中心附近虛構範圍"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [120.8780, 23.9120],
+          [120.8900, 23.9120],
+          [120.8900, 23.9220],
+          [120.8780, 23.9220],
+          [120.8780, 23.9120]
+        ]]
+      }
+    }
+  ]
+}

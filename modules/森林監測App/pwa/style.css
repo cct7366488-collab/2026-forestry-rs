@@ -1,0 +1,80 @@
+/* 自訂樣式（Tailwind 之外） */
+
+/* iPhone Safe Area */
+body {
+  padding-bottom: env(safe-area-inset-bottom);
+  font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "Segoe UI", sans-serif;
+}
+
+/* 表單欄位（行動裝置好按） */
+input, select, textarea, button {
+  font-size: 16px;  /* 防 iOS 自動 zoom */
+}
+
+/* 表格（立木列表） */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.tbl th, .tbl td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #e7e5e4;
+  text-align: left;
+}
+.tbl th {
+  background: #f5f5f4;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.tbl tr:hover {
+  background: #fafaf9;
+  cursor: pointer;
+}
+
+/* 活力 badge */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.badge-healthy { background: #dcfce7; color: #166534; }
+.badge-weak { background: #fef3c7; color: #854d0e; }
+.badge-standing-dead { background: #e7e5e4; color: #44403c; }
+.badge-fallen { background: #fecaca; color: #991b1b; }
+
+/* 保育等級警示 */
+.cons-warn { background: #fee2e2; color: #991b1b; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+
+/* Map (Leaflet) */
+.leaflet-container { font-family: inherit; }
+
+/* 表單群組 */
+.field { display: block; margin-bottom: 12px; }
+.field > label { display: block; font-size: 13px; color: #57534e; margin-bottom: 4px; font-weight: 500; }
+.field .req { color: #dc2626; }
+.field input, .field select, .field textarea {
+  width: 100%;
+  border: 1px solid #d6d3d1;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: 2px solid #15803d;
+  outline-offset: 1px;
+  border-color: transparent;
+}
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* GPS 按鈕 */
+.gps-btn {
+  background: #15803d; color: white; padding: 6px 12px; border-radius: 8px;
+  font-size: 13px; display: inline-flex; align-items: center; gap: 4px;
+}
+.gps-btn:disabled { opacity: 0.5; }
+
+/* 載入動畫 */
+.spinner {
+  border: 3px solid #f3f3f3; border-top: 3px solid #15803d;
+  border-radius: 50%; width: 24px; height: 24px;
+  animation: spin 0.8s linear infinite;
+  display: inline-block; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
