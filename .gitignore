@@ -14,6 +14,10 @@ credentials.*
 **/.firebaserc
 **/firebase-debug.log
 
+# Firebase init 自動裝的 Agent Skills（給 AI agent 的參考文件，會自動更新，不該進 repo）
+**/.agents/
+**/skills-lock.json
+
 # Claude Code 本地設定（含 permissions、可能記錄 token，絕不上雲）
 .claude/
 
