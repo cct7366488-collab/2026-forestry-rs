@@ -1,0 +1,41 @@
+# Google Drive 系統檔
+desktop.ini
+*.tmp
+~$*
+Thumbs.db
+
+# 敏感資料
+.env
+*.key
+credentials.*
+
+# Claude Code 本地設定（含 permissions、可能記錄 token，絕不上雲）
+.claude/
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# GIS 暫存
+*.tif.aux.xml
+*.lock
+.qgz~
+*.gpkg-shm
+*.gpkg-wal
+
+# 大型資料（視情況解開註解）
+# data/raw/
+# *.las
+# *.laz
+
+# 編輯器
+.vscode/
+.idea/
+*.swp
+.DS_Store
