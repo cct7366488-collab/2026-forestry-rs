@@ -2,8 +2,9 @@
 
 ## 對話開始時請先讀
 進度與最近更動都在 Obsidian：
-`C:\Users\cct\Documents\forestry rs vault\2026-forestry-rs\工作筆記.md`
+`G:\我的雲端硬碟\secondbrain\10-專案\2026-forestry-rs\工作筆記.md`
 
+（此 vault 已連 obsidian MCP，可用 MCP 直接查詢/更新）
 讀完工作筆記再決定下一步。
 
 ---
@@ -45,7 +46,7 @@
 
 - 📋 **GDrive 工作桌**：`H:\我的雲端硬碟\2026 forestry_RS\`（自動跨電腦同步）
 - 🐙 **GitHub repo**：`cct7366488-collab/2026-forestry-rs`（公開）
-- 📘 **Obsidian 駕駛艙**：`C:\Users\cct\Documents\forestry rs vault\2026-forestry-rs\工作筆記.md`（進度日誌）
+- 📘 **Obsidian 駕駛艙**：`G:\我的雲端硬碟\secondbrain\10-專案\2026-forestry-rs\工作筆記.md`（進度日誌；已連 obsidian MCP）
 - 🗺️ **公用圖層資料**：`C:\Users\cct\森林經營計畫書撰寫代理人\公用圖層資料\`（土壤、保安林、土地利用、DEM20m、植群、林班、棲地、火災點、土石流潛勢）
 - 📑 **經營計畫書範本**：`C:\Users\cct\森林經營計畫書撰寫代理人\經營計畫書範本\`（FMP 技能會自動掛載）
 
