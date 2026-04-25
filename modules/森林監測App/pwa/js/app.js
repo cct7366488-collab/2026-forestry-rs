@@ -382,20 +382,44 @@ async function renderProjectHome(root, projectId) {
   if (!psnap.exists()) { toast('找不到專案'); location.hash = ''; return; }
   state.project = { id: projectId, ...psnap.data() };
 
-  // 🩹 v1.0 → v1.5 自動 migration：若當前用戶是 pi 且專案缺欄位 → 自動補
-  if (state.project.members?.[state.user.uid] === 'pi') {
-    const updates = {};
-    if (!state.project.memberUids) updates.memberUids = Object.keys(state.project.members || {});
-    if (!state.project.pi) updates.pi = state.user.uid;
-    if (!state.project.methodology) updates.methodology = { ...DEFAULT_METHODOLOGY };
-    if (state.project.locked === undefined) updates.locked = false;
-    if (Object.keys(updates).length > 0) {
-      try {
-        await updateDoc(pref, updates);
-        Object.assign(state.project, updates);
-        toast('已自動升級此專案到 v1.5 schema');
-      } catch (e) { console.warn('Auto-migration failed:', e); }
-    }
+  // 🩹 v1.0 → v1.5 自動 migration：若當前用戶是 pi 且專案未 migration → 自動補
+  if (state.project.members?.[state.user.uid] === 'pi' && !state.project.migratedV1_5) {
+    try {
+      // (a) 補專案層欄位
+      const projUpdates = {};
+      if (!state.project.memberUids) projUpdates.memberUids = Object.keys(state.project.members || {});
+      if (!state.project.pi) projUpdates.pi = state.user.uid;
+      if (!state.project.methodology) projUpdates.methodology = { ...DEFAULT_METHODOLOGY };
+      if (state.project.locked === undefined) projUpdates.locked = false;
+
+      // (b) 補 plots/trees/regeneration 的 qaStatus
+      const plotsSnap = await getDocs(collection(db, 'projects', projectId, 'plots'));
+      const writeOps = [];
+      for (const plotDoc of plotsSnap.docs) {
+        if (!plotDoc.data().qaStatus) {
+          writeOps.push(updateDoc(plotDoc.ref, { qaStatus: 'pending' }));
+        }
+        const treesSnap = await getDocs(collection(db, 'projects', projectId, 'plots', plotDoc.id, 'trees'));
+        treesSnap.forEach(td => {
+          if (!td.data().qaStatus) writeOps.push(updateDoc(td.ref, { qaStatus: 'pending' }));
+        });
+        const regenSnap = await getDocs(collection(db, 'projects', projectId, 'plots', plotDoc.id, 'regeneration'));
+        regenSnap.forEach(rd => {
+          if (!rd.data().qaStatus) writeOps.push(updateDoc(rd.ref, { qaStatus: 'pending' }));
+        });
+      }
+      await Promise.all(writeOps);
+
+      // (c) 標記已 migration（避免每次開都跑）
+      projUpdates.migratedV1_5 = true;
+      await updateDoc(pref, projUpdates);
+      Object.assign(state.project, projUpdates);
+
+      const totalMigrated = Object.keys(projUpdates).length - 1 + writeOps.length;
+      if (totalMigrated > 0) {
+        toast(`已升級到 v1.5（補了 ${writeOps.length} 筆子資料 qaStatus）`, 4000);
+      }
+    } catch (e) { console.warn('Auto-migration failed:', e); }
   }
 
   // 補預設 methodology（舊專案 fallback，給非 pi 看時用）
