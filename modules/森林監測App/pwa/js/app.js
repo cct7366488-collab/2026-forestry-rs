@@ -381,7 +381,24 @@ async function renderProjectHome(root, projectId) {
   const psnap = await getDoc(pref);
   if (!psnap.exists()) { toast('找不到專案'); location.hash = ''; return; }
   state.project = { id: projectId, ...psnap.data() };
-  // 補預設 methodology（舊專案 fallback）
+
+  // 🩹 v1.0 → v1.5 自動 migration：若當前用戶是 pi 且專案缺欄位 → 自動補
+  if (state.project.members?.[state.user.uid] === 'pi') {
+    const updates = {};
+    if (!state.project.memberUids) updates.memberUids = Object.keys(state.project.members || {});
+    if (!state.project.pi) updates.pi = state.user.uid;
+    if (!state.project.methodology) updates.methodology = { ...DEFAULT_METHODOLOGY };
+    if (state.project.locked === undefined) updates.locked = false;
+    if (Object.keys(updates).length > 0) {
+      try {
+        await updateDoc(pref, updates);
+        Object.assign(state.project, updates);
+        toast('已自動升級此專案到 v1.5 schema');
+      } catch (e) { console.warn('Auto-migration failed:', e); }
+    }
+  }
+
+  // 補預設 methodology（舊專案 fallback，給非 pi 看時用）
   if (!state.project.methodology) state.project.methodology = { ...DEFAULT_METHODOLOGY };
 
   const tpl = $('#view-project-home').content.cloneNode(true);
