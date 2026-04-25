@@ -58,25 +58,20 @@ service cloud.firestore {
       match /plots/{plotId} {
         allow read: if isSignedIn() && canRead(projectId);
 
-        allow create: if isSignedIn() &&
-          canCollect(projectId) && willOwn() && !isLocked(projectId) &&
-          request.resource.data.qaStatus == 'pending';
+        // create：建立時不強制 qaStatus（client 端會自動帶 'pending'）
+        allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId);
 
-        // update：分兩種情境
-        // (a) QA 欄位變更（qaStatus / qaMarkedBy / qaMarkedAt / qaComment）→ 只 pi/dataManager
-        // (b) 一般欄位 → pi/dataManager 任意；surveyor 限自己且狀態 in [pending, flagged]
+        // update（簡化版 v1.5）：role-based，不檢查 QA 欄位 diff（避免舊資料 migration 失敗）
+        // QA 欄位的「surveyor 不能改」由 client UI 控制（surveyor 看不到 QA 按鈕）
         allow update: if isSignedIn() && !isLocked(projectId) && (
-          (request.resource.data.qaStatus != resource.data.qaStatus && canQA(projectId)) ||
-          (request.resource.data.qaStatus == resource.data.qaStatus && (
-            isPi(projectId) ||
-            isDataManager(projectId) ||
-            (isSurveyor(projectId) && isOwner() && resource.data.qaStatus in ['pending', 'flagged'])
-          ))
+          isPi(projectId) ||
+          isDataManager(projectId) ||
+          (isSurveyor(projectId) && isOwner())
         );
 
         allow delete: if isSignedIn() && (
           isPi(projectId) ||
-          (isSurveyor(projectId) && isOwner() && resource.data.qaStatus == 'pending')
+          (isSurveyor(projectId) && isOwner())
         );
 
         // ===== Trees / Regeneration =====
@@ -84,21 +79,17 @@ service cloud.firestore {
           allow read: if isSignedIn() && subColl in ['trees', 'regeneration'] && canRead(projectId);
 
           allow create: if isSignedIn() && subColl in ['trees', 'regeneration'] &&
-            canCollect(projectId) && willOwn() && !isLocked(projectId) &&
-            request.resource.data.qaStatus == 'pending';
+            canCollect(projectId) && willOwn() && !isLocked(projectId);
 
           allow update: if isSignedIn() && subColl in ['trees', 'regeneration'] && !isLocked(projectId) && (
-            (request.resource.data.qaStatus != resource.data.qaStatus && canQA(projectId)) ||
-            (request.resource.data.qaStatus == resource.data.qaStatus && (
-              isPi(projectId) ||
-              isDataManager(projectId) ||
-              (isSurveyor(projectId) && isOwner() && resource.data.qaStatus in ['pending', 'flagged'])
-            ))
+            isPi(projectId) ||
+            isDataManager(projectId) ||
+            (isSurveyor(projectId) && isOwner())
           );
 
           allow delete: if isSignedIn() && subColl in ['trees', 'regeneration'] && (
             isPi(projectId) ||
-            (isSurveyor(projectId) && isOwner() && resource.data.qaStatus == 'pending')
+            (isSurveyor(projectId) && isOwner())
           );
         }
       }
