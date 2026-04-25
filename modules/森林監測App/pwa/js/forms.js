@@ -388,8 +388,9 @@ export async function openPlotForm(project, existing = null) {
     };
     try {
       if (existing) {
+        applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', existing.id), data);
-        toast('已更新');
+        toast(data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新');
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -401,6 +402,17 @@ export async function openPlotForm(project, existing = null) {
     } catch (e) { toast('儲存失敗：' + e.message); }
   });
   openModal(existing ? '編輯樣區' : '新樣區', f);
+}
+
+// v1.5.1 bug #3：surveyor 修正自己被 flag/reject 的資料 → 自動回 pending
+// 保留 qaComment 給 dataManager 看歷史
+function applySurveyorReQaReset(data, existing) {
+  if (!existing) return;
+  if (existing.createdBy !== state.user.uid) return;
+  if (!['flagged', 'rejected'].includes(existing.qaStatus)) return;
+  data.qaStatus = 'pending';
+  data.qaMarkedBy = null;
+  data.qaMarkedAt = null;
 }
 
 async function deletePlot(project, plot) {
@@ -526,8 +538,9 @@ export function openTreeForm(project, plot, existing = null) {
     try {
       const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees');
       if (existing) {
+        applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, existing.id), data);
-        toast('已更新');
+        toast(data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新');
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -576,8 +589,9 @@ export function openRegenForm(project, plot, existing = null) {
     try {
       const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'regeneration');
       if (existing) {
+        applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, existing.id), data);
-        toast('已更新');
+        toast(data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新');
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();

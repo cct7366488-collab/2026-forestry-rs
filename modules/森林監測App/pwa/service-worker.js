@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v1.5';  // 提版可強制讓使用者拉新版
+const CACHE = 'forest-monitor-v1.5.3';  // 提版可強制讓使用者拉新版
 const SHELL = [
   './',
   './index.html',

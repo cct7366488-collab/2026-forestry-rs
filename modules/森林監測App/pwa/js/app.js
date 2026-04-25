@@ -140,6 +140,31 @@ export function anonName(uid) {
   return _anonMap.get(uid);
 }
 
+// v1.5.2 Bug #5：uid → displayName 快取（給 Lock by / createdBy 等顯示用）
+const _userLabelCache = new Map();
+export async function prefetchUserLabels(uids) {
+  const todo = [...new Set(uids)].filter(u => u && !_userLabelCache.has(u));
+  if (!todo.length) return;
+  await Promise.all(todo.map(async (uid) => {
+    try {
+      const us = await getDoc(doc(db, 'users', uid));
+      if (us.exists()) {
+        const d = us.data();
+        _userLabelCache.set(uid, d.displayName || d.email || uid.slice(0, 8));
+      } else {
+        _userLabelCache.set(uid, uid.slice(0, 8));
+      }
+    } catch {
+      _userLabelCache.set(uid, uid.slice(0, 8));
+    }
+  }));
+}
+export function userLabel(uid, fallback = '?') {
+  if (!uid) return fallback;
+  if (uid === state.user?.uid) return '我';
+  return _userLabelCache.get(uid) || uid.slice(0, 8);
+}
+
 // 套用 data-role-show 屬性，僅顯示符合當前角色的元素
 export function applyRoleVisibility(root = document) {
   const r = projectRole();
@@ -333,16 +358,18 @@ async function renderProjects(root) {
   const list = $('#project-list');
 
   // admin: 看全部；非 admin: where('memberUids', 'array-contains', uid)
+  console.log('[projects query]', { uid: state.user.uid, email: state.user.email, isSystemAdmin: isSystemAdmin() });
   const q = isSystemAdmin()
     ? query(collection(db, 'projects'))
     : query(collection(db, 'projects'), where('memberUids', 'array-contains', state.user.uid));
 
   const unsub = onSnapshot(q, snap => {
+    console.log('[projects snapshot]', { size: snap.size, ids: snap.docs.map(d => d.id) });
     list.innerHTML = '';
     if (snap.empty) {
       const msg = isSystemAdmin()
         ? '還沒有專案。點右上「＋ 新專案」建立第一個。'
-        : `你還沒被邀請加入任何專案。請聯絡計畫主持人，提供你的登入 email：${state.user.email}`;
+        : `你還沒被邀請加入任何專案。請聯絡計畫主持人，提供你的登入 email：${state.user.email}（uid: ${state.user.uid.slice(0, 8)}）`;
       list.appendChild(el('div', {
         class: 'col-span-2 bg-amber-50 border border-amber-200 rounded-lg p-4 text-stone-700 text-sm'
       }, msg));
@@ -381,6 +408,25 @@ async function renderProjectHome(root, projectId) {
   const psnap = await getDoc(pref);
   if (!psnap.exists()) { toast('找不到專案'); location.hash = ''; return; }
   state.project = { id: projectId, ...psnap.data() };
+  // v1.5.2 Bug #5：預取所有成員 + lockedBy 的 displayName，避免 UI 顯示 uid 片段
+  prefetchUserLabels([
+    ...Object.keys(state.project.members || {}),
+    state.project.lockedBy
+  ].filter(Boolean));
+
+  // 🩹 v1.5.2：PI 每次開啟都檢查 memberUids ↔ members 同步（自癒，不靠 migratedV1_5）
+  if (state.project.members?.[state.user.uid] === 'pi') {
+    const expectUids = Object.keys(state.project.members || {}).sort();
+    const actualUids = [...(state.project.memberUids || [])].sort();
+    if (expectUids.join(',') !== actualUids.join(',')) {
+      console.warn('[memberUids 不同步，自動修正]', { expected: expectUids, actual: actualUids });
+      try {
+        await updateDoc(doc(db, 'projects', projectId), { memberUids: expectUids });
+        state.project.memberUids = expectUids;
+        toast('已同步成員清單');
+      } catch (e) { console.error('memberUids 同步失敗', e); }
+    }
+  }
 
   // 🩹 v1.0 → v1.5 自動 migration：若當前用戶是 pi 且專案未 migration → 自動補
   if (state.project.members?.[state.user.uid] === 'pi' && !state.project.migratedV1_5) {
@@ -663,7 +709,7 @@ async function renderSettings() {
   const lockStatus = $('#lock-status');
   const lockBtn = $('#btn-toggle-lock');
   if (state.project.locked) {
-    lockStatus.innerHTML = `🔒 <b>已 Lock</b> — 由 ${state.project.lockedBy?.slice(0, 8) || '?'} 於 ${fmtDate(state.project.lockedAt)} 鎖定`;
+    lockStatus.innerHTML = `🔒 <b>已 Lock</b> — 由 ${userLabel(state.project.lockedBy)} 於 ${fmtDate(state.project.lockedAt)} 鎖定`;
     lockBtn.textContent = 'Unlock 專案';
     lockBtn.className = 'bg-amber-600 text-white px-4 py-2 rounded text-sm';
   } else {
@@ -679,7 +725,10 @@ async function renderSettings() {
       lockedAt: newState ? serverTimestamp() : null,
       lockedBy: newState ? state.user.uid : null
     });
+    // v1.5.2 Bug #4：本地 state 同步 lockedAt/lockedBy（serverTimestamp 還沒回，先用 client 時間頂著；下次 load 會被覆蓋為精確值）
     state.project.locked = newState;
+    state.project.lockedAt = newState ? new Date() : null;
+    state.project.lockedBy = newState ? state.user.uid : null;
     toast(newState ? '已 Lock' : '已 Unlock');
     renderSettings();
   };
@@ -704,6 +753,12 @@ async function renderPlotDetail(root, projectId, plotId) {
   const psnap = await getDoc(pref);
   if (!psnap.exists()) { toast('找不到樣區'); location.hash = `#/p/${projectId}`; return; }
   state.plot = { id: plotId, ...psnap.data() };
+  // v1.5.2 Bug #5：直接從 plot detail 入口（深連結）也要預取
+  await prefetchUserLabels([
+    ...Object.keys(state.project.members || {}),
+    state.project.lockedBy,
+    state.plot.createdBy
+  ].filter(Boolean));
 
   const tpl = $('#view-plot-detail').content.cloneNode(true);
   root.appendChild(tpl);
@@ -719,7 +774,7 @@ async function renderPlotDetail(root, projectId, plotId) {
     wgs84: loc ? `${loc.latitude.toFixed(6)}, ${loc.longitude.toFixed(6)}` : '—',
     twd97: t97 ? `(${t97.x}, ${t97.y})` : '—',
     establishedAt: fmtDate(state.plot.establishedAt),
-    createdBy: isReviewer() ? anonName(state.plot.createdBy) : (state.plot.createdBy === state.user.uid ? '我' : (state.plot.createdBy || '').slice(0, 8)),
+    createdBy: isReviewer() ? anonName(state.plot.createdBy) : userLabel(state.plot.createdBy, '—'),
     insideBoundary: state.plot.insideBoundary === false ? '⚠ 範圍外' : '✅',
     notes: state.plot.notes || '—'
   });
@@ -730,6 +785,13 @@ async function renderPlotDetail(root, projectId, plotId) {
   const qaBar = el('div', { class: 'mt-2 flex items-center gap-2 flex-wrap' },
     el('div', { html: qaBadge(state.plot.qaStatus) })
   );
+  // v1.5.2 Bug #7：plot detail 永遠顯示 Lock 視覺指示
+  if (isLocked()) {
+    qaBar.appendChild(el('span', {
+      class: 'text-xs bg-stone-700 text-white px-2 py-0.5 rounded',
+      title: `由 ${userLabel(state.project.lockedBy)} 於 ${fmtDate(state.project.lockedAt)} 鎖定`
+    }, '🔒 已鎖定'));
+  }
   if (state.plot.qaComment) {
     qaBar.appendChild(el('span', { class: 'text-xs italic text-stone-600' }, `「${state.plot.qaComment}」`));
   }
@@ -780,6 +842,22 @@ async function renderPlotDetail(root, projectId, plotId) {
   state.unsubscribers.push(unsubR);
 }
 
+// v1.5.2：subDoc 列上的 QA 按鈕組（直接 append 三顆按鈕到 td，不包 span）
+// stopPropagation 避免觸發 row 的 onclick（編輯）
+function appendQaButtons(parent, plotId, subDoc) {
+  const mk = (bg, label, status) => el('button', {
+    class: `text-xs ${bg} text-white px-1.5 py-0.5 rounded ml-1 align-middle`,
+    title: status,
+    onclick: (ev) => {
+      ev.stopPropagation();
+      forms.markQA(state.project, plotId, subDoc, status);
+    }
+  }, label);
+  parent.appendChild(mk('bg-green-600', '✓', 'verified'));
+  parent.appendChild(mk('bg-amber-500', '⚠', 'flagged'));
+  parent.appendChild(mk('bg-red-600', '✕', 'rejected'));
+}
+
 function renderTreeList(snap, projectId, plotId) {
   const list = $('#tree-list');
   $('#tree-count').textContent = `（${snap.size} 株）`;
@@ -797,9 +875,18 @@ function renderTreeList(snap, projectId, plotId) {
     sumH += t.height_m || 0;
     const v = t.vitality;
     const vlabel = { healthy: '健康', weak: '衰弱', 'standing-dead': '枯立', fallen: '倒伏' }[v] || v;
-    return el('tr', { onclick: () => forms.openTreeForm(state.project, state.plot, { id: d.id, ...t }) },
+    const speciesCell = el('td', { html: t.speciesZh + (t.conservationGrade ? ' ⚠' : '') + ' ' + qaBadge(t.qaStatus) });
+    if (canQA() && !isLocked()) {
+      appendQaButtons(speciesCell, plotId, { coll: 'trees', id: d.id });
+    }
+    return el('tr', {
+      onclick: () => {
+        if (isLocked()) return toast('資料已 Lock');
+        forms.openTreeForm(state.project, state.plot, { id: d.id, ...t });
+      }
+    },
       el('td', {}, String(t.treeNum)),
-      el('td', { html: t.speciesZh + (t.conservationGrade ? ' ⚠' : '') + ' ' + qaBadge(t.qaStatus) }),
+      speciesCell,
       el('td', {}, (t.dbh_cm || 0).toFixed(1)),
       el('td', {}, (t.height_m || 0).toFixed(1)),
       el('td', {}, el('span', { class: `badge badge-${v}` }, vlabel)),
@@ -843,8 +930,17 @@ function renderRegenList(snap, projectId, plotId) {
   }
   const rows = snap.docs.map(d => {
     const r = d.data();
-    return el('tr', { onclick: () => forms.openRegenForm(state.project, state.plot, { id: d.id, ...r }) },
-      el('td', { html: r.speciesZh + ' ' + qaBadge(r.qaStatus) }),
+    const speciesCell = el('td', { html: r.speciesZh + ' ' + qaBadge(r.qaStatus) });
+    if (canQA() && !isLocked()) {
+      appendQaButtons(speciesCell, plotId, { coll: 'regeneration', id: d.id });
+    }
+    return el('tr', {
+      onclick: () => {
+        if (isLocked()) return toast('資料已 Lock');
+        forms.openRegenForm(state.project, state.plot, { id: d.id, ...r });
+      }
+    },
+      speciesCell,
       el('td', {}, r.heightClass),
       el('td', {}, String(r.count)),
       el('td', {}, r.competitionCover_pct != null ? `${r.competitionCover_pct}%` : '—')
