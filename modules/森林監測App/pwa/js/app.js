@@ -3,7 +3,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getAuth, onAuthStateChanged,
-  signInWithPopup, GoogleAuthProvider,
+  signInWithPopup, signInWithRedirect, GoogleAuthProvider,
   signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
@@ -249,10 +249,31 @@ onAuthStateChanged(auth, async (user) => {
   route();
 });
 
+// v1.5.5：popup 被 COOP / popup-blocker 擋時 fallback 到 redirect
+// （signInWithPopup 在某些瀏覽器設定下會被 Cross-Origin-Opener-Policy 擋 window.close 回拋）
+const POPUP_FAIL_CODES = new Set([
+  'auth/popup-blocked',
+  'auth/popup-closed-by-user',
+  'auth/cancelled-popup-request',
+  'auth/web-storage-unsupported',
+  'auth/operation-not-supported-in-this-environment'
+]);
 async function googleLogin() {
-  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
-  catch (e) { toast('Google 登入失敗：' + e.message); }
+  const provider = new GoogleAuthProvider();
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (e) {
+    if (POPUP_FAIL_CODES.has(e.code) || /Cross-Origin-Opener-Policy/i.test(e.message || '')) {
+      toast('改用全頁跳轉登入...');
+      try { await signInWithRedirect(auth, provider); }
+      catch (e2) { toast('Google 登入失敗：' + e2.message); }
+    } else {
+      toast('Google 登入失敗：' + e.message);
+    }
+  }
 }
+// 註：redirect 完成後的 user，Firebase SDK 會自動透過 onAuthStateChanged listener 派送，
+// 不需要手動呼叫 getRedirectResult（除非要取 OAuth credential / access token）
 async function emailLogin(email, password) {
   try { await signInWithEmailAndPassword(auth, email, password); }
   catch (e) { toast('登入失敗：' + e.message); }
