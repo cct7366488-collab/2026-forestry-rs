@@ -39,8 +39,12 @@ service cloud.firestore {
 
     // ===== Projects =====
     match /projects/{projectId} {
-      // admin 可讀全部；成員可讀自己的
-      allow read: if isSignedIn() && (isMember(projectId) || isSystemAdmin());
+      // admin 可讀全部；成員可讀自己的（用 memberUids 陣列以對齊 client list query）
+      // 注意：rule 必須用 resource.data 直接欄位，與 query 的 array-contains 對齊，否則 Firestore 拒絕整批 list query
+      allow read: if isSignedIn() && (
+        request.auth.uid in resource.data.get('memberUids', []) ||
+        isSystemAdmin()
+      );
 
       // 只有 system admin 可建專案；建時必須含自己且 pi 必須在 members 中
       allow create: if isSignedIn() && isSystemAdmin() &&
