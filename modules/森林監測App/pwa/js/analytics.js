@@ -1,6 +1,6 @@
-// ===== analytics.js — 儀表板（Chart.js）+ 地圖（Leaflet）+ 匯出（SheetJS）=====
+// ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state } from './app.js';
+import { fb, $, $$, el, toast, state, isReviewer, anonName } from './app.js';
 
 // 共用：抓取本專案所有樣區與立木
 async function fetchAllData(project) {
@@ -106,6 +106,28 @@ export async function renderDashboard(project) {
       }]
     }
   });
+
+  // QA 狀態（plots + trees 合計）
+  const qaCount = { pending: 0, verified: 0, flagged: 0, rejected: 0 };
+  [...plots, ...trees].forEach(d => {
+    const s = d.qaStatus || 'pending';
+    if (qaCount[s] != null) qaCount[s]++;
+  });
+  // 在 KPI 區追加一張 QA 摘要小卡（用既有的 dashboard-summary）
+  const qaTotal = qaCount.pending + qaCount.verified + qaCount.flagged + qaCount.rejected;
+  if (qaTotal > 0) {
+    const qaCard = el('div', { class: 'bg-white rounded-lg shadow p-3 col-span-2 sm:col-span-4' },
+      el('div', { class: 'text-xs text-stone-500 mb-1' }, 'QA 進度'),
+      el('div', { class: 'flex gap-3 text-sm flex-wrap' },
+        el('span', {}, `⚪ pending ${qaCount.pending}`),
+        el('span', { class: 'text-green-700' }, `✓ verified ${qaCount.verified}`),
+        el('span', { class: 'text-amber-700' }, `⚠ flagged ${qaCount.flagged}`),
+        el('span', { class: 'text-red-700' }, `✕ rejected ${qaCount.rejected}`),
+        el('span', { class: 'text-stone-600' }, `（${Math.round(qaCount.verified / qaTotal * 100)}% 已通過）`)
+      )
+    );
+    cBox.appendChild(qaCard);
+  }
 }
 
 // ===== Map =====
@@ -130,16 +152,21 @@ export async function renderMap(project) {
     const lng = p.location.longitude || p.location._long;
     points.push([lat, lng]);
     const tCount = trees.filter(t => t.plotId === p.id).length;
+    // QA 狀態決定顏色
+    const qaColor = { pending: '#a8a29e', verified: '#15803d', flagged: '#eab308', rejected: '#dc2626' };
+    const dotColor = qaColor[p.qaStatus] || '#15803d';
+    const surveyorLabel = isReviewer() ? anonName(p.createdBy) : (p.createdBy || '').slice(0, 8);
     const marker = L.circleMarker([lat, lng], {
       radius: 8,
-      color: p.insideBoundary === false ? '#dc2626' : '#15803d',
-      fillColor: '#15803d',
+      color: p.insideBoundary === false ? '#dc2626' : dotColor,
+      fillColor: dotColor,
       fillOpacity: 0.7,
       weight: 2
     }).bindPopup(`
-      <strong>${p.code}</strong><br>
+      <strong>${p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${p.qaStatus || 'pending'}</span><br>
       ${p.forestUnit || ''} · ${p.shape === 'circle' ? '圓' : '方'} ${p.area_m2}m²<br>
       立木 ${tCount} 株<br>
+      調查者：${surveyorLabel}<br>
       <a href="#/p/${project.id}/plot/${p.id}">→ 開啟樣區</a>
     `);
     _layerGroup.addLayer(marker);
@@ -153,6 +180,7 @@ export async function exportXlsx(project) {
   const { plots, trees, regen } = await fetchAllData(project);
   const wb = XLSX.utils.book_new();
 
+  const anonOrReal = (uid) => isReviewer() ? anonName(uid) : uid;
   const plotsRows = plots.map(p => ({
     樣區編號: p.code,
     林班小班: p.forestUnit || '',
@@ -165,7 +193,9 @@ export async function exportXlsx(project) {
     GPS精度_m: p.locationAccuracy_m,
     在範圍內: p.insideBoundary,
     設置日期: fmtDate(p.establishedAt),
-    建立者: p.createdBy,
+    建立者: anonOrReal(p.createdBy),
+    QA狀態: p.qaStatus || 'pending',
+    QA評論: p.qaComment || '',
     備註: p.notes || ''
   }));
   const treesRows = trees.map(t => ({
@@ -183,7 +213,9 @@ export async function exportXlsx(project) {
     斷面積_m2: t.basalArea_m2,
     材積_m3: t.volume_m3,
     碳量_kg: t.carbon_kg,
-    建立者: t.createdBy,
+    建立者: anonOrReal(t.createdBy),
+    QA狀態: t.qaStatus || 'pending',
+    QA評論: t.qaComment || '',
     備註: t.notes || ''
   }));
   const regenRows = regen.map(r => ({

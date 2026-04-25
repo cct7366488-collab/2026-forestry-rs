@@ -40,6 +40,13 @@ input, select, textarea, button {
 .badge-standing-dead { background: #e7e5e4; color: #44403c; }
 .badge-fallen { background: #fecaca; color: #991b1b; }
 
+/* QA 狀態 badge */
+.qa-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 4px; }
+.qa-pending  { background: #f5f5f4; color: #57534e; }
+.qa-verified { background: #dcfce7; color: #166534; }
+.qa-flagged  { background: #fef3c7; color: #854d0e; }
+.qa-rejected { background: #fecaca; color: #991b1b; }
+
 /* 保育等級警示 */
 .cons-warn { background: #fee2e2; color: #991b1b; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 

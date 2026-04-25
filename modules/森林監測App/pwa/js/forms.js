@@ -1,39 +1,128 @@
-// ===== forms.js — 表單：專案 / 樣區 / 立木 / 更新 / Seed =====
+// ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, wgs84ToTwd97 } from './app.js';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, wgs84ToTwd97, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked } from './app.js';
 
-// ===== 內建樹種字典（v1：30 個常見種；v2 對接 species-conservation-lookup）=====
+// ===== 內建樹種字典（v1.1：~100 種台灣常見種；v2 對接 species-conservation-lookup 拿全清單）=====
 const SPECIES = [
+  // 針葉 - 杉科
   { zh: '台灣杉', sci: 'Taiwania cryptomerioides', cons: null },
+  { zh: '柳杉', sci: 'Cryptomeria japonica', cons: null },
+  { zh: '杉木', sci: 'Cunninghamia lanceolata', cons: null },
+  { zh: '香杉', sci: 'Cunninghamia konishii', cons: null },
+  // 針葉 - 柏科
   { zh: '紅檜', sci: 'Chamaecyparis formosensis', cons: null },
   { zh: '台灣扁柏', sci: 'Chamaecyparis obtusa var. formosana', cons: null },
   { zh: '台灣肖楠', sci: 'Calocedrus macrolepis var. formosana', cons: null },
+  { zh: '玉山圓柏', sci: 'Juniperus squamata', cons: null },
+  // 針葉 - 松科
   { zh: '台灣二葉松', sci: 'Pinus taiwanensis', cons: null },
   { zh: '台灣五葉松', sci: 'Pinus morrisonicola', cons: null },
-  { zh: '杉木', sci: 'Cunninghamia lanceolata', cons: null },
-  { zh: '柳杉', sci: 'Cryptomeria japonica', cons: null },
   { zh: '台灣鐵杉', sci: 'Tsuga chinensis var. formosana', cons: null },
   { zh: '台灣冷杉', sci: 'Abies kawakamii', cons: null },
   { zh: '台灣雲杉', sci: 'Picea morrisonicola', cons: null },
-  { zh: '香杉', sci: 'Cunninghamia konishii', cons: null },
+  { zh: '濕地松', sci: 'Pinus elliottii', cons: null },
+  { zh: '琉球松', sci: 'Pinus luchuensis', cons: null },
+  // 針葉 - 紅豆杉科
   { zh: '台灣油杉', sci: 'Keteleeria davidiana var. formosana', cons: 'I' },
   { zh: '台灣穗花杉', sci: 'Amentotaxus formosana', cons: 'I' },
-  { zh: '櫸木', sci: 'Zelkova serrata', cons: null },
+  { zh: '台灣紅豆杉', sci: 'Taxus mairei', cons: 'II' },
+  { zh: '蘭嶼羅漢松', sci: 'Podocarpus costalis', cons: 'II' },
+  // 闊葉 - 樟科
   { zh: '牛樟', sci: 'Cinnamomum kanehirae', cons: 'II' },
   { zh: '樟樹', sci: 'Cinnamomum camphora', cons: null },
-  { zh: '台灣赤楊', sci: 'Alnus formosana', cons: null },
-  { zh: '楓香', sci: 'Liquidambar formosana', cons: null },
-  { zh: '青剛櫟', sci: 'Cyclobalanopsis glauca', cons: null },
-  { zh: '長尾尖葉櫧', sci: 'Castanopsis cuspidata var. carlesii', cons: null },
-  { zh: '台灣赤楠', sci: 'Syzygium formosanum', cons: null },
-  { zh: '無患子', sci: 'Sapindus mukorossi', cons: null },
-  { zh: '光蠟樹', sci: 'Fraxinus formosana', cons: null },
-  { zh: '相思樹', sci: 'Acacia confusa', cons: null },
-  { zh: '台灣櫸', sci: 'Zelkova serrata', cons: null },
-  { zh: '九芎', sci: 'Lagerstroemia subcostata', cons: null },
-  { zh: '茄苳', sci: 'Bischofia javanica', cons: null },
+  { zh: '土肉桂', sci: 'Cinnamomum osmophloeum', cons: null },
   { zh: '香桂', sci: 'Cinnamomum subavenium', cons: null },
-  { zh: '小西氏石櫟', sci: 'Lithocarpus konishii', cons: null }
+  { zh: '陰香', sci: 'Cinnamomum burmannii', cons: null },
+  { zh: '紅楠', sci: 'Machilus thunbergii', cons: null },
+  { zh: '大葉楠', sci: 'Machilus japonica var. kusanoi', cons: null },
+  { zh: '香楠', sci: 'Machilus zuihoensis', cons: null },
+  // 闊葉 - 殼斗科
+  { zh: '青剛櫟', sci: 'Cyclobalanopsis glauca', cons: null },
+  { zh: '赤皮', sci: 'Cyclobalanopsis gilva', cons: null },
+  { zh: '長尾尖葉櫧', sci: 'Castanopsis cuspidata var. carlesii', cons: null },
+  { zh: '印度栲', sci: 'Castanopsis indica', cons: null },
+  { zh: '小西氏石櫟', sci: 'Lithocarpus konishii', cons: null },
+  { zh: '油葉石櫟', sci: 'Lithocarpus konishii var. lanceolatus', cons: null },
+  { zh: '三斗石櫟', sci: 'Pasania hancei', cons: null },
+  { zh: '槲櫟', sci: 'Quercus aliena', cons: null },
+  // 闊葉 - 木蘭科
+  { zh: '烏心石', sci: 'Michelia compressa', cons: null },
+  // 闊葉 - 桑科
+  { zh: '雀榕', sci: 'Ficus superba var. japonica', cons: null },
+  { zh: '榕樹', sci: 'Ficus microcarpa', cons: null },
+  { zh: '大葉雀榕', sci: 'Ficus caulocarpa', cons: null },
+  { zh: '稜果榕', sci: 'Ficus septica', cons: null },
+  { zh: '牛奶榕', sci: 'Ficus erecta var. beecheyana', cons: null },
+  // 闊葉 - 楝科
+  { zh: '苦楝', sci: 'Melia azedarach', cons: null },
+  { zh: '大葉桃花心木', sci: 'Swietenia macrophylla', cons: null },
+  { zh: '桃花心木', sci: 'Swietenia mahagoni', cons: null },
+  { zh: '紅椿', sci: 'Toona sureni', cons: null },
+  { zh: '香椿', sci: 'Toona sinensis', cons: null },
+  // 闊葉 - 大戟科
+  { zh: '烏桕', sci: 'Sapium sebiferum', cons: null },
+  { zh: '茄苳', sci: 'Bischofia javanica', cons: null },
+  { zh: '血桐', sci: 'Macaranga tanarius', cons: null },
+  { zh: '蟲屎', sci: 'Melanolepis multiglandulosa', cons: null },
+  // 闊葉 - 漆樹科
+  { zh: '黃連木', sci: 'Pistacia chinensis', cons: null },
+  { zh: '羅氏鹽膚木', sci: 'Rhus chinensis var. roxburghii', cons: null },
+  { zh: '山漆', sci: 'Rhus succedanea', cons: null },
+  // 闊葉 - 楓樹科
+  { zh: '青楓', sci: 'Acer serrulatum', cons: null },
+  { zh: '樟葉楓', sci: 'Acer albopurpurascens', cons: null },
+  { zh: '尖葉槭', sci: 'Acer kawakamii', cons: null },
+  { zh: '台灣三角楓', sci: 'Acer buergerianum var. formosanum', cons: null },
+  // 闊葉 - 榆科
+  { zh: '櫸木', sci: 'Zelkova serrata', cons: null },
+  { zh: '台灣櫸', sci: 'Zelkova serrata var. tarokoensis', cons: null },
+  { zh: '山黃麻', sci: 'Trema orientalis', cons: null },
+  { zh: '朴樹', sci: 'Celtis sinensis', cons: null },
+  { zh: '沙朴', sci: 'Celtis formosana', cons: null },
+  // 闊葉 - 樺木科 / 桃金孃科
+  { zh: '台灣赤楊', sci: 'Alnus formosana', cons: null },
+  { zh: '台灣赤楠', sci: 'Syzygium formosanum', cons: null },
+  { zh: '賽赤楠', sci: 'Syzygium tetragonum', cons: null },
+  { zh: '蓮霧', sci: 'Syzygium samarangense', cons: null },
+  // 闊葉 - 蝶形花科
+  { zh: '相思樹', sci: 'Acacia confusa', cons: null },
+  { zh: '大葉合歡', sci: 'Albizia lebbeck', cons: null },
+  { zh: '印度紫檀', sci: 'Pterocarpus indicus', cons: null },
+  { zh: '大葉相思', sci: 'Acacia mangium', cons: null },
+  // 闊葉 - 木麻黃科 / 桉樹
+  { zh: '木麻黃', sci: 'Casuarina equisetifolia', cons: null },
+  { zh: '桉樹', sci: 'Eucalyptus robusta', cons: null },
+  { zh: '檸檬桉', sci: 'Corymbia citriodora', cons: null },
+  // 闊葉 - 杜英科 / 五加科 / 山茶科
+  { zh: '猴歡喜', sci: 'Sloanea formosana', cons: null },
+  { zh: '杜英', sci: 'Elaeocarpus sylvestris', cons: null },
+  { zh: '鵝掌柴', sci: 'Schefflera octophylla', cons: null },
+  { zh: '木荷', sci: 'Schima superba', cons: null },
+  { zh: '油茶', sci: 'Camellia oleifera', cons: null },
+  // 闊葉 - 安息香 / 千屈菜 / 金縷梅 / 木犀
+  { zh: '烏皮九芎', sci: 'Styrax suberifolia', cons: null },
+  { zh: '紅皮', sci: 'Styrax tonkinensis', cons: null },
+  { zh: '九芎', sci: 'Lagerstroemia subcostata', cons: null },
+  { zh: '大花紫薇', sci: 'Lagerstroemia speciosa', cons: null },
+  { zh: '楓香', sci: 'Liquidambar formosana', cons: null },
+  { zh: '光蠟樹', sci: 'Fraxinus formosana', cons: null },
+  { zh: '小葉白蠟樹', sci: 'Fraxinus floribunda', cons: null },
+  // 闊葉 - 無患子 / 山欖 / 紫葳 / 海桐
+  { zh: '無患子', sci: 'Sapindus mukorossi', cons: null },
+  { zh: '台灣欒樹', sci: 'Koelreuteria henryi', cons: null },
+  { zh: '荔枝', sci: 'Litchi chinensis', cons: null },
+  { zh: '龍眼', sci: 'Dimocarpus longan', cons: null },
+  { zh: '山欖', sci: 'Planchonella obovata', cons: null },
+  { zh: '黃花風鈴木', sci: 'Tabebuia chrysantha', cons: null },
+  { zh: '藍花楹', sci: 'Jacaranda mimosifolia', cons: null },
+  { zh: '台灣海桐', sci: 'Pittosporum pentandrum', cons: null },
+  // 紅樹林
+  { zh: '海茄苳', sci: 'Avicennia marina', cons: null },
+  { zh: '紅海欖', sci: 'Rhizophora stylosa', cons: null },
+  { zh: '水筆仔', sci: 'Kandelia obovata', cons: null },
+  { zh: '欖李', sci: 'Lumnitzera racemosa', cons: null },
+  // 經濟果樹
+  { zh: '芒果', sci: 'Mangifera indica', cons: null }
 ];
 
 const PEST_OPTIONS = ['葉斑', '潰瘍', '蟲孔', '空洞', '菌害', '枯梢', '無'];
@@ -67,11 +156,16 @@ function field({ label, name, type = 'text', required = false, value = '', place
 }
 
 // ===== 專案表單 =====
+// v1.5：admin 建空殼 + 指派 PI 的 email；自動填 memberUids、預設 methodology
 export function openProjectForm(existing = null) {
   const f = el('form', { class: 'space-y-2' },
     field({ label: '案件代碼', name: 'code', required: true, value: existing?.code || '', placeholder: 'DEMO / LHC-2026' }),
     field({ label: '專案名稱', name: 'name', required: true, value: existing?.name || '', placeholder: '示範林班' }),
     field({ label: '描述', name: 'description', type: 'textarea', value: existing?.description || '' }),
+    field({ label: 'PI（計畫主持人）email', name: 'piEmail', required: true,
+      value: existing ? '' : state.user.email,
+      placeholder: '若 admin 自己當 PI 留預設即可' }),
+    el('p', { class: 'text-xs text-stone-500' }, '⚠️ PI 必須先用該 email 登入過一次本系統。建好專案後，PI 可在「設計」分頁設定方法學、在「設定」分頁邀請更多成員。'),
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
       el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
@@ -80,29 +174,142 @@ export function openProjectForm(existing = null) {
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
+    const piEmail = fd.get('piEmail').trim();
+    // 找 PI 的 uid
+    const usnap = await fb.getDocs(fb.query(fb.collection(fb.db, 'users'), fb.where('email', '==', piEmail)));
+    if (usnap.empty) { toast(`找不到 email = ${piEmail} 的使用者，請對方先登入過一次系統`); return; }
+    const piUid = usnap.docs[0].id;
     const data = {
       code: fd.get('code').trim(),
       name: fd.get('name').trim(),
       description: fd.get('description').trim() || '',
       coordinateSystem: 'TWD97_TM2',
-      members: { [state.user.uid]: 'pi' },
+      pi: piUid,
+      members: { [piUid]: 'pi' },
+      memberUids: [piUid],
+      methodology: { ...DEFAULT_METHODOLOGY },
+      locked: false,
       createdBy: state.user.uid,
       createdAt: fb.serverTimestamp()
     };
     try {
-      const ref = await fb.addDoc(fb.collection(fb.db, 'projects'), data);
-      toast('已建立');
+      if (existing) {
+        await fb.updateDoc(fb.doc(fb.db, 'projects', existing.id), {
+          name: data.name, description: data.description
+        });
+        toast('已更新');
+      } else {
+        const ref = await fb.addDoc(fb.collection(fb.db, 'projects'), data);
+        toast('已建立空殼專案，請通知 PI 進入設定方法學');
+        closeModal();
+        location.hash = `#/p/${ref.id}`;
+        return;
+      }
       closeModal();
-      location.hash = `#/p/${ref.id}`;
     } catch (e) { toast('建立失敗：' + e.message); }
   });
   openModal(existing ? '編輯專案' : '新專案', f);
 }
 
+// ===== 方法學編輯器（PI 主場）=====
+export function openMethodologyForm(project) {
+  const m = project.methodology || { ...DEFAULT_METHODOLOGY };
+  const f = el('form', { class: 'space-y-2' },
+    field({ label: '目標樣區數', name: 'targetPlotCount', type: 'number', step: '1', min: '1', required: true, value: m.targetPlotCount }),
+    field({ label: '樣區形狀', name: 'plotShape', required: true,
+      options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }],
+      value: m.plotShape }),
+    field({ label: '允許的樣區面積（m²，逗號分隔）', name: 'plotAreaOptions', required: true,
+      value: (m.plotAreaOptions || []).join(','), placeholder: '400, 500, 1000' }),
+    el('div', { class: 'field' },
+      el('label', {}, '強制必填欄位'),
+      el('div', { class: 'flex flex-wrap gap-3 text-sm' },
+        ...['photos', 'branchHeight', 'pestSymptoms'].map(k => el('label', { class: 'flex items-center gap-1 whitespace-nowrap' },
+          el('input', { type: 'checkbox', name: `req_${k}`, ...(m.required?.[k] ? { checked: 'true' } : {}) }),
+          { photos: '照片', branchHeight: '枝下高', pestSymptoms: '病蟲害' }[k]
+        ))
+      )
+    ),
+    el('div', { class: 'field' },
+      el('label', {}, '啟用模組'),
+      el('div', { class: 'flex flex-wrap gap-3 text-sm' },
+        ...['plot', 'tree', 'regeneration'].map(k => el('label', { class: 'flex items-center gap-1 whitespace-nowrap' },
+          el('input', { type: 'checkbox', name: `mod_${k}`, ...(m.modules?.[k] !== false ? { checked: 'true' } : {}) }),
+          { plot: '永久樣區', tree: '立木', regeneration: '自然更新' }[k]
+        ))
+      )
+    ),
+    field({ label: '方法學說明', name: 'description', type: 'textarea', rows: 5, value: m.description || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const newM = {
+      targetPlotCount: parseInt(fd.get('targetPlotCount'), 10),
+      plotShape: fd.get('plotShape'),
+      plotAreaOptions: fd.get('plotAreaOptions').split(',').map(s => parseInt(s.trim(), 10)).filter(n => n > 0),
+      required: {
+        photos: fd.get('req_photos') === 'on',
+        branchHeight: fd.get('req_branchHeight') === 'on',
+        pestSymptoms: fd.get('req_pestSymptoms') === 'on'
+      },
+      modules: {
+        plot: fd.get('mod_plot') === 'on',
+        tree: fd.get('mod_tree') === 'on',
+        regeneration: fd.get('mod_regeneration') === 'on',
+        understory: false, soil: false, disturbance: false
+      },
+      description: fd.get('description').trim()
+    };
+    try {
+      await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), { methodology: newM });
+      project.methodology = newM;
+      state.project.methodology = newM;
+      toast('方法學已更新');
+      closeModal();
+      location.reload();  // 簡單重整讓設計頁重繪
+    } catch (e) { toast('儲存失敗：' + e.message); }
+  });
+  openModal('編輯方法學', f);
+}
+
+// ===== QA 標記（pi/dataManager 用）=====
+export async function markQA(project, plotId, subDoc, status) {
+  const labels = { verified: '通過', flagged: '退回修正', rejected: '駁回' };
+  const comment = status === 'verified' ? '' : (prompt(`為什麼${labels[status]}？（簡短說明）`) || '');
+  if (status !== 'verified' && !comment.trim()) { toast('需填寫原因'); return; }
+  try {
+    const ref = subDoc
+      ? fb.doc(fb.db, 'projects', project.id, 'plots', plotId, subDoc.coll, subDoc.id)
+      : fb.doc(fb.db, 'projects', project.id, 'plots', plotId);
+    await fb.updateDoc(ref, {
+      qaStatus: status,
+      qaMarkedBy: state.user.uid,
+      qaMarkedAt: fb.serverTimestamp(),
+      qaComment: comment
+    });
+    toast(`已標記為 ${status}`);
+  } catch (e) { toast('標記失敗：' + e.message); }
+}
+
 // ===== 樣區表單 =====
-export function openPlotForm(project, existing = null) {
+export async function openPlotForm(project, existing = null) {
   const loc = existing?.location;
   const t97 = existing?.locationTWD97;
+  // v1.5：套用 methodology + 警示超過目標數
+  const meth = project.methodology || DEFAULT_METHODOLOGY;
+  if (!existing) {
+    try {
+      const ps = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
+      if (meth.targetPlotCount && ps.size >= meth.targetPlotCount) {
+        if (!confirm(`已達方法學目標數（${meth.targetPlotCount}）— 目前 ${ps.size} 個樣區。仍要繼續新增嗎？`)) return;
+      }
+    } catch {}
+  }
 
   const gpsBtn = el('button', { type: 'button', class: 'gps-btn' }, '📍 抓取 GPS');
   const gpsStatus = el('span', { class: 'text-xs text-stone-600 ml-2' }, loc ? `WGS84: ${loc.latitude.toFixed(6)}, ${loc.longitude.toFixed(6)}` : '尚未定位');
@@ -143,8 +350,12 @@ export function openPlotForm(project, existing = null) {
       lngInput, latInput, accInput
     ),
     el('div', { class: 'field-row' },
-      field({ label: '形狀', name: 'shape', options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }], value: existing?.shape || 'circle', required: true }),
-      field({ label: '面積 (m²)', name: 'area_m2', type: 'number', step: '1', min: '1', value: existing?.area_m2 || 500, required: true })
+      field({ label: '形狀', name: 'shape',
+        options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }],
+        value: existing?.shape || meth.plotShape || 'circle', required: true }),
+      field({ label: '面積 (m²)', name: 'area_m2',
+        options: (meth.plotAreaOptions || [400, 500, 1000]).map(a => ({ value: a, label: `${a} m²` })),
+        value: existing?.area_m2 || (meth.plotAreaOptions?.[0] || 500), required: true })
     ),
     field({ label: '設置日期', name: 'establishedAt', type: 'date', required: true, value: existing?.establishedAt ? (existing.establishedAt.toDate ? existing.establishedAt.toDate() : new Date(existing.establishedAt)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
     field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
@@ -182,8 +393,9 @@ export function openPlotForm(project, existing = null) {
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
+        data.qaStatus = 'pending';  // v1.5：初始狀態
         await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), data);
-        toast('已建立');
+        toast('已建立（待審核）');
       }
       closeModal();
     } catch (e) { toast('儲存失敗：' + e.message); }
@@ -237,7 +449,7 @@ export function openTreeForm(project, plot, existing = null) {
   // 病蟲害 checkbox
   const existingPests = new Set(existing?.pestSymptoms || []);
   const pestBox = el('div', { class: 'flex flex-wrap gap-2 text-sm' },
-    ...PEST_OPTIONS.map(p => el('label', { class: 'flex items-center gap-1' },
+    ...PEST_OPTIONS.map(p => el('label', { class: 'flex items-center gap-1 whitespace-nowrap mr-2' },
       el('input', { type: 'checkbox', name: 'pest', value: p, ...(existingPests.has(p) ? { checked: 'true' } : {}) }),
       p
     ))
@@ -319,8 +531,9 @@ export function openTreeForm(project, plot, existing = null) {
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
+        data.qaStatus = 'pending';  // v1.5
         await fb.addDoc(colRef, data);
-        toast('已建立');
+        toast('已建立（待審核）');
       }
       closeModal();
     } catch (e) { toast('儲存失敗：' + e.message); }
@@ -368,8 +581,9 @@ export function openRegenForm(project, plot, existing = null) {
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
+        data.qaStatus = 'pending';  // v1.5
         await fb.addDoc(colRef, data);
-        toast('已建立');
+        toast('已建立（待審核）');
       }
       closeModal();
     } catch (e) { toast('儲存失敗：' + e.message); }
@@ -431,7 +645,8 @@ export async function seedDemoData(project) {
           ...m,
           createdBy: state.user.uid,
           createdAt: fb.serverTimestamp(),
-          updatedAt: fb.serverTimestamp()
+          updatedAt: fb.serverTimestamp(),
+          qaStatus: 'pending'
         });
       }
       // 更新記錄 5-8 筆
@@ -445,7 +660,8 @@ export async function seedDemoData(project) {
           count: Math.floor(Math.random() * 30) + 1,
           competitionCover_pct: Math.floor(Math.random() * 80),
           createdBy: state.user.uid,
-          createdAt: fb.serverTimestamp()
+          createdAt: fb.serverTimestamp(),
+          qaStatus: 'pending'
         });
       }
     }

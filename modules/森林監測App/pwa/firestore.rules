@@ -4,62 +4,101 @@ service cloud.firestore {
 
     // ===== Helpers =====
     function isSignedIn() { return request.auth != null; }
-    function userRole(projectId) {
-      return get(/databases/$(database)/documents/projects/$(projectId)).data.members[request.auth.uid];
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
-    function isPi(projectId)       { return userRole(projectId) == 'pi'; }
-    function isSurveyor(projectId) { return userRole(projectId) == 'surveyor'; }
-    function isReviewer(projectId) { return userRole(projectId) == 'reviewer'; }
-    function isMember(projectId)   { return userRole(projectId) != null; }
-    function isOwner()             { return resource.data.createdBy == request.auth.uid; }
-    function willOwn()             { return request.resource.data.createdBy == request.auth.uid; }
+    // 過渡期同時支援 systemRole（v1.5）與 globalRole（v1.0），最終只留 systemRole
+    function isSystemAdmin() {
+      let d = userDoc();
+      return d.systemRole == 'admin' || d.globalRole == 'admin';
+    }
+
+    function projectDoc(pid) {
+      return get(/databases/$(database)/documents/projects/$(pid)).data;
+    }
+    function userRole(pid)        { return projectDoc(pid).members[request.auth.uid]; }
+    function isPi(pid)            { return userRole(pid) == 'pi'; }
+    function isDataManager(pid)   { return userRole(pid) == 'dataManager'; }
+    function isSurveyor(pid)      { return userRole(pid) == 'surveyor'; }
+    function isReviewer(pid)      { return userRole(pid) == 'reviewer'; }
+    function isMember(pid)        { return userRole(pid) != null; }
+    function canQA(pid)           { return isPi(pid) || isDataManager(pid); }
+    function canCollect(pid)      { return isPi(pid) || isDataManager(pid) || isSurveyor(pid); }
+    function canRead(pid)         { return isMember(pid) || isSystemAdmin(); }
+
+    function isLocked(pid)        { return projectDoc(pid).locked == true; }
+    function isOwner()            { return resource.data.createdBy == request.auth.uid; }
+    function willOwn()            { return request.resource.data.createdBy == request.auth.uid; }
 
     // ===== Users =====
     match /users/{uid} {
-      allow read:  if isSignedIn() && request.auth.uid == uid;
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isSystemAdmin());
       allow write: if isSignedIn() && request.auth.uid == uid;
     }
 
     // ===== Projects =====
     match /projects/{projectId} {
-      allow read:   if isSignedIn() && isMember(projectId);
+      // admin 可讀全部；成員可讀自己的
+      allow read: if isSignedIn() && (isMember(projectId) || isSystemAdmin());
+
+      // 只有 system admin 可建專案；建時必須含自己且 pi 必須在 members 中
+      allow create: if isSignedIn() && isSystemAdmin() &&
+        request.resource.data.memberUids is list &&
+        request.auth.uid in request.resource.data.memberUids &&
+        request.resource.data.members[request.resource.data.pi] == 'pi';
+
+      // 只有該專案 pi 可改（含 methodology / members / lock 欄位）
       allow update: if isSignedIn() && isPi(projectId);
-      allow create: if isSignedIn() &&
-        request.resource.data.members[request.auth.uid] == 'pi';
-      allow delete: if false;
 
-      // Plots
+      // admin 可刪空殼專案（v1.5 簡化：不檢查 plotCount）
+      allow delete: if isSignedIn() && isSystemAdmin();
+
+      // ===== Plots =====
       match /plots/{plotId} {
-        allow read: if isSignedIn() && (
-          isPi(projectId) ||
-          isReviewer(projectId) ||
-          (isSurveyor(projectId) && isOwner())
-        );
-        allow create: if isSignedIn() &&
-          (isSurveyor(projectId) || isPi(projectId)) && willOwn();
-        allow update: if isSignedIn() && (
-          isPi(projectId) ||
-          (isSurveyor(projectId) && isOwner())
-        );
-        allow delete: if isSignedIn() && isPi(projectId);
+        allow read: if isSignedIn() && canRead(projectId);
 
-        // Trees & Regeneration
+        allow create: if isSignedIn() &&
+          canCollect(projectId) && willOwn() && !isLocked(projectId) &&
+          request.resource.data.qaStatus == 'pending';
+
+        // update：分兩種情境
+        // (a) QA 欄位變更（qaStatus / qaMarkedBy / qaMarkedAt / qaComment）→ 只 pi/dataManager
+        // (b) 一般欄位 → pi/dataManager 任意；surveyor 限自己且狀態 in [pending, flagged]
+        allow update: if isSignedIn() && !isLocked(projectId) && (
+          (request.resource.data.qaStatus != resource.data.qaStatus && canQA(projectId)) ||
+          (request.resource.data.qaStatus == resource.data.qaStatus && (
+            isPi(projectId) ||
+            isDataManager(projectId) ||
+            (isSurveyor(projectId) && isOwner() && resource.data.qaStatus in ['pending', 'flagged'])
+          ))
+        );
+
+        allow delete: if isSignedIn() && (
+          isPi(projectId) ||
+          (isSurveyor(projectId) && isOwner() && resource.data.qaStatus == 'pending')
+        );
+
+        // ===== Trees / Regeneration =====
         match /{subColl}/{docId} {
-          allow read: if isSignedIn() && subColl in ['trees', 'regeneration'] && (
-            isPi(projectId) ||
-            isReviewer(projectId) ||
-            (isSurveyor(projectId) &&
-             get(/databases/$(database)/documents/projects/$(projectId)/plots/$(plotId)).data.createdBy == request.auth.uid)
-          );
+          allow read: if isSignedIn() && subColl in ['trees', 'regeneration'] && canRead(projectId);
+
           allow create: if isSignedIn() && subColl in ['trees', 'regeneration'] &&
-            (isSurveyor(projectId) || isPi(projectId)) && willOwn();
-          allow update: if isSignedIn() && subColl in ['trees', 'regeneration'] && (
-            isPi(projectId) ||
-            (isSurveyor(projectId) && isOwner())
+            canCollect(projectId) && willOwn() && !isLocked(projectId) &&
+            request.resource.data.qaStatus == 'pending';
+
+          allow update: if isSignedIn() && subColl in ['trees', 'regeneration'] && !isLocked(projectId) && (
+            (request.resource.data.qaStatus != resource.data.qaStatus && canQA(projectId)) ||
+            (request.resource.data.qaStatus == resource.data.qaStatus && (
+              isPi(projectId) ||
+              isDataManager(projectId) ||
+              (isSurveyor(projectId) && isOwner() && resource.data.qaStatus in ['pending', 'flagged'])
+            ))
           );
+
           allow delete: if isSignedIn() && subColl in ['trees', 'regeneration'] && (
             isPi(projectId) ||
-            (isSurveyor(projectId) && isOwner())
+            (isSurveyor(projectId) && isOwner() && resource.data.qaStatus == 'pending')
           );
         }
       }

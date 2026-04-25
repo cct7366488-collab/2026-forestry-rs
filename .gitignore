@@ -14,6 +14,10 @@ credentials.*
 **/.firebaserc
 **/firebase-debug.log
 
+# Firebase Admin SDK 服務帳戶金鑰（極敏感！可繞過所有 Security Rules）
+**/serviceAccountKey.json
+**/*-firebase-adminsdk-*.json
+
 # Firebase init 自動裝的 Agent Skills（給 AI agent 的參考文件，會自動更新，不該進 repo）
 **/.agents/
 **/skills-lock.json
