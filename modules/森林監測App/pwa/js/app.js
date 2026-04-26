@@ -69,8 +69,8 @@ export const DEFAULT_METHODOLOGY = {
     plot: true, tree: true, regeneration: true,
     understory: false,    // v2.0：地被植物 5 點樣方法
     soilCons: false,      // v2.0：水土保持 5 點觀測（取代舊 soil 命名）
-    wildlife: false,      // v2.1（未實作）
-    harvest: false,       // v2.2（未實作）
+    wildlife: false,      // v2.1：野生動物（4 種方法）
+    harvest: false,       // v2.2：經濟收穫（土肉桂為首；通用化名稱）
     disturbance: false    // 預留
   },
   // v2.0：各模組獨立必填規則
@@ -83,6 +83,18 @@ export const DEFAULT_METHODOLOGY = {
     stationCodes: ['N', 'E', 'S', 'W', 'C'],
     requirePhotos: true,            // 定點照片強制（比對基礎）
     eventTypes: ['routine', 'post-typhoon', 'post-rain', 'post-construction']
+  },
+  // v2.1：野生動物模組
+  wildlifeConfig: {
+    methods: ['direct', 'sign', 'cam', 'audio'],   // 啟用的方法
+    requirePhotos: false,                           // 預設不強制（音訊調查通常無照片）
+    blurSensitive: true                             // 匯出時對保育類 I 級加 ⚠ 標記（未來可實作 blur）
+  },
+  // v2.2：經濟收穫模組（通用化命名 — 未來可支援愛玉/咖啡等）
+  harvestConfig: {
+    species: ['土肉桂'],                            // 白名單：可採收樹種（PI 設定）
+    requirePhotos: true,                            // 採前/採後/產品照片必填
+    moistureDefault: 0.5                            // 預設含水率（用於從鮮重估乾重）
   },
   description: ''
 };
@@ -773,6 +785,9 @@ async function renderProjectHome(root, projectId) {
   // v2.0
   $('#btn-export-csv-understory')?.addEventListener('click', () => analytics.exportCsv(state.project, 'understory'));
   $('#btn-export-csv-soilcons')?.addEventListener('click', () => analytics.exportCsv(state.project, 'soilCons'));
+  // v2.1 / v2.2
+  $('#btn-export-csv-wildlife')?.addEventListener('click', () => analytics.exportCsv(state.project, 'wildlife'));
+  $('#btn-export-csv-harvest')?.addEventListener('click', () => analytics.exportCsv(state.project, 'harvest'));
 }
 
 async function refreshBadgeCounts(projectId) {
@@ -1142,15 +1157,21 @@ async function renderPlotDetail(root, projectId, plotId) {
     forms.openPlotForm(state.project, state.plot);
   });
 
-  // v2.0：依 methodology 顯示新 subtabs（地被植物 / 水土保持）
+  // v2.0/v2.1/v2.2：依 methodology 顯示新 subtabs
   const mods = state.project.methodology?.modules || {};
   const understoryTab = $('[data-subtab="understory"]');
   const soilConsTab = $('[data-subtab="soilcons"]');
+  const wildlifeTab = $('[data-subtab="wildlife"]');     // v2.1
+  const harvestTab = $('[data-subtab="harvest"]');       // v2.2
   if (understoryTab) understoryTab.classList.toggle('hidden', !mods.understory);
   if (soilConsTab) soilConsTab.classList.toggle('hidden', !mods.soilCons);
+  if (wildlifeTab) wildlifeTab.classList.toggle('hidden', !mods.wildlife);
+  if (harvestTab) harvestTab.classList.toggle('hidden', !mods.harvest);
 
   const btnNewUnderstory = $('#btn-new-understory');
   const btnNewSoilCons = $('#btn-new-soilcons');
+  const btnNewWildlife = $('#btn-new-wildlife');         // v2.1
+  const btnNewHarvest = $('#btn-new-harvest');           // v2.2
   if (btnNewUnderstory) {
     btnNewUnderstory.addEventListener('click', () => {
       if (isLocked()) return toast('資料已 Lock');
@@ -1161,6 +1182,18 @@ async function renderPlotDetail(root, projectId, plotId) {
     btnNewSoilCons.addEventListener('click', () => {
       if (isLocked()) return toast('資料已 Lock');
       forms.openSoilConsForm(state.project, state.plot);
+    });
+  }
+  if (btnNewWildlife) {
+    btnNewWildlife.addEventListener('click', () => {
+      if (isLocked()) return toast('資料已 Lock');
+      forms.openWildlifeForm(state.project, state.plot);
+    });
+  }
+  if (btnNewHarvest) {
+    btnNewHarvest.addEventListener('click', () => {
+      if (isLocked()) return toast('資料已 Lock');
+      forms.openHarvestForm(state.project, state.plot);
     });
   }
 
@@ -1191,6 +1224,22 @@ async function renderPlotDetail(root, projectId, plotId) {
       renderSoilConsList(snap, projectId, plotId);
     });
     state.unsubscribers.push(unsubS);
+  }
+  // v2.1：野生動物 list 訂閱
+  if (mods.wildlife) {
+    const wlRef = collection(db, 'projects', projectId, 'plots', plotId, 'wildlife');
+    const unsubW = onSnapshot(query(wlRef, orderBy('surveyDate', 'desc')), snap => {
+      renderWildlifeList(snap, projectId, plotId);
+    });
+    state.unsubscribers.push(unsubW);
+  }
+  // v2.2：經濟收穫 list 訂閱
+  if (mods.harvest) {
+    const hvRef = collection(db, 'projects', projectId, 'plots', plotId, 'harvest');
+    const unsubH = onSnapshot(query(hvRef, orderBy('harvestDate', 'desc')), snap => {
+      renderHarvestList(snap, projectId, plotId);
+    });
+    state.unsubscribers.push(unsubH);
   }
 }
 
@@ -1358,6 +1407,126 @@ function renderUnderstoryList(snap, projectId, plotId) {
       el('th', {}, '總覆蓋'), el('th', {}, '物種數'), el('th', {}, '入侵種')
     )),
     el('tbody', {}, ...rows)
+  );
+  list.innerHTML = '';
+  list.appendChild(tbl);
+}
+
+// ===== v2.1：野生動物列表渲染（method 分組 + 保育等級色階）=====
+function renderWildlifeList(snap, projectId, plotId) {
+  const list = $('#wildlife-list');
+  if (!list) return;
+  $('#wildlife-count') && ($('#wildlife-count').textContent = `（${snap.size} 筆）`);
+  if (snap.empty) {
+    list.innerHTML = '<p class="p-4 text-stone-500 text-sm">尚無野生動物紀錄。</p>';
+    return;
+  }
+  const consColor = { 'I': '#dc2626', 'II': '#f97316', 'III': '#eab308' };
+  const methodLabel = { direct: '🔭 目擊', sign: '🐾 痕跡', cam: '📷 相機', audio: '🔊 鳴聲' };
+  const rows = snap.docs.map(d => {
+    const w = d.data();
+    const dateStr = w.surveyDate?.toDate ? w.surveyDate.toDate().toISOString().slice(0, 10) : (w.surveyDate ? new Date(w.surveyDate).toISOString().slice(0, 10) : '—');
+    const photoTag = (w.photos || []).length > 0 ? ` <span style="font-size:11px;color:#57534e">📷${(w.photos || []).length}</span>` : '';
+    const consTag = w.conservationGrade
+      ? `<span style="background:${consColor[w.conservationGrade]};color:#fff;padding:1px 5px;border-radius:3px;font-size:11px;font-weight:600">${w.conservationGrade}</span>`
+      : '';
+    const speciesCell = el('td', { html: `${consTag} ${w.speciesZh || '—'}${photoTag} ${qaBadge(w.qaStatus)}` });
+    if (canQA() && !isLocked()) {
+      appendQaButtons(speciesCell, plotId, { coll: 'wildlife', id: d.id });
+    }
+    // 保育類整列加色底
+    const rowClass = w.conservationGrade === 'I' ? 'bg-red-50'
+                   : w.conservationGrade === 'II' ? 'bg-orange-50'
+                   : w.conservationGrade === 'III' ? 'bg-yellow-50' : '';
+    return el('tr', {
+      class: rowClass,
+      onclick: () => {
+        if (isLocked()) return toast('資料已 Lock');
+        forms.openWildlifeForm(state.project, state.plot, { id: d.id, ...w });
+      }
+    },
+      el('td', {}, dateStr),
+      el('td', {}, methodLabel[w.method] || w.method),
+      speciesCell,
+      el('td', {}, String(w.count ?? 0)),
+      el('td', {}, w.group || '—'),
+      el('td', {}, { foraging: '覓食', resting: '休息', moving: '移動', alert: '警戒', breeding: '育幼', calling: '鳴叫' }[w.activity] || '—')
+    );
+  });
+  const tbl = el('table', { class: 'tbl' },
+    el('thead', {}, el('tr', {},
+      el('th', {}, '調查日'), el('th', {}, '方法'), el('th', {}, '物種 / QA'),
+      el('th', {}, '隻數'), el('th', {}, '類群'), el('th', {}, '行為')
+    )),
+    el('tbody', {}, ...rows)
+  );
+  list.innerHTML = '';
+  list.appendChild(tbl);
+}
+
+// ===== v2.2：經濟收穫列表渲染（按 harvestDate desc + 累計碳扣減）=====
+function renderHarvestList(snap, projectId, plotId) {
+  const list = $('#harvest-list');
+  if (!list) return;
+  $('#harvest-count') && ($('#harvest-count').textContent = `（${snap.size} 筆）`);
+  if (snap.empty) {
+    list.innerHTML = '<p class="p-4 text-stone-500 text-sm">尚無採收紀錄。在「立木調查」加入白名單樹種後即可採收。</p>';
+    return;
+  }
+  // 累計
+  let totalFresh = 0, totalDry = 0, totalCO2 = 0;
+  const typeLabel = { bark: '樹皮', leaves: '嫩葉', twigs: '嫩枝', flowers: '花', roots: '根', whole: '全株' };
+  const statusLabel = {
+    'kept-resprout': '✅ 重萌', 'kept-no-sprout': '⏳ 未萌',
+    'dead': '⚠ 枯死', 'removed': '🪓 砍除'
+  };
+  const statusColor = {
+    'kept-resprout': '#16a34a', 'kept-no-sprout': '#a8a29e',
+    'dead': '#eab308', 'removed': '#dc2626'
+  };
+  const rows = snap.docs.map(d => {
+    const h = d.data();
+    totalFresh += h.harvestAmount_kg_fresh || 0;
+    totalDry += h.dryEstimated_kg || h.harvestAmount_kg_dry || 0;
+    totalCO2 += h.carbonRemoved_tCO2e || 0;
+    const dateStr = h.harvestDate?.toDate ? h.harvestDate.toDate().toISOString().slice(0, 10) : (h.harvestDate ? new Date(h.harvestDate).toISOString().slice(0, 10) : '—');
+    const photoTag = (h.photos || []).length > 0 ? ` <span style="font-size:11px;color:#57534e">📷${(h.photos || []).length}</span>` : '';
+    const speciesCell = el('td', { html: `#${h.treeNum || '?'} ${h.speciesZh || '—'}${photoTag} ${qaBadge(h.qaStatus)}` });
+    if (canQA() && !isLocked()) {
+      appendQaButtons(speciesCell, plotId, { coll: 'harvest', id: d.id });
+    }
+    return el('tr', {
+      class: h.treeStatusAfter === 'removed' ? 'bg-red-50' : '',
+      onclick: () => {
+        if (isLocked()) return toast('資料已 Lock');
+        forms.openHarvestForm(state.project, state.plot, { id: d.id, ...h });
+      }
+    },
+      el('td', {}, dateStr),
+      speciesCell,
+      el('td', {}, typeLabel[h.harvestType] || h.harvestType),
+      el('td', {}, (h.harvestAmount_kg_fresh ?? 0).toFixed(2)),
+      el('td', {}, (h.dryEstimated_kg ?? h.harvestAmount_kg_dry ?? 0).toFixed(2)),
+      el('td', {}, (h.carbonRemoved_tCO2e ?? 0).toFixed(4)),
+      el('td', { html: `<span style="color:${statusColor[h.treeStatusAfter] || '#57534e'};font-weight:500">${statusLabel[h.treeStatusAfter] || '—'}</span>` })
+    );
+  });
+  const tbl = el('table', { class: 'tbl' },
+    el('thead', {}, el('tr', {},
+      el('th', {}, '採收日'), el('th', {}, '個體 / QA'), el('th', {}, '部位'),
+      el('th', {}, '鮮重 (kg)'), el('th', {}, '乾重 (kg)'),
+      el('th', {}, 'CO₂ 扣減 (t)'), el('th', {}, '採後狀態')
+    )),
+    el('tbody', {}, ...rows),
+    el('tfoot', {},
+      el('tr', { style: 'background:#f5f5f4;font-weight:600' },
+        el('td', { colspan: '3' }, `累計 ${snap.size} 筆`),
+        el('td', {}, totalFresh.toFixed(2)),
+        el('td', {}, totalDry.toFixed(2)),
+        el('td', { style: 'color:#dc2626' }, totalCO2.toFixed(4)),
+        el('td', {}, '')
+      )
+    )
   );
   list.innerHTML = '';
   list.appendChild(tbl);

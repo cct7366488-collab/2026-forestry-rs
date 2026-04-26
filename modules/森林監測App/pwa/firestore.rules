@@ -80,19 +80,19 @@ service cloud.firestore {
         // ===== Trees / Regeneration / Understory / SoilCons =====
         // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩子集合，沿用同樣 QA 流程
         match /{subColl}/{docId} {
-          allow read: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons'] && canRead(projectId);
+          allow read: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'] && canRead(projectId);
 
-          allow create: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons'] &&
+          allow create: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'] &&
             canCollect(projectId) && willOwn() && !isLocked(projectId);
 
           // v1.7.1.3：systemAdmin god view
-          allow update: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons'] && !isLocked(projectId) && (
+          allow update: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'] && !isLocked(projectId) && (
             isSystemAdmin() ||
             isPi(projectId) ||
             (isSurveyor(projectId) && isOwner())
           );
 
-          allow delete: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons'] && (
+          allow delete: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'] && (
             isSystemAdmin() ||
             isPi(projectId) ||
             (isSurveyor(projectId) && isOwner())

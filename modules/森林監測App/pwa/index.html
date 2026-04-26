@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=2002">
+  <link rel="stylesheet" href="style.css?v=2200">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -170,6 +170,8 @@
         <button id="btn-export-csv-regen" class="border px-4 py-2 rounded text-sm">CSV: 更新</button>
         <button id="btn-export-csv-understory" class="border px-4 py-2 rounded text-sm">CSV: 地被</button>
         <button id="btn-export-csv-soilcons" class="border px-4 py-2 rounded text-sm">CSV: 水保</button>
+        <button id="btn-export-csv-wildlife" class="border px-4 py-2 rounded text-sm">CSV: 野生動物</button>
+        <button id="btn-export-csv-harvest" class="border px-4 py-2 rounded text-sm">CSV: 收穫</button>
       </div>
     </section>
 
@@ -223,6 +225,8 @@
       <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">自然更新</a>
       <a href="#" data-subtab="understory" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌿 地被植物</a>
       <a href="#" data-subtab="soilcons" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">⛰️ 水土保持</a>
+      <a href="#" data-subtab="wildlife" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🦌 野生動物</a>
+      <a href="#" data-subtab="harvest" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌰 經濟收穫</a>
       <a href="#" data-subtab="info" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">樣區資訊</a>
     </nav>
 
@@ -263,6 +267,26 @@
       <div id="soilcons-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
     </section>
 
+    <!-- v2.1：野生動物（4 種方法切換）-->
+    <section data-subtab-content="wildlife" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">🦌 野生動物 <span id="wildlife-count" class="text-sm text-stone-500"></span></h2>
+        <button id="btn-new-wildlife" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新紀錄</button>
+      </div>
+      <p class="text-xs text-stone-500 mb-2">4 種方法：直接目擊 / 痕跡 / 自動相機 / 鳴聲。保育類 I=紅 II=橘 III=黃 標示</p>
+      <div id="wildlife-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
+    <!-- v2.2：經濟收穫（土肉桂為首）-->
+    <section data-subtab-content="harvest" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">🌰 經濟收穫 <span id="harvest-count" class="text-sm text-stone-500"></span></h2>
+        <button id="btn-new-harvest" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新採收</button>
+      </div>
+      <p class="text-xs text-stone-500 mb-2">綁立木個體；treeStatusAfter=砍除根除 自動同步 tree.vitality；自動算碳扣減</p>
+      <div id="harvest-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
     <section data-subtab-content="info" class="hidden">
       <div class="bg-white rounded-lg shadow p-4 space-y-2 text-sm">
         <div><span class="text-stone-500">設置日期</span>：<span data-bind="plot.establishedAt"></span></div>
@@ -288,6 +312,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=2002"></script>
+<script type="module" src="js/app.js?v=2200"></script>
 </body>
 </html>

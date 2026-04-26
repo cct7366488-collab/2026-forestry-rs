@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.0.2';  // v2.0.2：強制必填欄位 label 也改 inline style，與 v2 區塊一致
+const CACHE = 'forest-monitor-v2.2.0';  // v2.2.0：v2.1 野生動物 + v2.2 經濟收穫（土肉桂為首）上線
 const SHELL = [
   './',
   './index.html',

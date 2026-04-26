@@ -2,7 +2,7 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 
-// 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保
+// 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
   const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
   const plots = [];
@@ -10,6 +10,8 @@ async function fetchAllData(project) {
   const regen = [];
   const understory = [];   // v2.0
   const soilCons = [];     // v2.0
+  const wildlife = [];     // v2.1
+  const harvest = [];      // v2.2
   for (const pd of plotsSnap.docs) {
     const plot = { id: pd.id, ...pd.data() };
     plots.push(plot);
@@ -17,7 +19,6 @@ async function fetchAllData(project) {
     tSnap.forEach(td => trees.push({ id: td.id, plotId: pd.id, plotCode: plot.code, ...td.data() }));
     const rSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'regeneration'));
     rSnap.forEach(rd => regen.push({ id: rd.id, plotId: pd.id, plotCode: plot.code, ...rd.data() }));
-    // v2.0：地被 + 水保
     try {
       const uSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'understory'));
       uSnap.forEach(ud => understory.push({ id: ud.id, plotId: pd.id, plotCode: plot.code, ...ud.data() }));
@@ -26,8 +27,16 @@ async function fetchAllData(project) {
       const sSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'soilCons'));
       sSnap.forEach(sd => soilCons.push({ id: sd.id, plotId: pd.id, plotCode: plot.code, ...sd.data() }));
     } catch {}
+    try {
+      const wSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'wildlife'));
+      wSnap.forEach(wd => wildlife.push({ id: wd.id, plotId: pd.id, plotCode: plot.code, ...wd.data() }));
+    } catch {}
+    try {
+      const hSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'harvest'));
+      hSnap.forEach(hd => harvest.push({ id: hd.id, plotId: pd.id, plotCode: plot.code, ...hd.data() }));
+    } catch {}
   }
-  return { plots, trees, regen, understory, soilCons };
+  return { plots, trees, regen, understory, soilCons, wildlife, harvest };
 }
 
 // 全域 chart instances（避免重畫時重疊）
@@ -36,7 +45,7 @@ function killChart(key) { if (_charts[key]) { _charts[key].destroy(); delete _ch
 
 // ===== Dashboard =====
 export async function renderDashboard(project) {
-  const { plots, trees, understory, soilCons } = await fetchAllData(project);
+  const { plots, trees, understory, soilCons, wildlife, harvest } = await fetchAllData(project);
 
   // 摘要 KPI
   const totalArea = plots.reduce((s, p) => s + (p.area_m2 || 0), 0);
@@ -142,10 +151,34 @@ export async function renderDashboard(project) {
         `沖蝕 ≥ 4 級：${highErosion} 點次${highErosion > 0 ? ' ⚠' : ''}`)
     ));
   }
+  // v2.1：野生動物 KPI
+  if (mods.wildlife && wildlife.length > 0) {
+    const uniqueSpecies = new Set(wildlife.map(w => w.speciesZh)).size;
+    const consI = wildlife.filter(w => w.conservationGrade === 'I').length;
+    const consII = wildlife.filter(w => w.conservationGrade === 'II').length;
+    cBox.appendChild(el('div', { class: 'bg-white rounded-lg shadow p-3 col-span-2 sm:col-span-2 border-l-4 border-yellow-600' },
+      el('div', { class: 'text-xs text-stone-500' }, '🦌 野生動物'),
+      el('div', { class: 'text-sm' }, `${wildlife.length} 筆紀錄 · 物種 ${uniqueSpecies}`),
+      el('div', { class: 'text-sm' + (consI > 0 ? ' text-red-700 font-medium' : '') },
+        `保育類 I 級 ${consI} · II 級 ${consII}`)
+    ));
+  }
+  // v2.2：經濟收穫 KPI（年度累計碳扣減）
+  if (mods.harvest && harvest.length > 0) {
+    const totalFresh = harvest.reduce((s, h) => s + (h.harvestAmount_kg_fresh || 0), 0);
+    const totalCO2 = harvest.reduce((s, h) => s + (h.carbonRemoved_tCO2e || 0), 0);
+    const removed = harvest.filter(h => h.treeStatusAfter === 'removed').length;
+    cBox.appendChild(el('div', { class: 'bg-white rounded-lg shadow p-3 col-span-2 sm:col-span-2 border-l-4 border-orange-600' },
+      el('div', { class: 'text-xs text-stone-500' }, '🌰 經濟收穫'),
+      el('div', { class: 'text-sm' }, `${harvest.length} 筆 · 鮮重 ${totalFresh.toFixed(2)} kg`),
+      el('div', { class: 'text-sm text-orange-700 font-medium' },
+        `CO₂ 扣減 ${totalCO2.toFixed(4)} tCO₂e · 砍除 ${removed}`)
+    ));
+  }
 
-  // QA 狀態（plots + trees + understory + soilCons 合計）
+  // QA 狀態（全模組合計）
   const qaCount = { pending: 0, verified: 0, flagged: 0, rejected: 0 };
-  [...plots, ...trees, ...understory, ...soilCons].forEach(d => {
+  [...plots, ...trees, ...understory, ...soilCons, ...wildlife, ...harvest].forEach(d => {
     const s = d.qaStatus || 'pending';
     if (qaCount[s] != null) qaCount[s]++;
   });
@@ -213,7 +246,7 @@ export async function renderMap(project) {
 // ===== 匯出 =====
 export async function exportXlsx(project) {
   toast('準備匯出...');
-  const { plots, trees, regen, understory, soilCons } = await fetchAllData(project);
+  const { plots, trees, regen, understory, soilCons, wildlife, harvest } = await fetchAllData(project);
   const wb = XLSX.utils.book_new();
 
   const anonOrReal = (uid) => isReviewer() ? anonName(uid) : uid;
@@ -334,6 +367,94 @@ export async function exportXlsx(project) {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(soilConsRows), '水土保持');
   }
 
+  // v2.1：野生動物
+  if (wildlife.length > 0) {
+    const blurI = project.methodology?.wildlifeConfig?.blurSensitive !== false;
+    const wildlifeRows = wildlife.map(w => ({
+      樣區: w.plotCode,
+      調查日期: fmtDate(w.surveyDate),
+      場次: w.surveyRound || '',
+      方法: { direct: '直接目擊', sign: '痕跡', cam: '自動相機', audio: '鳴聲' }[w.method] || w.method,
+      物種中名: w.speciesZh || '',
+      物種學名: w.speciesSci || '',
+      類群: w.group || '',
+      保育等級: w.conservationGrade || '',
+      隻數: w.count ?? '',
+      齡別性別: w.ageSex || '',
+      行為: { foraging: '覓食', resting: '休息', moving: '移動', alert: '警戒', breeding: '育幼', calling: '鳴叫' }[w.activity] || '',
+      微棲地: { canopy: '林冠', understory: '林下', ground: '地表', water: '水域', edge: '林緣', open: '空曠' }[w.habitat] || '',
+      痕跡類型: w.signType || '',
+      相機編號: w.camId || '',
+      相機觸發時間: w.camTriggerTime ? fmtDate(w.camTriggerTime) : '',
+      聽聲時長_min: w.audioMinutes ?? '',
+      經度_WGS84: w.location?.longitude ?? w.location?._long ?? '',
+      緯度_WGS84: w.location?.latitude ?? w.location?._lat ?? '',
+      // 保育類 I：blurSensitive 開時加警示但仍給座標（agency-internal use）
+      敏感標記: (blurI && w.conservationGrade === 'I') ? '⚠ 敏感保育種點位 — 限機關內部使用' : '',
+      建立者: anonOrReal(w.createdBy),
+      QA狀態: w.qaStatus || 'pending',
+      QA評論: w.qaComment || '',
+      備註: w.notes || ''
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wildlifeRows), '野生動物');
+  }
+
+  // v2.2：經濟收穫（含年度累計尾列）
+  if (harvest.length > 0) {
+    const harvestRows = harvest.map(h => ({
+      樣區: h.plotCode,
+      個體編號: h.treeNum ?? '',
+      樹種: h.speciesZh || '',
+      採收日期: fmtDate(h.harvestDate),
+      場次: h.surveyRound || '',
+      採收部位: { bark: '樹皮', leaves: '嫩葉', twigs: '嫩枝', flowers: '花', roots: '根', whole: '全株' }[h.harvestType] || h.harvestType,
+      採收方式: { 'half-bark': '半皮取', ring: '環剝', 'leaf-pruning': '剪葉', 'branch-pruning': '枝條修剪', coppice: '全砍重萌', 'root-dig': '挖根' }[h.harvestMethod] || h.harvestMethod,
+      鮮重_kg: h.harvestAmount_kg_fresh ?? '',
+      乾重_kg: h.harvestAmount_kg_dry ?? '',
+      估算乾重_kg: h.dryEstimated_kg ?? '',
+      含水率: h.moistureContent ?? '',
+      碳扣減_kgC: h.carbonRemoved_kgC ?? '',
+      CO2扣減_tCO2e: h.carbonRemoved_tCO2e ?? '',
+      採收時_DBH_cm: h.dbh_at_harvest ?? '',
+      產品用途: { 'essential-oil': '精油', powder: '桂皮粉', tea: '茶飲', seedling: '種苗', medicinal: '藥用', other: '其他' }[h.productUse] || '',
+      採後狀態: { 'kept-resprout': '存活並重萌', 'kept-no-sprout': '存活未萌', dead: '枯死', removed: '砍除根除' }[h.treeStatusAfter] || '',
+      下次回測: fmtDate(h.nextSurveyDate),
+      建立者: anonOrReal(h.createdBy),
+      QA狀態: h.qaStatus || 'pending',
+      QA評論: h.qaComment || '',
+      備註: h.notes || ''
+    }));
+    // 累計尾列
+    const totalFresh = harvest.reduce((s, h) => s + (h.harvestAmount_kg_fresh || 0), 0);
+    const totalDry = harvest.reduce((s, h) => s + (h.dryEstimated_kg || h.harvestAmount_kg_dry || 0), 0);
+    const totalKgC = harvest.reduce((s, h) => s + (h.carbonRemoved_kgC || 0), 0);
+    const totalCO2 = harvest.reduce((s, h) => s + (h.carbonRemoved_tCO2e || 0), 0);
+    harvestRows.push({
+      樣區: '【累計】',
+      個體編號: '',
+      樹種: `${harvest.length} 筆`,
+      採收日期: '',
+      場次: '',
+      採收部位: '',
+      採收方式: '',
+      鮮重_kg: totalFresh.toFixed(2),
+      乾重_kg: '',
+      估算乾重_kg: totalDry.toFixed(2),
+      含水率: '',
+      碳扣減_kgC: totalKgC.toFixed(2),
+      CO2扣減_tCO2e: totalCO2.toFixed(6),
+      採收時_DBH_cm: '',
+      產品用途: '',
+      採後狀態: '',
+      下次回測: '',
+      建立者: '',
+      QA狀態: '',
+      QA評論: '',
+      備註: ''
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(harvestRows), '經濟收穫');
+  }
+
   const stamp = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `${project.code}_森林監測_${stamp}.xlsx`);
   toast('匯出完成');
@@ -344,7 +465,8 @@ export async function exportCsv(project, kind) {
   const data = await fetchAllData(project);
   const map = {
     plots: data.plots, trees: data.trees, regeneration: data.regen,
-    understory: data.understory, soilCons: data.soilCons   // v2.0
+    understory: data.understory, soilCons: data.soilCons,  // v2.0
+    wildlife: data.wildlife, harvest: data.harvest         // v2.1 / v2.2
   };
   const rows = map[kind];
   if (!rows || rows.length === 0) { toast('沒有資料'); return; }

@@ -605,8 +605,78 @@ export function openMethodologyForm(project) {
           })
         )
       ),
-      el('p', { style: 'font-size:11px;color:#78716c;margin-top:8px' },
-        '💡 v2.1 將支援野生動物，v2.2 支援經濟收穫（土肉桂等）')
+    ),
+    // v2.1：野生動物模組
+    el('div', { class: 'field', style: 'background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px' },
+      el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:6px' }, 'v2.1 野生動物監測'),
+      el('label', { style: 'display:block;font-size:14px;line-height:1.8;cursor:pointer' },
+        el('input', {
+          type: 'checkbox', name: 'mod_wildlife',
+          style: 'vertical-align:middle;margin-right:6px;width:16px;height:16px',
+          ...(m.modules?.wildlife === true ? { checked: 'true' } : {})
+        }),
+        '🦌 啟用野生動物監測'
+      ),
+      el('div', { style: 'margin-top:8px;padding-left:8px;border-left:2px solid #fcd34d' },
+        el('div', { style: 'font-size:12px;color:#57534e;margin-bottom:4px' }, '設定'),
+        el('label', { style: 'display:block;font-size:13px;line-height:1.7;cursor:pointer' },
+          el('input', {
+            type: 'checkbox', name: 'wl_photoReq',
+            style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+            ...(m.wildlifeConfig?.requirePhotos === true ? { checked: 'true' } : {})
+          }),
+          '紀錄照片必填（音訊調查可免）'
+        ),
+        el('label', { style: 'display:block;font-size:13px;line-height:1.7;cursor:pointer' },
+          el('input', {
+            type: 'checkbox', name: 'wl_blur',
+            style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+            ...(m.wildlifeConfig?.blurSensitive !== false ? { checked: 'true' } : {})
+          }),
+          '保育類 I 級匯出時加警示（避免敏感物種點位外流）'
+        )
+      ),
+      el('p', { style: 'font-size:11px;color:#78716c;margin-top:6px' },
+        '支援 4 種方法：直接目擊 / 痕跡 / 自動相機 / 鳴聲。物種輸入即時帶保育等級色階。')
+    ),
+    // v2.2：經濟收穫模組
+    el('div', { class: 'field', style: 'background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:10px' },
+      el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:6px' }, 'v2.2 經濟收穫監測'),
+      el('label', { style: 'display:block;font-size:14px;line-height:1.8;cursor:pointer' },
+        el('input', {
+          type: 'checkbox', name: 'mod_harvest',
+          style: 'vertical-align:middle;margin-right:6px;width:16px;height:16px',
+          ...(m.modules?.harvest === true ? { checked: 'true' } : {})
+        }),
+        '🌰 啟用經濟收穫監測'
+      ),
+      el('div', { style: 'margin-top:8px;padding-left:8px;border-left:2px solid #fde047' },
+        el('div', { style: 'font-size:12px;color:#57534e;margin-bottom:4px' }, '可採收樹種白名單（限制 harvest 紀錄綁的 tree.speciesZh）'),
+        el('input', {
+          type: 'text', name: 'hv_species',
+          style: 'border:1px solid #d6d3d1;border-radius:4px;padding:4px 8px;font-size:13px;width:100%;background:#fff',
+          placeholder: '土肉桂, 油茶, 愛玉子',
+          value: (m.harvestConfig?.species || ['土肉桂']).join(', ')
+        }),
+        el('label', { style: 'display:block;font-size:13px;line-height:1.7;cursor:pointer;margin-top:6px' },
+          el('input', {
+            type: 'checkbox', name: 'hv_photoReq',
+            style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+            ...(m.harvestConfig?.requirePhotos !== false ? { checked: 'true' } : {})
+          }),
+          '採收照片必填（採前/採後/產品）'
+        ),
+        el('div', { style: 'margin-top:6px' },
+          el('label', { style: 'display:block;font-size:13px;color:#57534e;margin-bottom:2px' }, '預設含水率（鮮→乾重估算）'),
+          el('input', {
+            type: 'number', name: 'hv_moisture', step: '0.05', min: '0', max: '0.95',
+            style: 'border:1px solid #d6d3d1;border-radius:4px;padding:4px 8px;font-size:13px;width:100px;background:#fff',
+            value: m.harvestConfig?.moistureDefault ?? 0.5
+          })
+        )
+      ),
+      el('p', { style: 'font-size:11px;color:#78716c;margin-top:6px' },
+        '🌳 採收紀錄綁立木個體；treeStatusAfter=砍除根除 自動同步 tree.vitality。鮮重→乾重→自動算 tCO₂e 扣減。')
     ),
     field({ label: '方法學說明', name: 'description', type: 'textarea', rows: 5, value: m.description || '' }),
     el('div', { class: 'flex gap-2 pt-2' },
@@ -632,8 +702,8 @@ export function openMethodologyForm(project) {
         regeneration: fd.get('mod_regeneration') === 'on',
         understory: fd.get('mod_understory') === 'on',  // v2.0
         soilCons: fd.get('mod_soilCons') === 'on',      // v2.0
-        wildlife: m.modules?.wildlife || false,         // v2.1
-        harvest: m.modules?.harvest || false,           // v2.2
+        wildlife: fd.get('mod_wildlife') === 'on',      // v2.1
+        harvest: fd.get('mod_harvest') === 'on',        // v2.2
         disturbance: m.modules?.disturbance || false
       },
       // v2.0：新模組獨立 config
@@ -647,6 +717,21 @@ export function openMethodologyForm(project) {
         ...DEFAULT_METHODOLOGY.soilConsConfig,
         ...(m.soilConsConfig || {}),
         requirePhotos: fd.get('sc_photoReq') === 'on'
+      },
+      // v2.1：野生動物
+      wildlifeConfig: {
+        ...DEFAULT_METHODOLOGY.wildlifeConfig,
+        ...(m.wildlifeConfig || {}),
+        requirePhotos: fd.get('wl_photoReq') === 'on',
+        blurSensitive: fd.get('wl_blur') === 'on'
+      },
+      // v2.2：經濟收穫
+      harvestConfig: {
+        ...DEFAULT_METHODOLOGY.harvestConfig,
+        ...(m.harvestConfig || {}),
+        species: (fd.get('hv_species') || '').split(/[,\n]/).map(s => s.trim()).filter(Boolean),
+        requirePhotos: fd.get('hv_photoReq') === 'on',
+        moistureDefault: parseFloat(fd.get('hv_moisture')) || 0.5
       },
       description: fd.get('description').trim()
     };
@@ -1563,6 +1648,517 @@ export async function openSoilConsForm(project, plot, existing = null) {
     }
   });
   openModal(existing ? `編輯水保紀錄 ${existing.stationCode}` : '新水保紀錄', f);
+}
+
+// ===== v2.1 模組三：野生動物（wildlife）— 4 種方法切換 =====
+// 一筆 = 一次觀察（直接目擊 / 痕跡 / 自動相機 / 鳴聲）
+// 物種 datalist 用 ANIMALS 字典，自動帶保育等級色階
+export function openWildlifeForm(project, plot, existing = null) {
+  const cfg = project.methodology?.wildlifeConfig || DEFAULT_METHODOLOGY.wildlifeConfig;
+  const photoReq = !!cfg.requirePhotos;
+
+  // 動物字典 datalist（按 group 分組顯示）
+  const animalList = el('datalist', { id: 'dl-animals' },
+    ...ANIMALS.map(a => el('option', { value: a.zh },
+      `${a.group}${a.cons ? ` [${a.cons} 級]` : ''} ｜ ${a.sci}`))
+  );
+
+  // method 切換：依選的方法顯示對應必填欄位
+  const methodFields = {
+    sign: null, cam: null, audio: null
+  };
+
+  const consWarn = el('div', { class: 'text-xs mt-1' });
+  const speciesInput = el('input', {
+    type: 'text', name: 'speciesZh', required: 'true',
+    list: 'dl-animals', placeholder: '輸入或選擇',
+    value: existing?.speciesZh || '',
+    autocomplete: 'off',
+    class: 'w-full border rounded px-2 py-1'
+  });
+  function updateConsWarn() {
+    const a = findAnimal(speciesInput.value);
+    if (a?.cons) {
+      const colorMap = { 'I': '#dc2626', 'II': '#f97316', 'III': '#eab308' };
+      const labelMap = { 'I': '瀕臨絕種', 'II': '珍貴稀有', 'III': '其他應予保育' };
+      consWarn.innerHTML = `<span style="background:${colorMap[a.cons]};color:#fff;padding:2px 8px;border-radius:4px;font-weight:600">⚠ 第 ${a.cons} 級 — ${labelMap[a.cons]}</span> <span style="color:#57534e">${a.sci}</span>`;
+    } else if (a) {
+      consWarn.innerHTML = `<span style="color:#57534e">${a.group} ｜ ${a.sci}</span>`;
+    } else {
+      consWarn.innerHTML = '';
+    }
+  }
+  speciesInput.addEventListener('input', updateConsWarn);
+  updateConsWarn();
+
+  // method 切換 listener
+  const methodSelect = el('select', { name: 'method', required: 'true', class: 'border rounded px-2 py-1 w-full' },
+    ...['direct', 'sign', 'cam', 'audio'].map(m => {
+      const labelMap = { direct: '直接目擊', sign: '痕跡（足印/糞便/食痕）', cam: '自動相機', audio: '鳴聲調查' };
+      const opt = el('option', { value: m }, labelMap[m]);
+      if (existing?.method === m) opt.setAttribute('selected', 'true');
+      return opt;
+    })
+  );
+
+  // 各方法專屬欄位區
+  const signBox = el('div', { class: 'field hidden' },
+    field({ label: '痕跡類型', name: 'signType',
+      options: [
+        { value: 'footprint', label: '足印' },
+        { value: 'feces', label: '糞便' },
+        { value: 'feeding', label: '食痕' },
+        { value: 'scratching', label: '刨痕' },
+        { value: 'nest', label: '巢穴' },
+        { value: 'call', label: '鳴聲（聽到未見）' },
+        { value: 'other', label: '其他' }
+      ], value: existing?.signType || 'footprint' })
+  );
+  const camBox = el('div', { class: 'field hidden' },
+    field({ label: '相機編號 / 點位 ID', name: 'camId',
+      value: existing?.camId || '', placeholder: 'CAM-001' }),
+    field({ label: '相機觸發時間', name: 'camTriggerTime', type: 'datetime-local',
+      value: existing?.camTriggerTime ? toDatetimeLocal(existing.camTriggerTime) : '' })
+  );
+  const audioBox = el('div', { class: 'field hidden' },
+    field({ label: '聽聲時長 (分鐘)', name: 'audioMinutes', type: 'number', step: '0.5', min: '0',
+      value: existing?.audioMinutes ?? 5 })
+  );
+
+  function updateMethodVisibility() {
+    const m = methodSelect.value;
+    signBox.classList.toggle('hidden', m !== 'sign');
+    camBox.classList.toggle('hidden', m !== 'cam');
+    audioBox.classList.toggle('hidden', m !== 'audio');
+    // 動態調整 required
+    signBox.querySelector('[name=signType]').required = (m === 'sign');
+    camBox.querySelector('[name=camId]').required = (m === 'cam');
+    audioBox.querySelector('[name=audioMinutes]').required = (m === 'audio');
+  }
+  methodSelect.addEventListener('change', updateMethodVisibility);
+
+  // GPS 抓取（顯示與 plot 中心距離）
+  const gpsStatus = el('span', { class: 'text-xs text-stone-600 ml-2' },
+    existing?.location ? `已存：${existing.location.latitude?.toFixed(6) || existing.location._lat?.toFixed(6)}, ${existing.location.longitude?.toFixed(6) || existing.location._long?.toFixed(6)}` : '尚未定位');
+  const gpsBtn = el('button', { type: 'button', class: 'gps-btn' }, '📍 抓取 GPS');
+  const lngInput = el('input', { type: 'hidden', name: 'lng',
+    value: existing?.location?.longitude || existing?.location?._long || '' });
+  const latInput = el('input', { type: 'hidden', name: 'lat',
+    value: existing?.location?.latitude || existing?.location?._lat || '' });
+  gpsBtn.addEventListener('click', () => {
+    if (!navigator.geolocation) { toast('此裝置不支援 GPS'); return; }
+    gpsBtn.disabled = true; gpsBtn.textContent = '⏳ 定位中...';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { longitude, latitude, accuracy } = pos.coords;
+        lngInput.value = longitude; latInput.value = latitude;
+        // 算距 plot 中心
+        const plotLoc = plot.location;
+        const plotLat = plotLoc?.latitude || plotLoc?._lat;
+        const plotLng = plotLoc?.longitude || plotLoc?._long;
+        let distMsg = '';
+        if (plotLat && plotLng) {
+          const d = haversine(latitude, longitude, plotLat, plotLng);
+          distMsg = `<br>距 plot 中心 ${Math.round(d)} m${d > 100 ? ' ⚠ 超過 100 m 邊界' : ''}`;
+        }
+        gpsStatus.innerHTML = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} ±${Math.round(accuracy)}m${distMsg}`;
+        gpsBtn.disabled = false; gpsBtn.textContent = '📍 重新定位';
+      },
+      (err) => { toast('GPS 失敗：' + err.message); gpsBtn.disabled = false; gpsBtn.textContent = '📍 抓取 GPS'; },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+
+  const photoUp = photoUploader({ existing: existing?.photos || [] });
+  const photoLabel = el('label', {}, '紀錄照片', photoReq ? el('span', { class: 'req' }, ' *') : null,
+    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（直接目擊：個體；痕跡：糞便/足印特寫；相機：原檔；音訊可免）'));
+
+  const f = el('form', { class: 'space-y-2' },
+    animalList,
+    el('div', { class: 'field' },
+      el('label', {}, '調查方法 ', el('span', { class: 'req' }, '*')),
+      methodSelect
+    ),
+    el('div', { class: 'field' },
+      el('label', {}, '物種中名 ', el('span', { class: 'req' }, '*')),
+      speciesInput,
+      consWarn
+    ),
+    signBox, camBox, audioBox,
+    el('div', { class: 'field-row' },
+      field({ label: '隻數 / 估計個體數', name: 'count', type: 'number', step: '1', min: '0', required: true,
+        value: existing?.count ?? 1 }),
+      field({ label: '齡別/性別', name: 'ageSex',
+        options: [
+          { value: '', label: '— 不確定 —' },
+          { value: 'adult-M', label: '成體公' },
+          { value: 'adult-F', label: '成體母' },
+          { value: 'adult-U', label: '成體（性別不明）' },
+          { value: 'juvenile', label: '幼體' },
+          { value: 'mixed', label: '混齡' }
+        ], value: existing?.ageSex || '' })
+    ),
+    field({ label: '行為', name: 'activity',
+      options: [
+        { value: '', label: '— 未確認 —' },
+        { value: 'foraging', label: '覓食' },
+        { value: 'resting', label: '休息' },
+        { value: 'moving', label: '移動' },
+        { value: 'alert', label: '警戒' },
+        { value: 'breeding', label: '育幼/繁殖' },
+        { value: 'calling', label: '鳴叫' }
+      ], value: existing?.activity || '' }),
+    field({ label: '微棲地', name: 'habitat',
+      options: [
+        { value: '', label: '— 未指定 —' },
+        { value: 'canopy', label: '林冠層' },
+        { value: 'understory', label: '林下層' },
+        { value: 'ground', label: '地表' },
+        { value: 'water', label: '水域' },
+        { value: 'edge', label: '林緣' },
+        { value: 'open', label: '空曠地' }
+      ], value: existing?.habitat || '' }),
+    el('div', { class: 'field-row' },
+      field({ label: '調查日期', name: 'surveyDate', type: 'date', required: true,
+        value: existing?.surveyDate ? (existing.surveyDate.toDate ? existing.surveyDate.toDate() : new Date(existing.surveyDate)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
+      field({ label: '調查場次', name: 'surveyRound', required: true,
+        value: existing?.surveyRound || currentSurveyRound() })
+    ),
+    el('div', { class: 'field' },
+      el('label', {}, '觀察點 GPS ',
+        el('span', { class: 'text-xs text-stone-500' }, '（容許 plot 邊界外，會顯示距離）')),
+      el('div', { class: 'flex items-center flex-wrap gap-2' }, gpsBtn, gpsStatus),
+      lngInput, latInput
+    ),
+    el('div', { class: 'field' }, photoLabel, photoUp.element),
+    field({ label: '備註 / 行為描述', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      existing ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-red-600',
+        onclick: () => deleteSubdoc(project, plot, 'wildlife', existing) }, '刪除') : null,
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+
+  updateMethodVisibility();
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張紀錄照片'); return; }
+    const fd = new FormData(f);
+    const speciesZh = fd.get('speciesZh').trim();
+    const a = findAnimal(speciesZh) || {};
+    const lng = parseFloat(fd.get('lng'));
+    const lat = parseFloat(fd.get('lat'));
+    const data = {
+      method: fd.get('method'),
+      speciesZh,
+      speciesSci: a.sci || null,
+      group: a.group || null,
+      conservationGrade: a.cons || null,
+      count: parseInt(fd.get('count'), 10),
+      ageSex: fd.get('ageSex') || null,
+      activity: fd.get('activity') || null,
+      habitat: fd.get('habitat') || null,
+      signType: fd.get('signType') || null,
+      camId: fd.get('camId')?.trim() || null,
+      camTriggerTime: fd.get('camTriggerTime') ? new Date(fd.get('camTriggerTime')) : null,
+      audioMinutes: fd.get('audioMinutes') ? parseFloat(fd.get('audioMinutes')) : null,
+      location: (lng && lat) ? new fb.GeoPoint(lat, lng) : null,
+      surveyDate: new Date(fd.get('surveyDate')),
+      surveyRound: fd.get('surveyRound').trim(),
+      notes: fd.get('notes').trim() || null,
+      updatedAt: fb.serverTimestamp()
+    };
+    const submitBtn = f.querySelector('button[type=submit]');
+    submitBtn.disabled = true; submitBtn.textContent = '儲存中...';
+    try {
+      const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'wildlife');
+      let docId;
+      if (existing) {
+        docId = existing.id;
+        applySurveyorReQaReset(data, existing);
+        await fb.updateDoc(fb.doc(colRef, docId), data);
+      } else {
+        data.createdBy = state.user.uid;
+        data.createdAt = fb.serverTimestamp();
+        data.qaStatus = 'pending';
+        const ref = await fb.addDoc(colRef, data);
+        docId = ref.id;
+      }
+      if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
+        if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
+        const photos = await photoUp.commit({
+          projectId: project.id, plotId: plot.id, prefix: `wildlife-${docId}`
+        });
+        await fb.updateDoc(fb.doc(colRef, docId), { photos });
+      }
+      toast(existing
+        ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
+        : '已建立（待審核）');
+      closeModal();
+    } catch (e) {
+      toast('儲存失敗：' + e.message);
+      submitBtn.disabled = false; submitBtn.textContent = '儲存';
+    }
+  });
+  openModal(existing ? `編輯野生動物紀錄` : '新野生動物紀錄', f);
+}
+
+// 共用：datetime-local 轉換 helper
+function toDatetimeLocal(ts) {
+  const d = ts?.toDate ? ts.toDate() : new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// 共用：兩點 WGS84 距離（公尺）— Haversine
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// ===== v2.2 模組四：經濟收穫（harvest）— 通用化命名（土肉桂為首） =====
+// 紀錄綁立木個體（treeId 必填）；採後狀態同步 tree.vitality；自動算碳扣減（kg dry × 0.5 × 44/12 / 1000 = tCO₂e）
+export async function openHarvestForm(project, plot, existing = null) {
+  const cfg = project.methodology?.harvestConfig || DEFAULT_METHODOLOGY.harvestConfig;
+  const photoReq = !!cfg.requirePhotos;
+  const speciesWhitelist = cfg.species || ['土肉桂'];
+
+  // 抓本 plot 內白名單樹種的 trees 給 treeId 下拉
+  let candidateTrees = [];
+  try {
+    const treesSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees'));
+    candidateTrees = treesSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(t => speciesWhitelist.includes(t.speciesZh))
+      .sort((a, b) => (a.treeNum || 0) - (b.treeNum || 0));
+  } catch {}
+
+  if (candidateTrees.length === 0 && !existing) {
+    openModal('新採收紀錄', el('div', { class: 'space-y-2' },
+      el('p', { class: 'text-sm' }, '此 plot 內沒有白名單樹種的立木。'),
+      el('p', { class: 'text-xs text-stone-600' },
+        `白名單：${speciesWhitelist.join(' / ')}（可在「設計 → 編輯方法學 → v2.2」修改）`),
+      el('p', { class: 'text-xs text-stone-600' }, '請先在「立木調查」加入該樹種的立木。'),
+      el('button', { type: 'button', class: 'w-full border py-2 rounded mt-3', onclick: closeModal }, '關閉')
+    ));
+    return;
+  }
+
+  // 找出當前選中的 tree（編輯模式）
+  let selectedTree = existing
+    ? candidateTrees.find(t => t.id === existing.treeId) || (existing.treeId ? { id: existing.treeId, treeNum: existing.treeNum, speciesZh: existing.speciesZh, dbh_cm: existing.dbh_at_harvest } : null)
+    : candidateTrees[0];
+
+  const treeSelect = el('select', { name: 'treeId', required: 'true', class: 'border rounded px-2 py-1 w-full' },
+    ...candidateTrees.map(t => {
+      const opt = el('option', { value: t.id },
+        `#${t.treeNum || '?'} · ${t.speciesZh} · DBH ${t.dbh_cm?.toFixed(1) || '?'} cm`);
+      if (selectedTree?.id === t.id) opt.setAttribute('selected', 'true');
+      return opt;
+    })
+  );
+
+  // 計算自動帶 dbh_at_harvest（從選中 tree 帶過來）
+  const dbhAuto = el('div', { class: 'text-xs text-stone-500 my-1' });
+  function updateTreeInfo() {
+    const t = candidateTrees.find(x => x.id === treeSelect.value);
+    if (t) {
+      dbhAuto.textContent = `自動帶：${t.speciesZh}，原 DBH ${t.dbh_cm?.toFixed(1) || '?'} cm`;
+      const dbhField = f?.querySelector('[name=dbh_at_harvest]');
+      if (dbhField && !existing) dbhField.value = t.dbh_cm?.toFixed(1) || '';
+    }
+  }
+  treeSelect.addEventListener('change', updateTreeInfo);
+
+  // 即時碳扣減試算
+  const carbonOut = el('div', { class: 'bg-stone-50 rounded p-2 text-xs my-2' });
+  function updateCarbonCalc() {
+    const fresh = parseFloat(f?.querySelector('[name=harvestAmount_kg_fresh]')?.value);
+    let dry = parseFloat(f?.querySelector('[name=harvestAmount_kg_dry]')?.value);
+    const moisture = cfg.moistureDefault ?? 0.5;
+    if (!isNaN(fresh) && isNaN(dry)) {
+      dry = fresh * (1 - moisture);
+    }
+    if (isNaN(fresh) && isNaN(dry)) { carbonOut.textContent = '輸入鮮重或乾重即時試算碳扣減'; return; }
+    const dryEst = !isNaN(dry) ? dry : fresh * (1 - moisture);
+    const carbonRemoved_kgC = dryEst * 0.5;  // 碳含量 50%
+    const co2_kg = carbonRemoved_kgC * 44 / 12;
+    carbonOut.innerHTML =
+      `<div>估算乾重 <b>${dryEst.toFixed(2)}</b> kg ${isNaN(dry) ? `（從鮮重×${(1 - moisture).toFixed(2)}）` : ''}</div>` +
+      `<div>碳扣減 <b>${(carbonRemoved_kgC / 1000).toFixed(4)}</b> t-C ｜ CO₂ 扣減 <b>${(co2_kg / 1000).toFixed(4)}</b> tCO₂e</div>`;
+  }
+
+  // 照片上傳
+  const photoUp = photoUploader({ existing: existing?.photos || [] });
+  const photoLabel = el('label', {}, '採收照片', photoReq ? el('span', { class: 'req' }, ' *') : null,
+    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（採前 / 採後 / 產品 至少一張）'));
+
+  const f = el('form', { class: 'space-y-2' },
+    el('div', { class: 'field' },
+      el('label', {}, '採收個體 ', el('span', { class: 'req' }, '*')),
+      treeSelect,
+      dbhAuto
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '採收日期', name: 'harvestDate', type: 'date', required: true,
+        value: existing?.harvestDate ? (existing.harvestDate.toDate ? existing.harvestDate.toDate() : new Date(existing.harvestDate)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
+      field({ label: '場次', name: 'surveyRound', required: true,
+        value: existing?.surveyRound || currentSurveyRound() })
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '採收部位', name: 'harvestType', required: true,
+        options: [
+          { value: 'bark', label: '樹皮' },
+          { value: 'leaves', label: '嫩葉' },
+          { value: 'twigs', label: '嫩枝' },
+          { value: 'flowers', label: '花' },
+          { value: 'roots', label: '根' },
+          { value: 'whole', label: '全株' }
+        ], value: existing?.harvestType || 'bark' }),
+      field({ label: '採收方式', name: 'harvestMethod', required: true,
+        options: [
+          { value: 'half-bark', label: '半皮取（保留樹幹存活）' },
+          { value: 'ring', label: '環剝' },
+          { value: 'leaf-pruning', label: '剪葉' },
+          { value: 'branch-pruning', label: '枝條修剪' },
+          { value: 'coppice', label: '全砍重萌（萌芽更新）' },
+          { value: 'root-dig', label: '挖根' }
+        ], value: existing?.harvestMethod || 'half-bark' })
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '鮮重 (kg)', name: 'harvestAmount_kg_fresh', type: 'number', step: '0.01', min: '0', required: true,
+        value: existing?.harvestAmount_kg_fresh ?? '' }),
+      field({ label: '乾重 (kg) — 可後補', name: 'harvestAmount_kg_dry', type: 'number', step: '0.01', min: '0',
+        value: existing?.harvestAmount_kg_dry ?? '' })
+    ),
+    field({ label: '採收時 DBH (cm)', name: 'dbh_at_harvest', type: 'number', step: '0.1', min: '0', required: true,
+      value: existing?.dbh_at_harvest ?? selectedTree?.dbh_cm ?? '' }),
+    carbonOut,
+    field({ label: '產品用途', name: 'productUse',
+      options: [
+        { value: '', label: '— 未指定 —' },
+        { value: 'essential-oil', label: '精油' },
+        { value: 'powder', label: '桂皮粉 / 香料粉' },
+        { value: 'tea', label: '茶飲' },
+        { value: 'seedling', label: '種苗' },
+        { value: 'medicinal', label: '藥用' },
+        { value: 'other', label: '其他' }
+      ], value: existing?.productUse || '' }),
+    field({ label: '採後植株狀態', name: 'treeStatusAfter', required: true,
+      options: [
+        { value: 'kept-resprout', label: '存活並重萌（半皮取常見）' },
+        { value: 'kept-no-sprout', label: '存活未萌（觀察期）' },
+        { value: 'dead', label: '枯死' },
+        { value: 'removed', label: '砍除根除（→ 自動 set tree 為 standing-dead）' }
+      ], value: existing?.treeStatusAfter || 'kept-resprout' }),
+    field({ label: '預計下次回測日期', name: 'nextSurveyDate', type: 'date',
+      value: existing?.nextSurveyDate ? (existing.nextSurveyDate.toDate ? existing.nextSurveyDate.toDate() : new Date(existing.nextSurveyDate)).toISOString().slice(0, 10) : '' }),
+    el('div', { class: 'field' }, photoLabel, photoUp.element),
+    field({ label: '備註 / 萌芽情形描述', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      existing ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-red-600',
+        onclick: () => deleteSubdoc(project, plot, 'harvest', existing) }, '刪除') : null,
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+
+  // 即時試算
+  f.querySelector('[name=harvestAmount_kg_fresh]').addEventListener('input', updateCarbonCalc);
+  f.querySelector('[name=harvestAmount_kg_dry]').addEventListener('input', updateCarbonCalc);
+  updateCarbonCalc();
+  updateTreeInfo();
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張採收照片'); return; }
+    const fd = new FormData(f);
+    const treeId = fd.get('treeId');
+    const tree = candidateTrees.find(t => t.id === treeId);
+    const fresh = parseFloat(fd.get('harvestAmount_kg_fresh'));
+    let dry = parseFloat(fd.get('harvestAmount_kg_dry'));
+    const moisture = cfg.moistureDefault ?? 0.5;
+    if (isNaN(dry)) dry = fresh * (1 - moisture);
+    const carbonRemoved_kgC = dry * 0.5;
+    const carbonRemoved_tCO2e = (carbonRemoved_kgC * 44 / 12) / 1000;
+
+    const treeStatusAfter = fd.get('treeStatusAfter');
+    const data = {
+      treeId,
+      treeNum: tree?.treeNum || existing?.treeNum || null,
+      speciesZh: tree?.speciesZh || existing?.speciesZh || null,
+      harvestDate: new Date(fd.get('harvestDate')),
+      surveyRound: fd.get('surveyRound').trim(),
+      harvestType: fd.get('harvestType'),
+      harvestMethod: fd.get('harvestMethod'),
+      harvestAmount_kg_fresh: fresh,
+      harvestAmount_kg_dry: !isNaN(parseFloat(fd.get('harvestAmount_kg_dry'))) ? parseFloat(fd.get('harvestAmount_kg_dry')) : null,
+      dryEstimated_kg: dry,                   // 永遠存估算結果
+      moistureContent: moisture,
+      carbonRemoved_kgC: +carbonRemoved_kgC.toFixed(3),
+      carbonRemoved_tCO2e: +carbonRemoved_tCO2e.toFixed(6),
+      dbh_at_harvest: parseFloat(fd.get('dbh_at_harvest')),
+      productUse: fd.get('productUse') || null,
+      treeStatusAfter,
+      nextSurveyDate: fd.get('nextSurveyDate') ? new Date(fd.get('nextSurveyDate')) : null,
+      notes: fd.get('notes').trim() || null,
+      updatedAt: fb.serverTimestamp()
+    };
+
+    const submitBtn = f.querySelector('button[type=submit]');
+    submitBtn.disabled = true; submitBtn.textContent = '儲存中...';
+    try {
+      const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'harvest');
+      let docId;
+      if (existing) {
+        docId = existing.id;
+        applySurveyorReQaReset(data, existing);
+        await fb.updateDoc(fb.doc(colRef, docId), data);
+      } else {
+        data.createdBy = state.user.uid;
+        data.createdAt = fb.serverTimestamp();
+        data.qaStatus = 'pending';
+        const ref = await fb.addDoc(colRef, data);
+        docId = ref.id;
+      }
+      if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
+        if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
+        const photos = await photoUp.commit({
+          projectId: project.id, plotId: plot.id, prefix: `harvest-${docId}`
+        });
+        await fb.updateDoc(fb.doc(colRef, docId), { photos });
+      }
+      // tree 雙向同步：砍除根除 → 自動 set tree.vitality='standing-dead'
+      if (treeStatusAfter === 'removed' && tree) {
+        try {
+          await fb.updateDoc(
+            fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', tree.id),
+            {
+              vitality: 'standing-dead',
+              harvestedAt: data.harvestDate,
+              harvestRemovedBy: state.user.uid,
+              updatedAt: fb.serverTimestamp()
+            }
+          );
+        } catch (e) { console.warn('tree vitality sync failed:', e.message); }
+      }
+      toast(existing
+        ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
+        : (treeStatusAfter === 'removed' ? '已建立 + tree 已標記枯立' : '已建立（待審核）'));
+      closeModal();
+    } catch (e) {
+      toast('儲存失敗：' + e.message);
+      submitBtn.disabled = false; submitBtn.textContent = '儲存';
+    }
+  });
+  openModal(existing ? `編輯採收紀錄 #${existing.treeNum}` : '新採收紀錄', f);
 }
 
 // ===== Seed Demo Data =====
