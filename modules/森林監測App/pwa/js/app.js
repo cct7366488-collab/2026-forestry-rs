@@ -11,7 +11,9 @@ import {
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getStorage } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
+import {
+  getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
 import { firebaseConfig } from "../firebase-config.js";
 import * as forms from "./forms.js";
@@ -66,7 +68,8 @@ export const DEFAULT_METHODOLOGY = {
 export const fb = {
   app, db, auth, storage,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup
+  query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup,
+  storageRef, uploadBytes, getDownloadURL, deleteObject
 };
 
 export function $(sel, root = document) { return root.querySelector(sel); }
@@ -260,6 +263,9 @@ const POPUP_FAIL_CODES = new Set([
 ]);
 async function googleLogin() {
   const provider = new GoogleAuthProvider();
+  // v1.6.1：每次都顯示帳號選擇器，避免一鍵登入到上次用過的帳號
+  // （單人多帳號時：PI cct7366488@gmail.com / surveyor chenchaurtzuhn7@gmail.com）
+  provider.setCustomParameters({ prompt: 'select_account' });
   try {
     await signInWithPopup(auth, provider);
   } catch (e) {
@@ -296,8 +302,11 @@ function parseHash() {
 }
 
 let _initialNav = true;
+// v1.6.10：route token 防止 onAuthStateChanged 雙觸發或 hashchange 競態導致兩份畫面疊加
+let _routeId = 0;
 
 async function route() {
+  const myId = ++_routeId;
   state.unsubscribers.forEach(u => u());
   state.unsubscribers = [];
 
@@ -315,6 +324,7 @@ async function route() {
     if (lastId) {
       try {
         const ps = await getDoc(doc(db, 'projects', lastId));
+        if (myId !== _routeId) return;  // 被新 route 取代
         if (ps.exists() && (ps.data().members?.[state.user.uid] || isSystemAdmin())) {
           location.replace(`#/p/${lastId}`);
           return;
@@ -328,6 +338,7 @@ async function route() {
           collection(db, 'projects'),
           where('memberUids', 'array-contains', state.user.uid)
         ));
+        if (myId !== _routeId) return;
         if (snap.size === 1) {
           location.replace(`#/p/${snap.docs[0].id}`);
           return;
@@ -337,6 +348,7 @@ async function route() {
   }
   _initialNav = false;
 
+  if (myId !== _routeId) return;
   if (r.route === 'projects') {
     await renderProjects(main);
   } else if (r.route === 'project') {
@@ -764,14 +776,17 @@ async function renderSettings() {
 }
 
 async function renderPlotDetail(root, projectId, plotId) {
+  const myId = _routeId;  // v1.6.10：搶到 token，後續任何 await 結束都比對
   if (!state.project || state.project.id !== projectId) {
     const psnap = await getDoc(doc(db, 'projects', projectId));
+    if (myId !== _routeId) return;
     if (!psnap.exists()) { toast('找不到專案'); location.hash = ''; return; }
     state.project = { id: projectId, ...psnap.data() };
     if (!state.project.methodology) state.project.methodology = { ...DEFAULT_METHODOLOGY };
   }
   const pref = doc(db, 'projects', projectId, 'plots', plotId);
   const psnap = await getDoc(pref);
+  if (myId !== _routeId) return;
   if (!psnap.exists()) { toast('找不到樣區'); location.hash = `#/p/${projectId}`; return; }
   state.plot = { id: plotId, ...psnap.data() };
   // v1.5.2 Bug #5：直接從 plot detail 入口（深連結）也要預取
@@ -780,7 +795,10 @@ async function renderPlotDetail(root, projectId, plotId) {
     state.project.lockedBy,
     state.plot.createdBy
   ].filter(Boolean));
+  if (myId !== _routeId) return;
 
+  // v1.6.10：DOM 寫入前再清一次 root，雙重保險避免 race append
+  root.innerHTML = '';
   const tpl = $('#view-plot-detail').content.cloneNode(true);
   root.appendChild(tpl);
   $('[data-back-to-project]').setAttribute('href', `#/p/${projectId}`);
@@ -825,6 +843,23 @@ async function renderPlotDetail(root, projectId, plotId) {
       onclick: () => forms.markQA(state.project, plotId, null, 'rejected') }, '✕ reject'));
   }
   $('[data-bind="plot.code"]').parentElement.appendChild(qaBar);
+
+  // v1.6.10：照片 thumbnail（點開全螢幕）— inline style 確保 80x80 不受 Tailwind CDN 影響
+  const photos = state.plot.photos || [];
+  if (photos.length > 0) {
+    const photoBar = el('div', { style: 'margin-top:8px;display:flex;flex-wrap:wrap;gap:8px' },
+      ...photos.map(p => el('a', {
+        href: p.url, target: '_blank', rel: 'noopener',
+        style: 'display:inline-block;line-height:0', title: p.name || '照片'
+      },
+        el('img', {
+          src: p.url, loading: 'lazy',
+          style: 'width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #d6d3d1'
+        })
+      ))
+    );
+    $('[data-bind="plot.code"]').parentElement.appendChild(photoBar);
+  }
 
   // sub-tabs
   $$('.subtab-link').forEach(a => a.addEventListener('click', e => {

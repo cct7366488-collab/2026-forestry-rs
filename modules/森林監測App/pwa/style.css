@@ -11,6 +11,36 @@ input, select, textarea, button {
   font-size: 16px;  /* 防 iOS 自動 zoom */
 }
 
+/* v1.6.2：checkbox 在 iOS Safari 字型影響下與 label 對不齊
+   固定 16x16 + flex-shrink:0 確保 .flex items-center 容器內垂直置中 */
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: #15803d;  /* forest-700 */
+  vertical-align: middle;
+}
+
+/* v1.6.8：CJK checkbox 群組 — 拋棄 flex/grid，用最堅固的 inline-block + width:32% */
+.pest-grid {
+  font-size: 0;  /* 消 inline-block 之間的空白 gap */
+}
+.pest-grid label {
+  display: inline-block;
+  width: 33%;
+  font-size: 14px;
+  white-space: nowrap;
+  color: #1c1917;
+  cursor: pointer;
+  line-height: 1.8;
+  vertical-align: top;
+}
+.pest-grid label input {
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
 /* 表格（立木列表） */
 .tbl {
   width: 100%;

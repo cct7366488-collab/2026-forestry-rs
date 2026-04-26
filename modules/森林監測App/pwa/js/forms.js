@@ -155,6 +155,118 @@ function field({ label, name, type = 'text', required = false, value = '', place
   return el('div', { class: 'field' }, lab, input);
 }
 
+// ===== 照片上傳元件（v1.6） =====
+// 用法：const up = photoUploader({ existing: doc.photos || [], required, onChange });
+//      表單中放 up.element；submit 時呼叫 await up.commit({ projectId, plotId, prefix }) 拿到新 photos 陣列
+// 行為：
+//   - 顯示既有照片 thumbnail（不可被 surveyor 編輯時）+ 刪除 X 按鈕
+//   - 新增按鈕：accept=image/*，capture=environment（手機開後鏡頭）
+//   - 新加的檔案先做本地 preview（FileReader）；submit 才真正上傳到 Storage
+//   - commit() 回傳合併後的 photos 陣列：[...remainingExisting, ...newlyUploaded]
+function photoUploader({ existing = [], onChange = null } = {}) {
+  let kept = [...existing];          // 保留的既有照片（user 沒按刪除的）
+  let pending = [];                  // 待上傳的新檔案 [{ file, previewUrl, tempId }]
+
+  const wrap = el('div', { class: 'photo-uploader space-y-2' });
+  const grid = el('div', { class: 'flex flex-wrap gap-2' });
+  const fileInput = el('input', {
+    type: 'file', accept: 'image/*', capture: 'environment',
+    multiple: 'true', class: 'hidden'
+  });
+  const addBtn = el('button', {
+    type: 'button',
+    class: 'border-2 border-dashed border-stone-300 rounded w-20 h-20 flex items-center justify-center text-stone-400 hover:bg-stone-50',
+    onclick: () => fileInput.click()
+  }, '＋');
+
+  fileInput.addEventListener('change', () => {
+    for (const file of fileInput.files) {
+      if (!file.type.startsWith('image/')) { toast(`忽略非圖片：${file.name}`); continue; }
+      if (file.size > 5 * 1024 * 1024) { toast(`檔案過大（>5MB）：${file.name}`); continue; }
+      const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const previewUrl = URL.createObjectURL(file);
+      pending.push({ file, previewUrl, tempId });
+    }
+    fileInput.value = '';
+    redraw();
+    onChange?.();
+  });
+
+  function redraw() {
+    grid.innerHTML = '';
+    kept.forEach((p, i) => {
+      const item = el('div', { class: 'relative w-20 h-20' },
+        el('img', { src: p.url, class: 'w-20 h-20 object-cover rounded border' }),
+        el('button', {
+          type: 'button',
+          class: 'absolute -top-1 -right-1 bg-red-600 text-white text-xs w-5 h-5 rounded-full',
+          title: '移除',
+          onclick: () => { kept.splice(i, 1); redraw(); onChange?.(); }
+        }, '✕')
+      );
+      grid.appendChild(item);
+    });
+    pending.forEach((p) => {
+      const item = el('div', { class: 'relative w-20 h-20' },
+        el('img', { src: p.previewUrl, class: 'w-20 h-20 object-cover rounded border opacity-70' }),
+        el('span', { class: 'absolute bottom-0 left-0 right-0 text-center text-[10px] bg-amber-500 text-white' }, '待上傳'),
+        el('button', {
+          type: 'button',
+          class: 'absolute -top-1 -right-1 bg-stone-600 text-white text-xs w-5 h-5 rounded-full',
+          title: '取消',
+          onclick: () => {
+            URL.revokeObjectURL(p.previewUrl);
+            pending = pending.filter(x => x.tempId !== p.tempId);
+            redraw(); onChange?.();
+          }
+        }, '✕')
+      );
+      grid.appendChild(item);
+    });
+    grid.appendChild(addBtn);
+  }
+  redraw();
+
+  wrap.appendChild(grid);
+  wrap.appendChild(fileInput);
+
+  return {
+    element: wrap,
+    get count() { return kept.length + pending.length; },
+    // 上傳 + 回傳合併陣列。upload 失敗的檔案會 throw，由 caller 處理
+    async commit({ projectId, plotId, prefix = 'plot' }) {
+      const uploaded = [];
+      for (const p of pending) {
+        const ext = (p.file.name.match(/\.[a-zA-Z0-9]+$/) || ['.jpg'])[0].toLowerCase();
+        const ts = Date.now();
+        const rand = Math.random().toString(36).slice(2, 8);
+        const path = `projects/${projectId}/plots/${plotId}/${prefix}-${ts}-${rand}${ext}`;
+        const r = fb.storageRef(fb.storage, path);
+        await fb.uploadBytes(r, p.file, { contentType: p.file.type });
+        const url = await fb.getDownloadURL(r);
+        uploaded.push({
+          url, path,
+          name: p.file.name,
+          size: p.file.size,
+          contentType: p.file.type,
+          uploadedAt: new Date(),
+          uploadedBy: state.user.uid
+        });
+        URL.revokeObjectURL(p.previewUrl);
+      }
+      // 計算被移除的既有照片（既有 - 保留）→ 從 Storage 刪
+      const removedExisting = existing.filter(e => !kept.some(k => k.path === e.path));
+      for (const r of removedExisting) {
+        if (!r.path) continue;
+        try { await fb.deleteObject(fb.storageRef(fb.storage, r.path)); }
+        catch (e) { console.warn('刪除舊照片失敗（可能已不存在）:', r.path, e.code); }
+      }
+      pending = [];
+      return [...kept, ...uploaded];
+    }
+  };
+}
+
 // ===== 專案表單 =====
 // v1.5：admin 建空殼 + 指派 PI 的 email；自動填 memberUids、預設 methodology
 export function openProjectForm(existing = null) {
@@ -341,6 +453,12 @@ export async function openPlotForm(project, existing = null) {
     );
   });
 
+  // v1.6：照片上傳元件
+  const photoReq = !!meth.required?.photos;
+  const photoUp = photoUploader({ existing: existing?.photos || [] });
+  const photoLabel = el('label', {}, '樣區照片', photoReq ? el('span', { class: 'req' }, ' *') : null,
+    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（≤5MB / 張，可多選）'));
+
   const f = el('form', { class: 'space-y-2' },
     field({ label: '樣區編號', name: 'code', required: true, value: existing?.code || '', placeholder: `${project.code}-001` }),
     field({ label: '林班-小班', name: 'forestUnit', value: existing?.forestUnit || '', placeholder: '123-2' }),
@@ -358,6 +476,7 @@ export async function openPlotForm(project, existing = null) {
         value: existing?.area_m2 || (meth.plotAreaOptions?.[0] || 500), required: true })
     ),
     field({ label: '設置日期', name: 'establishedAt', type: 'date', required: true, value: existing?.establishedAt ? (existing.establishedAt.toDate ? existing.establishedAt.toDate() : new Date(existing.establishedAt)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
+    el('div', { class: 'field' }, photoLabel, photoUp.element),
     field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
@@ -372,6 +491,8 @@ export async function openPlotForm(project, existing = null) {
     const lng = parseFloat(fd.get('lng'));
     const lat = parseFloat(fd.get('lat'));
     if (!lng || !lat) { toast('請先抓取 GPS'); return; }
+    // v1.6：照片 required 驗證
+    if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張樣區照片'); return; }
     const t97 = wgs84ToTwd97(lng, lat);
     const data = {
       code: fd.get('code').trim(),
@@ -386,20 +507,37 @@ export async function openPlotForm(project, existing = null) {
       updatedAt: fb.serverTimestamp(),
       insideBoundary: true  // v2: 對林班界做點面套疊
     };
+    const submitBtn = f.querySelector('button[type=submit]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '儲存中...';
     try {
+      // v1.6：先建/更新 plot 取得 id，再上傳照片，最後寫回 photos URL
+      let plotId;
       if (existing) {
+        plotId = existing.id;
         applySurveyorReQaReset(data, existing);
-        await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', existing.id), data);
-        toast(data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新');
+        await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plotId), data);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
-        data.qaStatus = 'pending';  // v1.5：初始狀態
-        await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), data);
-        toast('已建立（待審核）');
+        data.qaStatus = 'pending';
+        const ref = await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), data);
+        plotId = ref.id;
       }
+      if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
+        if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
+        const photos = await photoUp.commit({ projectId: project.id, plotId, prefix: 'plot' });
+        await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plotId), { photos });
+      }
+      toast(existing
+        ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
+        : '已建立（待審核）');
       closeModal();
-    } catch (e) { toast('儲存失敗：' + e.message); }
+    } catch (e) {
+      toast('儲存失敗：' + e.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '儲存';
+    }
   });
   openModal(existing ? '編輯樣區' : '新樣區', f);
 }
@@ -458,14 +596,14 @@ export function openTreeForm(project, plot, existing = null) {
     calcOut.innerHTML = `斷面積 ${m.basalArea_m2} m² ｜ 材積 ${m.volume_m3} m³ ｜ 碳量 ${m.carbon_kg} kg`;
   }
 
-  // 病蟲害 checkbox
+  // 病蟲害 checkbox（v1.6.9：inline style 寫死在 HTML，不依賴 CSS file，避開任何快取問題）
   const existingPests = new Set(existing?.pestSymptoms || []);
-  const pestBox = el('div', { class: 'flex flex-wrap gap-2 text-sm' },
-    ...PEST_OPTIONS.map(p => el('label', { class: 'flex items-center gap-1 whitespace-nowrap mr-2' },
-      el('input', { type: 'checkbox', name: 'pest', value: p, ...(existingPests.has(p) ? { checked: 'true' } : {}) }),
-      p
-    ))
-  );
+  const pestBox = el('div', { style: 'font-size:0' });
+  const labStyle = 'display:inline-block;width:33%;font-size:14px;white-space:nowrap;line-height:1.8;vertical-align:top;color:#1c1917;cursor:pointer';
+  const inpStyle = 'vertical-align:middle;margin-right:4px;width:16px;height:16px';
+  pestBox.innerHTML = PEST_OPTIONS.map(p =>
+    `<label style="${labStyle}"><input type="checkbox" name="pest" value="${p}"${existingPests.has(p) ? ' checked' : ''} style="${inpStyle}"> ${p}</label>`
+  ).join('');
 
   const f = el('form', { class: 'space-y-2' },
     speciesList,

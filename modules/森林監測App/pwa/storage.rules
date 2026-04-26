@@ -1,11 +1,14 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /projects/{projectId}/plots/{plotId}/{filename} {
+    // v1.6：照片放在 projects/{projectId}/plots/{plotId}/ 下，支援巢狀路徑（給 tree 層預留）
+    // 限制：登入用戶可讀；寫入需 < 5MB + image/*；刪除需登入
+    match /projects/{projectId}/plots/{plotId}/{allPaths=**} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null;
     }
   }
 }
