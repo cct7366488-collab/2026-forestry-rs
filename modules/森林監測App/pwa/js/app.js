@@ -12,12 +12,13 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import {
-  getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
+  getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js";
-import * as forms from "./forms.js";
-import * as analytics from "./analytics.js";
+import { firebaseConfig } from "../firebase-config.js?v=1714";
+import * as forms from "./forms.js?v=1714";
+import * as analytics from "./analytics.js?v=1714";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=1714";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -47,11 +48,14 @@ export function projectRole() {
   return state.project.members?.[state.user.uid] || null;
 }
 export function isPi() { return projectRole() === 'pi'; }
-export function isDataManager() { return projectRole() === 'dataManager'; }
+// v1.7.0：dataManager 角色移除（auto migration 在 renderProjectHome 中執行）
+// 保留 isDataManager() 為相容 stub，永遠回傳 false（避免 import 端誤用）
+export function isDataManager() { return false; }
 export function isSurveyor() { return projectRole() === 'surveyor'; }
 export function isReviewer() { return projectRole() === 'reviewer'; }
-export function canQA() { return isPi() || isDataManager(); }
-export function canCollect() { return isPi() || isDataManager() || isSurveyor(); }
+// v1.7.1.3：system admin 不管專案角色是什麼，都享 PI 權限（god view）
+export function canQA() { return isPi() || isSystemAdmin(); }
+export function canCollect() { return isPi() || isSurveyor() || isSystemAdmin(); }
 export function isLocked() { return state.project?.locked === true; }
 
 // 預設方法學（v1.5 新專案/無 methodology 的舊專案 fallback）
@@ -69,7 +73,7 @@ export const fb = {
   app, db, auth, storage,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup,
-  storageRef, uploadBytes, getDownloadURL, deleteObject
+  storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 };
 
 export function $(sel, root = document) { return root.querySelector(sel); }
@@ -112,18 +116,13 @@ export function twd97ToWgs84(x, y) {
   return { lng, lat };
 }
 
-export function calcTreeMetrics({ dbh_cm, height_m, speciesSci }) {
-  if (!dbh_cm || !height_m) return { basalArea_m2: 0, volume_m3: 0, carbon_kg: 0 };
-  const basalArea_m2 = Math.PI * Math.pow(dbh_cm / 200, 2);
-  const formFactor = (speciesSci || '').match(/Pinus|Cunninghamia|Cryptomeria|Cedrus|Picea|Abies|Tsuga|Taiwania|Chamaecyparis|Calocedrus|Keteleeria|Amentotaxus|Taxus|Podocarpus|Juniperus/) ? 0.5 : 0.45;
-  const volume_m3 = 0.0000785 * dbh_cm * dbh_cm * height_m * formFactor;
-  const carbon_kg = volume_m3 * 500 * 1.4 * 0.5;
-  return {
-    basalArea_m2: +basalArea_m2.toFixed(4),
-    volume_m3: +volume_m3.toFixed(3),
-    carbon_kg: +carbon_kg.toFixed(1)
-  };
-}
+// v1.6.21：樹種別計算移到 species-equations.js（移植自 carbon-volume-calculator skill）
+// 以下被淘汰的 SPECIES_PARAMS 與 calcTreeMetrics（v1.6.20 我自編、結構錯誤）已被新版取代
+// 重新 export 以維持外部 API 介面（forms.js 仍 import）
+export const calcTreeMetrics = calcTreeMetricsImpl;
+export const speciesParamsLabel = speciesParamsLabelImpl;
+
+// （v1.6.20 自編的形數法 SPECIES_PARAMS 與 calcTreeMetrics 已刪除，全部移到 species-equations.js）
 
 // QA badge HTML
 export function qaBadge(status) {
@@ -191,6 +190,7 @@ export function openModal(title, bodyEl) {
   body.appendChild(bodyEl);
   $('#modal').classList.remove('hidden');
   $('#modal-backdrop').classList.remove('hidden');
+  modalDrag?.reset();  // v1.6.15：每次開 modal 重置拖移位置
 }
 export function closeModal() {
   $('#modal').classList.add('hidden');
@@ -198,6 +198,44 @@ export function closeModal() {
 }
 $('#modal-close').addEventListener('click', closeModal);
 $('#modal-backdrop').addEventListener('click', closeModal);
+
+// v1.6.15：modal 標題列拖移（支援滑鼠與觸控；用 Pointer Events 統一 API）
+const modalDrag = (() => {
+  const modal = $('#modal');
+  if (!modal) return null;
+  const card = modal.querySelector('.bg-white');
+  const header = card?.querySelector(':scope > .flex');  // 標題列（第一個 flex 容器）
+  if (!card || !header) return null;
+
+  let tx = 0, ty = 0, dragging = false, startX = 0, startY = 0;
+  header.style.cursor = 'move';
+  header.style.userSelect = 'none';
+  header.style.touchAction = 'none';
+
+  header.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;  // 點關閉鈕時不啟動拖移
+    dragging = true;
+    try { header.setPointerCapture(e.pointerId); } catch {}
+    startX = e.clientX - tx;
+    startY = e.clientY - ty;
+  });
+  header.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    tx = e.clientX - startX;
+    ty = e.clientY - startY;
+    card.style.transform = `translate(${tx}px, ${ty}px)`;
+  });
+  const stop = () => { dragging = false; };
+  header.addEventListener('pointerup', stop);
+  header.addEventListener('pointercancel', stop);
+
+  return {
+    reset() {
+      tx = 0; ty = 0;
+      card.style.transform = '';
+    }
+  };
+})();
 
 // ===== 離線偵測 =====
 function updateOnlineStatus() {
@@ -317,35 +355,9 @@ async function route() {
 
   const r = parseHash();
 
-  // 首次載入自動跳轉：lastProjectId or 唯一專案（非 admin）
-  if (r.route === 'projects' && _initialNav) {
-    _initialNav = false;
-    const lastId = localStorage.getItem('lastProjectId');
-    if (lastId) {
-      try {
-        const ps = await getDoc(doc(db, 'projects', lastId));
-        if (myId !== _routeId) return;  // 被新 route 取代
-        if (ps.exists() && (ps.data().members?.[state.user.uid] || isSystemAdmin())) {
-          location.replace(`#/p/${lastId}`);
-          return;
-        }
-      } catch {}
-      localStorage.removeItem('lastProjectId');
-    }
-    if (!isSystemAdmin()) {
-      try {
-        const snap = await getDocs(query(
-          collection(db, 'projects'),
-          where('memberUids', 'array-contains', state.user.uid)
-        ));
-        if (myId !== _routeId) return;
-        if (snap.size === 1) {
-          location.replace(`#/p/${snap.docs[0].id}`);
-          return;
-        }
-      } catch {}
-    }
-  }
+  // v1.7.1.4：移除登入後自動跳轉到 lastProjectId 邏輯
+  // 統一所有角色（admin / pi / surveyor / reviewer）落在「我的專案」清單，方便切專案
+  // localStorage 'lastProjectId' 仍會被寫入（renderProjectHome / renderPlotDetail），但不再被讀取做 auto-redirect
   _initialNav = false;
 
   if (myId !== _routeId) return;
@@ -378,6 +390,8 @@ function renderLogin(root) {
 }
 
 async function renderProjects(root) {
+  // v1.6.12：DOM 寫入前再清 root，防 race append 兩份模板
+  root.innerHTML = '';
   const tpl = $('#view-projects').content.cloneNode(true);
   root.appendChild(tpl);
 
@@ -408,28 +422,82 @@ async function renderProjects(root) {
       }, msg));
       return;
     }
-    snap.forEach(d => {
-      const data = d.data();
+    // v1.6.19：分作用中與已封存兩組
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const active = all.filter(p => !p.archived);
+    const archived = all.filter(p => p.archived);
+
+    const renderCard = (data, isArchived) => {
       const role = data.members?.[state.user.uid] || (isSystemAdmin() ? 'admin' : '?');
-      const roleLabel = { pi: '主持人', dataManager: '資料管理員', surveyor: '調查員', reviewer: '審查委員', admin: '系統管理者' }[role] || role;
-      const lockBadge = data.locked
+      const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', admin: '系統管理者' }[role] || role;
+      const lockBadge = (data.locked && !isArchived)
         ? el('span', { class: 'text-xs bg-stone-200 text-stone-700 px-2 py-0.5 rounded ml-1' }, '🔒 已 Lock')
         : null;
-      list.appendChild(el('a', {
-        href: `#/p/${d.id}`,
-        class: 'block bg-white rounded-xl shadow hover:shadow-md p-4 transition'
+      const archivedBadge = isArchived
+        ? el('span', { class: 'text-xs bg-stone-300 text-stone-700 px-2 py-0.5 rounded ml-1' }, '📦 已封存')
+        : null;
+      // admin only：依封存狀態顯示不同按鈕組
+      const adminActions = isSystemAdmin() ? el('div', { class: 'flex gap-1 ml-1' },
+        ...(isArchived ? [
+          el('button', {
+            class: 'text-xs bg-blue-600 text-white px-2 py-0.5 rounded',
+            title: '還原為作用中專案',
+            onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); forms.unarchiveProject(data); }
+          }, '↺ 解封存'),
+          el('button', {
+            class: 'text-xs bg-red-600 text-white px-2 py-0.5 rounded',
+            title: '永久刪除（無法救回）',
+            onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); forms.deleteProjectCascade(data); }
+          }, '🗑 永久刪除')
+        ] : [
+          el('button', {
+            class: 'text-xs bg-amber-600 text-white px-2 py-0.5 rounded',
+            title: '案件結束時封存（資料保留）',
+            onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); forms.archiveProject(data); }
+          }, '📦 封存')
+        ])
+      ) : null;
+      return el('a', {
+        href: `#/p/${data.id}`,
+        class: `block bg-white rounded-xl shadow p-4 transition ${isArchived ? 'opacity-60 hover:opacity-100' : 'hover:shadow-md'}`
       },
-        el('div', { class: 'flex justify-between items-start' },
+        el('div', { class: 'flex justify-between items-start gap-2 flex-wrap' },
           el('h3', { class: 'font-semibold' }, data.name),
-          el('div', { class: 'flex items-center' },
+          el('div', { class: 'flex items-center flex-wrap gap-1' },
             el('span', { class: 'text-xs bg-stone-100 px-2 py-0.5 rounded' }, roleLabel),
-            lockBadge
+            lockBadge,
+            archivedBadge,
+            adminActions
           )
         ),
         el('p', { class: 'text-sm text-stone-500 mt-1' }, data.code),
         data.description ? el('p', { class: 'text-sm text-stone-600 mt-2' }, data.description) : null
-      ));
-    });
+      );
+    };
+
+    active.forEach(p => list.appendChild(renderCard(p, false)));
+
+    if (archived.length > 0) {
+      const archivedSection = el('div', { class: 'col-span-2 mt-4' },
+        el('div', { class: 'flex items-center gap-2 mb-2' },
+          el('h2', { class: 'text-sm font-semibold text-stone-600' }, `📦 已封存（${archived.length}）`),
+          el('button', {
+            id: 'btn-toggle-archived',
+            class: 'text-xs text-blue-600 hover:underline',
+            onclick: (ev) => {
+              ev.preventDefault();
+              const wrap = $('#archived-list');
+              wrap.classList.toggle('hidden');
+              ev.target.textContent = wrap.classList.contains('hidden') ? '顯示' : '隱藏';
+            }
+          }, '顯示')
+        ),
+        el('div', { id: 'archived-list', class: 'hidden grid sm:grid-cols-2 gap-4' },
+          ...archived.map(p => renderCard(p, true))
+        )
+      );
+      list.appendChild(archivedSection);
+    }
   }, err => {
     list.innerHTML = `<div class="col-span-2 bg-red-50 border border-red-200 rounded p-4 text-red-700 text-sm">載入失敗：${err.message}</div>`;
   });
@@ -437,8 +505,10 @@ async function renderProjects(root) {
 }
 
 async function renderProjectHome(root, projectId) {
+  const myId = _routeId;  // v1.6.12：搶 token 防 race
   const pref = doc(db, 'projects', projectId);
   const psnap = await getDoc(pref);
+  if (myId !== _routeId) return;
   if (!psnap.exists()) { toast('找不到專案'); location.hash = ''; return; }
   state.project = { id: projectId, ...psnap.data() };
   // v1.5.2 Bug #5：預取所有成員 + lockedBy 的 displayName，避免 UI 顯示 uid 片段
@@ -446,6 +516,22 @@ async function renderProjectHome(root, projectId) {
     ...Object.keys(state.project.members || {}),
     state.project.lockedBy
   ].filter(Boolean));
+
+  // 🩹 v1.7.0：dataManager 角色自動 migration → pi（靜默，PI 開啟時觸發）
+  if (state.project.members?.[state.user.uid] === 'pi') {
+    const m = { ...state.project.members };
+    let dmFound = false;
+    for (const [uid, role] of Object.entries(m)) {
+      if (role === 'dataManager') { m[uid] = 'pi'; dmFound = true; }
+    }
+    if (dmFound) {
+      try {
+        await updateDoc(doc(db, 'projects', projectId), { members: m });
+        state.project.members = m;
+        console.log('[v1.7.0 migration] dataManager → pi 完成');
+      } catch (e) { console.warn('dataManager migration 失敗', e); }
+    }
+  }
 
   // 🩹 v1.5.2：PI 每次開啟都檢查 memberUids ↔ members 同步（自癒，不靠 migratedV1_5）
   if (state.project.members?.[state.user.uid] === 'pi') {
@@ -504,6 +590,9 @@ async function renderProjectHome(root, projectId) {
   // 補預設 methodology（舊專案 fallback，給非 pi 看時用）
   if (!state.project.methodology) state.project.methodology = { ...DEFAULT_METHODOLOGY };
 
+  if (myId !== _routeId) return;
+  // v1.6.12：DOM 寫入前再清 root，雙重保險（onAuthStateChanged 雙觸發 race）
+  root.innerHTML = '';
   const tpl = $('#view-project-home').content.cloneNode(true);
   root.appendChild(tpl);
   bindData(root, 'project', state.project);
@@ -538,33 +627,118 @@ async function renderProjectHome(root, projectId) {
   });
 
   const plotsRef = collection(db, 'projects', projectId, 'plots');
-  // surveyor 看全部（為了 QA 透明度），不再限 own
   const qPlots = query(plotsRef, orderBy('createdAt', 'desc'));
+  // v1.7.0：取得專案 surveyor 清單（給 PI 指派用）
+  const surveyors = Object.entries(state.project.members || {})
+    .filter(([uid, role]) => role === 'surveyor')
+    .map(([uid]) => ({ uid, label: userLabel(uid, uid.slice(0, 6)) }));
+
   const unsub = onSnapshot(qPlots, snap => {
     const list = $('#plot-list');
     list.innerHTML = '';
-    const total = snap.size;
+    const allDocs = snap.docs;
     const target = state.project.methodology?.targetPlotCount;
-    $('#plot-progress').textContent = target ? `（${total} / ${target}）` : `（${total}）`;
+    // v1.7.0：surveyor 視角過濾 — 只看被指派 + 自己 createdBy 的
+    // v1.7.1.3：admin 不被過濾（god view 永遠看全部）
+    const surveyorView = isSurveyor() && !isSystemAdmin();
+    const visible = surveyorView
+      ? allDocs.filter(d => {
+          const dd = d.data();
+          return dd.assignedTo === state.user.uid || dd.createdBy === state.user.uid;
+        })
+      : allDocs;
+    $('#plot-progress').textContent = target
+      ? `（${visible.length} / ${target}${surveyorView ? '，全專案 ' + allDocs.length : ''}）`
+      : `（${visible.length}${surveyorView && visible.length !== allDocs.length ? '，全專案 ' + allDocs.length : ''}）`;
 
-    if (snap.empty) {
-      list.appendChild(el('p', { class: 'text-stone-500 text-sm col-span-2' }, '尚無樣區。'));
+    // v1.7.1：PI 視角偵測「有空殼但沒 surveyor」→ 顯示提示 banner
+    if (canQA() && !isLocked()) {
+      const shellCount = allDocs.filter(d => !d.data().location).length;
+      const unassignedShells = allDocs.filter(d => !d.data().location && !d.data().assignedTo).length;
+      if (shellCount > 0 && surveyors.length === 0) {
+        list.appendChild(el('div', {
+          class: 'col-span-2 bg-blue-50 border border-blue-300 rounded-lg p-3 text-sm flex items-center justify-between gap-2 flex-wrap'
+        },
+          el('div', {},
+            el('div', { class: 'font-semibold text-blue-800' }, '💡 下一步：邀請調查員'),
+            el('div', { class: 'text-blue-700 text-xs mt-1' },
+              `已建立 ${shellCount} 個空殼樣區，但專案內還沒有任何調查員。請到「設定」分頁加成員，回來這裡才能分派。`)
+          ),
+          el('a', { href: '#', class: 'bg-blue-600 text-white px-3 py-1.5 rounded text-sm whitespace-nowrap',
+            onclick: (ev) => {
+              ev.preventDefault();
+              const tab = document.querySelector('.tab-link[data-tab="settings"]');
+              if (tab) tab.click();
+            }
+          }, '前往設定 →')
+        ));
+      } else if (unassignedShells > 0 && surveyors.length > 0) {
+        list.appendChild(el('div', {
+          class: 'col-span-2 bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm'
+        },
+          el('div', { class: 'text-amber-800' },
+            `📌 仍有 ${unassignedShells} 個空殼樣區尚未指派。每張卡片下方下拉選單可指定 surveyor。`)
+        ));
+      }
+    }
+
+    if (visible.length === 0) {
+      list.appendChild(el('p', { class: 'text-stone-500 text-sm col-span-2' },
+        isSurveyor() ? '你還沒有被指派的樣區。請聯絡 PI。' : '尚無樣區。'));
       return;
     }
-    snap.forEach(d => {
+    visible.forEach(d => {
       const dd = d.data();
-      list.appendChild(el('a', {
+      const isShell = !dd.location;  // 沒 GPS = 空殼
+      const assignedLabel = dd.assignedTo
+        ? (dd.assignedTo === state.user.uid ? '指派給我' : `指派給 ${userLabel(dd.assignedTo, dd.assignedTo.slice(0,6))}`)
+        : null;
+      // 卡片標頭：code + badges
+      const headerRight = el('div', { class: 'flex items-center gap-1 flex-wrap' });
+      if (isShell) headerRight.appendChild(el('span', { class: 'text-xs bg-stone-200 text-stone-700 px-2 py-0.5 rounded' }, '🔘 待調查'));
+      else headerRight.appendChild(el('div', { html: qaBadge(dd.qaStatus) }));
+      // v1.7.1：未指派 shell 補「📌 待指派」紅字（PI 視角）
+      if (isShell && !dd.assignedTo && canQA()) {
+        headerRight.appendChild(el('span', { class: 'text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded' }, '📌 待指派'));
+      }
+      // 卡片
+      const card = el('a', {
         href: `#/p/${projectId}/plot/${d.id}`,
-        class: 'block bg-white rounded-xl shadow hover:shadow-md p-4'
+        class: `block bg-white rounded-xl shadow hover:shadow-md p-4 ${isShell ? 'border-2 border-dashed border-stone-300' : ''}`
       },
         el('div', { class: 'flex justify-between items-start' },
           el('h3', { class: 'font-semibold' }, dd.code),
-          el('div', { html: qaBadge(dd.qaStatus) })
+          headerRight
         ),
-        el('p', { class: 'text-sm text-stone-500' }, `${dd.forestUnit || ''} · ${dd.shape === 'circle' ? '圓' : '方'} ${dd.area_m2}m²`),
+        el('p', { class: 'text-sm text-stone-500' },
+          `${dd.forestUnit || ''} · ${dd.shape === 'circle' ? '圓' : '方'} ${dd.area_m2 || '?'}m²`),
         el('p', { class: 'text-xs text-stone-400 mt-1' },
-          `${fmtDate(dd.establishedAt)} · ${isReviewer() ? anonName(dd.createdBy) : (dd.createdBy === state.user.uid ? '我' : (dd.createdBy || '').slice(0, 8))}`)
-      ));
+          isShell
+            ? '尚未開始調查'
+            : `${fmtDate(dd.establishedAt)} · ${isReviewer() ? anonName(dd.createdBy) : userLabel(dd.createdBy, '—')}`)
+      );
+      // PI 視角：加指派下拉（不讓進入連結 stopPropagation）
+      if (canQA() && surveyors.length > 0 && !isLocked()) {
+        const sel = el('select', {
+          class: 'mt-2 text-xs border rounded px-1 py-0.5 w-full',
+          onclick: (ev) => ev.preventDefault(),
+          onchange: (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            forms.assignPlotToSurveyor(state.project, { id: d.id, ...dd }, ev.target.value || null);
+          }
+        });
+        sel.appendChild(el('option', { value: '' }, '— 未指派 —'));
+        surveyors.forEach(s => {
+          const opt = el('option', { value: s.uid }, s.label);
+          if (s.uid === dd.assignedTo) opt.setAttribute('selected', 'true');
+          sel.appendChild(opt);
+        });
+        card.appendChild(sel);
+      } else if (assignedLabel) {
+        card.appendChild(el('p', { class: 'text-xs text-blue-700 mt-1' }, `📌 ${assignedLabel}`));
+      }
+      list.appendChild(card);
     });
   });
   state.unsubscribers.push(unsub);
@@ -616,6 +790,14 @@ function renderDesign() {
     if (isLocked()) return toast('資料已 Lock，無法修改');
     forms.openMethodologyForm(state.project);
   };
+  // v1.7.0：批量建立空殼樣區
+  const batchBtn = $('#btn-batch-plots');
+  if (batchBtn) {
+    batchBtn.onclick = () => {
+      if (isLocked()) return toast('資料已 Lock，無法新增');
+      forms.openBatchPlotsForm(state.project);
+    };
+  }
 }
 
 async function renderPending() {
@@ -637,7 +819,7 @@ async function renderPending() {
         el('div', {},
           el('div', { class: 'font-medium' }, `${it.code} (${it.kind})`),
           el('div', { class: 'text-xs text-stone-500' },
-            `${isReviewer() ? anonName(it.createdBy) : (it.createdBy || '').slice(0, 8)} · ${fmtDate(it.createdAt)}`)
+            `${isReviewer() ? anonName(it.createdBy) : userLabel(it.createdBy, '—')} · ${fmtDate(it.createdAt)}`)
         ),
         el('div', { class: 'flex gap-1' },
           el('button', {
@@ -707,36 +889,41 @@ async function renderSettings() {
       const us = await getDoc(doc(db, 'users', uid));
       if (us.exists()) label = `${us.data().displayName} (${us.data().email})`;
     } catch {}
-    const roleLabel = { pi: '主持人', dataManager: '資料管理員', surveyor: '調查員', reviewer: '審查委員' }[role] || role;
+    const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員' }[role] || role;
     list.appendChild(el('div', { class: 'flex justify-between' },
       el('span', {}, label),
       el('span', { class: 'text-stone-500' }, roleLabel)
     ));
   }
-  // 加成員
+  // 加成員（v1.7.1.2：加 try/catch 顯示錯誤；admin 自動將自己升為 pi 防呆）
   $('#form-add-member').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const email = fd.get('email');
-    const role = fd.get('role');
-    const usnap = await getDocs(query(collection(db, 'users'), where('email', '==', email)));
-    if (usnap.empty) { toast('找不到此 email — 請對方先登入過一次'); return; }
-    const targetUid = usnap.docs[0].id;
-    const newMembers = { ...members, [targetUid]: role };
-    const newMemberUids = Object.keys(newMembers);
-    await updateDoc(doc(db, 'projects', state.project.id), { members: newMembers, memberUids: newMemberUids });
-    state.project.members = newMembers;
-    state.project.memberUids = newMemberUids;
-    toast('已加入');
-    renderSettings();
+    const email = fd.get('email').trim();
+    let role = fd.get('role');
+    try {
+      const usnap = await getDocs(query(collection(db, 'users'), where('email', '==', email)));
+      if (usnap.empty) { toast('找不到此 email — 請對方先登入過一次'); return; }
+      const targetUid = usnap.docs[0].id;
+      // 防呆：admin 加自己時強制設為 pi（避免管理員自己降權）
+      if (targetUid === state.user.uid && isSystemAdmin() && role !== 'pi') {
+        if (confirm('偵測到你正把自己加為「' + role + '」，要改為「主持人 (pi)」嗎？\n（admin 通常需要 PI 角色才能管理專案）')) {
+          role = 'pi';
+        }
+      }
+      const newMembers = { ...members, [targetUid]: role };
+      const newMemberUids = Object.keys(newMembers);
+      await updateDoc(doc(db, 'projects', state.project.id), { members: newMembers, memberUids: newMemberUids });
+      state.project.members = newMembers;
+      state.project.memberUids = newMemberUids;
+      toast(`已加入：${email} 為 ${role}`);
+      renderSettings();
+    } catch (err) {
+      console.error('加成員失敗:', err);
+      toast('加入失敗：' + err.message + '（你目前的角色可能無權變更成員）');
+    }
   };
-  // 加 surveyor 選項
-  const sel = $('#form-add-member [name=role]');
-  if (sel && !sel.querySelector('option[value=dataManager]')) {
-    const opt = document.createElement('option');
-    opt.value = 'dataManager'; opt.textContent = '資料管理員';
-    sel.appendChild(opt);
-  }
+  // v1.7.0：dataManager 選項已從 HTML 移除，舊資料 auto migrate 到 pi（在 renderProjectHome 處理）
 
   // Lock 切換
   const lockStatus = $('#lock-status');
@@ -772,6 +959,41 @@ async function renderSettings() {
     seedBtn.onclick = () => forms.seedDemoData(state.project);
   } else {
     seedBtn.closest('.bg-white').classList.add('hidden');
+  }
+
+  // v1.6.19：admin 專案管理區塊（封存 / 永久刪除依狀態切換顯示）
+  if (isSystemAdmin()) {
+    const settingsView = $('[data-tab-content="settings"]');
+    if (settingsView && !settingsView.querySelector('#admin-danger-zone')) {
+      const isArchived = state.project.archived === true;
+      const dangerZone = el('div', {
+        id: 'admin-danger-zone',
+        class: `${isArchived ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'} border rounded-lg p-4 mt-4`
+      },
+        el('h3', { class: `font-semibold ${isArchived ? 'text-red-800' : 'text-amber-800'} mb-2` },
+          isArchived ? '⚠️ 危險區（已封存專案）' : '專案管理（限系統管理員）'),
+        el('p', { class: `text-sm ${isArchived ? 'text-red-700' : 'text-amber-700'} mb-3` },
+          isArchived
+            ? '此專案已封存。可永久刪除（無法救回）或解封存還原。'
+            : '案件結束後請使用「封存」— 資料完整保留在 Firebase 雲端，只是從作用中清單移除。'),
+        isArchived
+          ? el('div', { class: 'flex gap-2 flex-wrap' },
+              el('button', {
+                class: 'bg-blue-600 text-white px-4 py-2 rounded text-sm',
+                onclick: () => forms.unarchiveProject(state.project)
+              }, '↺ 解封存'),
+              el('button', {
+                class: 'bg-red-600 text-white px-4 py-2 rounded text-sm',
+                onclick: () => forms.deleteProjectCascade(state.project)
+              }, '🗑 永久刪除（無法救回）')
+            )
+          : el('button', {
+              class: 'bg-amber-600 text-white px-4 py-2 rounded text-sm',
+              onclick: () => forms.archiveProject(state.project)
+            }, '📦 封存專案')
+      );
+      settingsView.appendChild(dangerZone);
+    }
   }
 }
 
@@ -845,10 +1067,16 @@ async function renderPlotDetail(root, projectId, plotId) {
   $('[data-bind="plot.code"]').parentElement.appendChild(qaBar);
 
   // v1.6.10：照片 thumbnail（點開全螢幕）— inline style 確保 80x80 不受 Tailwind CDN 影響
+  // v1.6.11：加「📷 加照片」獨立按鈕（不必進編輯表單，現場拍立傳）
   const photos = state.plot.photos || [];
-  if (photos.length > 0) {
-    const photoBar = el('div', { style: 'margin-top:8px;display:flex;flex-wrap:wrap;gap:8px' },
-      ...photos.map(p => el('a', {
+  const canAddPhoto = !isLocked() && (
+    isPi() || isDataManager() ||
+    (isSurveyor() && state.plot.createdBy === state.user.uid)
+  );
+  if (photos.length > 0 || canAddPhoto) {
+    const photoBar = el('div', { style: 'margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center' });
+    photos.forEach(p => {
+      photoBar.appendChild(el('a', {
         href: p.url, target: '_blank', rel: 'noopener',
         style: 'display:inline-block;line-height:0', title: p.name || '照片'
       },
@@ -856,8 +1084,15 @@ async function renderPlotDetail(root, projectId, plotId) {
           src: p.url, loading: 'lazy',
           style: 'width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #d6d3d1'
         })
-      ))
-    );
+      ));
+    });
+    if (canAddPhoto) {
+      photoBar.appendChild(el('button', {
+        type: 'button',
+        style: 'width:80px;height:80px;border:2px dashed #a8a29e;border-radius:4px;background:#fafaf9;color:#57534e;font-size:12px;cursor:pointer;line-height:1.2',
+        onclick: () => forms.quickAddPhoto(state.project, state.plot)
+      }, '📷 加照片'));
+    }
     $('[data-bind="plot.code"]').parentElement.appendChild(photoBar);
   }
 
@@ -931,7 +1166,10 @@ function renderTreeList(snap, projectId, plotId) {
     sumH += t.height_m || 0;
     const v = t.vitality;
     const vlabel = { healthy: '健康', weak: '衰弱', 'standing-dead': '枯立', fallen: '倒伏' }[v] || v;
-    const speciesCell = el('td', { html: t.speciesZh + (t.conservationGrade ? ' ⚠' : '') + ' ' + qaBadge(t.qaStatus) });
+    // v1.6.13：照片 indicator（📷 N）顯示在樹種後面
+    const photoCount = (t.photos || []).length;
+    const photoTag = photoCount > 0 ? ` <span style="font-size:11px;color:#57534e">📷${photoCount}</span>` : '';
+    const speciesCell = el('td', { html: t.speciesZh + (t.conservationGrade ? ' ⚠' : '') + photoTag + ' ' + qaBadge(t.qaStatus) });
     if (canQA() && !isLocked()) {
       appendQaButtons(speciesCell, plotId, { coll: 'trees', id: d.id });
     }

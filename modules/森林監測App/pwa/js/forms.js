@@ -1,6 +1,7 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, wgs84ToTwd97, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked } from './app.js';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked } from './app.js';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=1714';
 
 // ===== 內建樹種字典（v1.1：~100 種台灣常見種；v2 對接 species-conservation-lookup 拿全清單）=====
 const SPECIES = [
@@ -267,17 +268,299 @@ function photoUploader({ existing = [], onChange = null } = {}) {
   };
 }
 
+// ===== v1.6.11：plot detail 頁的「📷 加照片」獨立按鈕（不必進編輯表單，現場拍立傳）=====
+// 限：plot 建立者本人 OR PI/dataManager；且專案未 Lock（client 端先擋，Rules 會再驗）
+// 行為：直接觸發系統相機/相簿 → 上傳 → updateDoc plot.photos → location.reload() 重繪
+export async function quickAddPhoto(project, plot) {
+  if (!plot || !plot.id) { toast('找不到樣區資訊'); return; }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.capture = 'environment';
+  input.multiple = true;
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  document.body.appendChild(input);
+
+  const cleanup = () => { if (input.parentNode) input.parentNode.removeChild(input); };
+
+  input.addEventListener('change', async () => {
+    const files = Array.from(input.files || []);
+    cleanup();
+    if (!files.length) return;
+
+    const valid = files.filter(f => {
+      if (!f.type.startsWith('image/')) { toast(`忽略非圖片：${f.name}`); return false; }
+      if (f.size > 5 * 1024 * 1024) { toast(`過大（>5MB）：${f.name}`); return false; }
+      return true;
+    });
+    if (!valid.length) return;
+
+    toast(`上傳中（${valid.length} 張）...`, 8000);
+    try {
+      const newPhotos = [];
+      for (const file of valid) {
+        const ext = (file.name.match(/\.[a-zA-Z0-9]+$/) || ['.jpg'])[0].toLowerCase();
+        const ts = Date.now();
+        const rand = Math.random().toString(36).slice(2, 8);
+        const path = `projects/${project.id}/plots/${plot.id}/plot-${ts}-${rand}${ext}`;
+        const r = fb.storageRef(fb.storage, path);
+        await fb.uploadBytes(r, file, { contentType: file.type });
+        const url = await fb.getDownloadURL(r);
+        newPhotos.push({
+          url, path, name: file.name, size: file.size, contentType: file.type,
+          uploadedAt: new Date(), uploadedBy: state.user.uid
+        });
+      }
+      const merged = [...(plot.photos || []), ...newPhotos];
+      const updates = { photos: merged, updatedAt: fb.serverTimestamp() };
+      // 若 surveyor 補照片給自己被 flag/reject 的 plot → qaStatus 自動回 pending（一致 Bug #3 邏輯）
+      if (plot.createdBy === state.user.uid && ['flagged', 'rejected'].includes(plot.qaStatus)) {
+        updates.qaStatus = 'pending';
+        updates.qaMarkedBy = null;
+        updates.qaMarkedAt = null;
+      }
+      await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id), updates);
+      toast(`已新增 ${valid.length} 張照片` + (updates.qaStatus === 'pending' ? '（重新送審）' : ''));
+      setTimeout(() => location.reload(), 800);  // 等 toast 顯示完再重整
+    } catch (e) {
+      console.error('quickAddPhoto failed:', e);
+      toast('上傳失敗：' + e.message);
+    }
+  });
+
+  input.click();
+}
+
+// ===== v1.6.19：封存 / 解封存 — 真實案件結束後使用，資料保留只是從作用中清單移除 =====
+export async function archiveProject(project) {
+  if (!confirm(
+    `封存專案「${project.name}」（${project.code}）？\n\n` +
+    `✓ 所有資料保留在 Firebase 雲端（不會刪除）\n` +
+    `✓ 自動 Lock，沒人能再寫入\n` +
+    `✓ 從預設「我的專案」清單移除（仍可從「顯示已封存」查看）\n\n` +
+    `適用：案件結束、研究結案。仍可隨時解封存還原。`
+  )) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), {
+      archived: true,
+      locked: true,
+      lockedAt: fb.serverTimestamp(),
+      lockedBy: state.user.uid,
+      archivedAt: fb.serverTimestamp(),
+      archivedBy: state.user.uid
+    });
+    toast(`已封存「${project.name}」`);
+  } catch (e) { toast('封存失敗：' + e.message); }
+}
+
+export async function unarchiveProject(project) {
+  if (!confirm(
+    `解封存「${project.name}」？\n\n` +
+    `✓ 還原為作用中專案\n` +
+    `✓ 自動 Unlock（PI 可重新編輯）\n\n` +
+    `若要繼續封存狀態（資料不可改），請手動 Lock。`
+  )) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), {
+      archived: false,
+      locked: false,
+      lockedAt: null,
+      lockedBy: null
+    });
+    toast(`已解封存「${project.name}」`);
+  } catch (e) { toast('解封存失敗：' + e.message); }
+}
+
+// ===== v1.6.19：admin 永久刪除（級聯刪除所有 plots / trees / regen + Storage 照片）=====
+// 安全閘門（依序）：
+//   (1) 必須先「封存」此專案（archived=true）才允許永久刪除 — 強制至少二步驟思考
+//   (2) 客製 modal 必須勾選「我已匯出資料備份」 — 提醒先匯出 XLSX/CSV
+//   (3) 必須輸入專案代碼確認 — 防誤刪
+// Storage Rules `allow delete`（v1.6.0 已加）；Firestore Rules `allow delete: if isSystemAdmin()`
+export async function deleteProjectCascade(project) {
+  if (!project.archived) {
+    toast('請先「封存」此專案，封存後才能永久刪除');
+    return;
+  }
+
+  // 客製確認 modal（取代 prompt + confirm）
+  const confirmed = await new Promise(resolve => {
+    const f = el('form', { class: 'space-y-3' },
+      el('p', { class: 'text-sm font-medium' }, `永久刪除「${project.name}」（${project.code}）`),
+      el('p', { class: 'text-sm text-red-700 bg-red-50 p-2 rounded' },
+        '⚠️ 將連同所有樣區、立木、自然更新、上傳照片一併刪除，**無法復原**。'),
+      el('label', { class: 'flex items-start gap-2 text-sm' },
+        el('input', { type: 'checkbox', name: 'exported', required: 'true', class: 'mt-1' }),
+        el('span', {}, '我已從「匯出」分頁下載此專案的資料備份（XLSX / CSV）')
+      ),
+      el('div', { class: 'field' },
+        el('label', {}, `輸入專案代碼 `, el('code', { class: 'bg-stone-100 px-1' }, project.code), ` 確認：`),
+        el('input', { type: 'text', name: 'code', required: 'true', autocomplete: 'off',
+          class: 'border rounded px-2 py-1 w-full mt-1' })
+      ),
+      el('div', { class: 'flex gap-2 pt-2' },
+        el('button', { type: 'submit', class: 'flex-1 bg-red-600 text-white py-2 rounded' }, '永久刪除'),
+        el('button', { type: 'button', class: 'flex-1 border py-2 rounded',
+          onclick: () => { closeModal(); resolve(false); } }, '取消')
+      )
+    );
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(f);
+      if (fd.get('code').trim() !== project.code) {
+        toast('代碼不符');
+        return;
+      }
+      closeModal();
+      resolve(true);
+    });
+    openModal('永久刪除專案', f);
+  });
+  if (!confirmed) return;
+
+  toast('刪除中...', 30000);
+  try {
+    const projectId = project.id;
+    // (1) 列出所有 plots
+    const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', projectId, 'plots'));
+    let plotCount = 0, treeCount = 0, regenCount = 0, photoCount = 0;
+
+    for (const plotDoc of plotsSnap.docs) {
+      const plotId = plotDoc.id;
+
+      // (a) 刪 trees（含 photos）
+      const treesSnap = await fb.getDocs(fb.collection(fb.db, 'projects', projectId, 'plots', plotId, 'trees'));
+      for (const td of treesSnap.docs) {
+        await fb.deleteDoc(td.ref);
+        treeCount++;
+      }
+
+      // (b) 刪 regeneration
+      const regenSnap = await fb.getDocs(fb.collection(fb.db, 'projects', projectId, 'plots', plotId, 'regeneration'));
+      for (const rd of regenSnap.docs) {
+        await fb.deleteDoc(rd.ref);
+        regenCount++;
+      }
+
+      // (c) 刪 plot 與其下所有 Storage 照片（用 listAll 抓 prefix 一網打盡 plot + tree 照片）
+      try {
+        const list = await fb.listAll(fb.storageRef(fb.storage, `projects/${projectId}/plots/${plotId}`));
+        for (const item of list.items) {
+          try { await fb.deleteObject(item); photoCount++; }
+          catch (e) { console.warn('刪照片失敗', item.fullPath, e.code); }
+        }
+      } catch (e) { console.warn('listAll 失敗', e); }
+
+      // (d) 刪 plot doc
+      await fb.deleteDoc(plotDoc.ref);
+      plotCount++;
+    }
+
+    // (2) 刪 project doc
+    await fb.deleteDoc(fb.doc(fb.db, 'projects', projectId));
+
+    toast(`已刪除：${plotCount} 樣區 / ${treeCount} 立木 / ${regenCount} 更新 / ${photoCount} 照片`, 5000);
+    setTimeout(() => { location.hash = ''; location.reload(); }, 1500);
+  } catch (e) {
+    console.error('deleteProjectCascade failed:', e);
+    toast('刪除失敗：' + e.message);
+  }
+}
+
 // ===== 專案表單 =====
 // v1.5：admin 建空殼 + 指派 PI 的 email；自動填 memberUids、預設 methodology
 export function openProjectForm(existing = null) {
+  // v1.7.1：結構化代碼輸入 — 編輯既有專案時保留原 code（不允許改）
+  const isEdit = !!existing;
+  const currentYear = new Date().getFullYear();
+
+  // 類型 select
+  const typeSel = el('select', { name: 'type', required: 'true', class: 'border rounded px-2 py-1 w-full' },
+    el('option', { value: '' }, '— 選擇類型 —'),
+    ...TYPE_CODES.map(t => el('option', { value: t.code }, `${t.code} — ${t.label}`))
+  );
+  // 單位 select（依 group 分組）
+  const agencySel = el('select', { name: 'agency', required: 'true', class: 'border rounded px-2 py-1 w-full' });
+  agencySel.appendChild(el('option', { value: '' }, '— 選擇單位 —'));
+  const grouped = agenciesByGroup();
+  for (const [grp, items] of Object.entries(grouped)) {
+    const og = document.createElement('optgroup');
+    og.label = grp;
+    items.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.code;
+      opt.textContent = `${a.code} — ${a.label}`;
+      og.appendChild(opt);
+    });
+    agencySel.appendChild(og);
+  }
+  const yearInput = el('input', { type: 'number', name: 'year', min: '2020', max: '2100', value: currentYear,
+    required: 'true', class: 'border rounded px-2 py-1 w-full' });
+  const seqInput = el('input', { type: 'text', name: 'seq', readonly: 'true', placeholder: '自動產生',
+    class: 'border rounded px-2 py-1 w-full bg-stone-50 text-stone-600' });
+  const codePreview = el('div', {
+    class: 'bg-blue-50 border border-blue-200 rounded p-2 text-sm font-mono text-center'
+  }, '請填類型 / 單位 / 年度');
+
+  // 自動算流水號
+  let cachedProjectsSnap = null;
+  async function ensureProjectsSnap() {
+    if (cachedProjectsSnap) return cachedProjectsSnap;
+    const s = await fb.getDocs(fb.collection(fb.db, 'projects'));
+    cachedProjectsSnap = s.docs;
+    return cachedProjectsSnap;
+  }
+  async function updateCodePreview() {
+    const t = typeSel.value;
+    const a = agencySel.value;
+    const y = yearInput.value;
+    if (!t || !a || !y) {
+      codePreview.textContent = '請填類型 / 單位 / 年度';
+      seqInput.value = '';
+      return;
+    }
+    const prefix = `${t}-${a}-${y}-`;
+    const docs = await ensureProjectsSnap();
+    const seq = nextSequence(docs, prefix);
+    seqInput.value = seq;
+    codePreview.textContent = buildProjectCode(t, a, y, seq);
+  }
+  typeSel.addEventListener('change', updateCodePreview);
+  agencySel.addEventListener('change', updateCodePreview);
+  yearInput.addEventListener('change', updateCodePreview);
+
   const f = el('form', { class: 'space-y-2' },
-    field({ label: '案件代碼', name: 'code', required: true, value: existing?.code || '', placeholder: 'DEMO / LHC-2026' }),
+    isEdit
+      ? el('div', { class: 'field' },
+          el('label', {}, '案件代碼'),
+          el('div', { class: 'bg-stone-100 px-2 py-1 rounded text-sm font-mono' }, existing.code),
+          el('p', { class: 'text-xs text-stone-500 mt-1' }, '代碼建立後不可改')
+        )
+      : el('div', { class: 'space-y-2' },
+          el('div', { class: 'field' }, el('label', {}, '計畫類型 ', el('span', { class: 'req' }, '*')), typeSel),
+          el('div', { class: 'field' }, el('label', {}, '委託 / 執行單位 ', el('span', { class: 'req' }, '*')), agencySel),
+          el('div', { class: 'field-row' },
+            el('div', { class: 'field' }, el('label', {}, '年度 ', el('span', { class: 'req' }, '*')), yearInput),
+            el('div', { class: 'field' }, el('label', {}, '流水號（自動）'), seqInput)
+          ),
+          el('div', { class: 'field' },
+            el('label', {}, '專案代碼 預覽'),
+            codePreview,
+            el('p', { class: 'text-xs text-stone-500 mt-1' }, '系統自動依 (類型,單位,年度) 找未用過的最小編號')
+          )
+        ),
     field({ label: '專案名稱', name: 'name', required: true, value: existing?.name || '', placeholder: '示範林班' }),
     field({ label: '描述', name: 'description', type: 'textarea', value: existing?.description || '' }),
-    field({ label: 'PI（計畫主持人）email', name: 'piEmail', required: true,
-      value: existing ? '' : state.user.email,
-      placeholder: '若 admin 自己當 PI 留預設即可' }),
-    el('p', { class: 'text-xs text-stone-500' }, '⚠️ PI 必須先用該 email 登入過一次本系統。建好專案後，PI 可在「設計」分頁設定方法學、在「設定」分頁邀請更多成員。'),
+    // v1.7.0：支援多 PI（comma 或換行分隔多個 email）
+    isEdit
+      ? null
+      : field({ label: 'PI（計畫主持人）email — 多人請用「,」或換行分隔', name: 'piEmail', type: 'textarea', rows: 2, required: true,
+          value: state.user.email,
+          placeholder: 'professor1@example.com, professor2@example.com' }),
+    isEdit
+      ? null
+      : el('p', { class: 'text-xs text-stone-500' }, '⚠️ 每個 PI 必須先用該 email 登入過一次本系統。建好專案後，PI 可在「設計」分頁設定方法學、在「設定」分頁邀請更多成員。'),
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
       el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
@@ -286,38 +569,61 @@ export function openProjectForm(existing = null) {
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
-    const piEmail = fd.get('piEmail').trim();
-    // 找 PI 的 uid
-    const usnap = await fb.getDocs(fb.query(fb.collection(fb.db, 'users'), fb.where('email', '==', piEmail)));
-    if (usnap.empty) { toast(`找不到 email = ${piEmail} 的使用者，請對方先登入過一次系統`); return; }
-    const piUid = usnap.docs[0].id;
+
+    if (isEdit) {
+      // 編輯：只更新 name / description
+      try {
+        await fb.updateDoc(fb.doc(fb.db, 'projects', existing.id), {
+          name: fd.get('name').trim(),
+          description: fd.get('description').trim() || ''
+        });
+        toast('已更新');
+        closeModal();
+      } catch (e) { toast('更新失敗：' + e.message); }
+      return;
+    }
+
+    // 新建專案：v1.7.1 結構化代碼
+    const t = fd.get('type'), a = fd.get('agency'), y = fd.get('year'), seq = fd.get('seq');
+    if (!t || !a || !y || !seq) { toast('請完整選擇類型 / 單位 / 年度'); return; }
+    const code = buildProjectCode(t, a, y, seq);
+    // 重新驗證流水號（避免 race：他人剛建同 prefix）
+    const docs = await ensureProjectsSnap();
+    if (docs.some(d => d.data().code === code)) {
+      toast(`代碼 ${code} 已被使用，請重新打開表單以取得新流水號`);
+      return;
+    }
+
+    const piEmails = fd.get('piEmail').split(/[,;\n\s]+/).map(s => s.trim()).filter(Boolean);
+    if (piEmails.length === 0) { toast('至少需要 1 位 PI'); return; }
+    const piUids = [];
+    for (const email of piEmails) {
+      const usnap = await fb.getDocs(fb.query(fb.collection(fb.db, 'users'), fb.where('email', '==', email)));
+      if (usnap.empty) { toast(`找不到 email = ${email} 的使用者，請對方先登入過一次系統`); return; }
+      piUids.push(usnap.docs[0].id);
+    }
+    const members = {};
+    piUids.forEach(uid => { members[uid] = 'pi'; });
     const data = {
-      code: fd.get('code').trim(),
+      code,
+      codeMeta: { type: t, agency: a, year: parseInt(y, 10), seq },  // v1.7.1：結構化資訊備查
       name: fd.get('name').trim(),
       description: fd.get('description').trim() || '',
       coordinateSystem: 'TWD97_TM2',
-      pi: piUid,
-      members: { [piUid]: 'pi' },
-      memberUids: [piUid],
+      pi: piUids[0],
+      pis: piUids,
+      members,
+      memberUids: piUids,
       methodology: { ...DEFAULT_METHODOLOGY },
       locked: false,
       createdBy: state.user.uid,
       createdAt: fb.serverTimestamp()
     };
     try {
-      if (existing) {
-        await fb.updateDoc(fb.doc(fb.db, 'projects', existing.id), {
-          name: data.name, description: data.description
-        });
-        toast('已更新');
-      } else {
-        const ref = await fb.addDoc(fb.collection(fb.db, 'projects'), data);
-        toast('已建立空殼專案，請通知 PI 進入設定方法學');
-        closeModal();
-        location.hash = `#/p/${ref.id}`;
-        return;
-      }
+      const ref = await fb.addDoc(fb.collection(fb.db, 'projects'), data);
+      toast(`已建立 ${code}（${piUids.length} 位 PI）`);
       closeModal();
+      location.hash = `#/p/${ref.id}`;
     } catch (e) { toast('建立失敗：' + e.message); }
   });
   openModal(existing ? '編輯專案' : '新專案', f);
@@ -389,7 +695,113 @@ export function openMethodologyForm(project) {
   openModal('編輯方法學', f);
 }
 
-// ===== QA 標記（pi/dataManager 用）=====
+// ===== v1.7.0：PI 批量建立空殼樣區（預先規劃 + 分派工作的入口）=====
+// Code 規則：{projectCode}[-{林班}]-{NNN}（NNN 補零三位數）
+// 空殼 = 無 GPS / 無 area / assignedTo=null / qaStatus='shell'（不會出現在待審核）
+export async function openBatchPlotsForm(project) {
+  const meth = project.methodology || DEFAULT_METHODOLOGY;
+  const previewBox = el('div', { class: 'bg-stone-50 rounded p-2 text-xs text-stone-700 my-2' });
+
+  const f = el('form', { class: 'space-y-2' },
+    el('p', { class: 'text-sm text-stone-600' },
+      `批量建立預先規劃的空殼樣區。Surveyor 被指派後可填 GPS 與資料。`),
+    el('div', { class: 'field-row' },
+      field({ label: '林班（可留空）', name: 'forestUnit', value: '', placeholder: '123-2' }),
+      field({ label: '起始編號', name: 'startNum', type: 'number', step: '1', min: '1', required: true, value: 1 })
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '建立數量', name: 'count', type: 'number', step: '1', min: '1', max: '500', required: true, value: 10 }),
+      field({ label: '預設面積 (m²)', name: 'area_m2',
+        options: (meth.plotAreaOptions || [400, 500, 1000]).map(a => ({ value: a, label: `${a} m²` })),
+        value: meth.plotAreaOptions?.[0] || 500, required: true })
+    ),
+    field({ label: '預設形狀', name: 'shape',
+      options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }],
+      value: meth.plotShape || 'circle', required: true }),
+    previewBox,
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '建立'),
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+
+  function updatePreview() {
+    const fd = new FormData(f);
+    const fu = fd.get('forestUnit').trim();
+    const start = parseInt(fd.get('startNum'), 10) || 1;
+    const count = parseInt(fd.get('count'), 10) || 1;
+    const codeOf = (n) => `${project.code}${fu ? '-' + fu : ''}-${String(n).padStart(3, '0')}`;
+    if (count <= 0) { previewBox.textContent = ''; return; }
+    if (count === 1) {
+      previewBox.innerHTML = `將建立：<b>${codeOf(start)}</b>`;
+    } else {
+      previewBox.innerHTML = `將建立 <b>${count}</b> 個樣區：<b>${codeOf(start)}</b> ～ <b>${codeOf(start + count - 1)}</b>`;
+    }
+  }
+  f.addEventListener('input', updatePreview);
+  updatePreview();
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const fu = fd.get('forestUnit').trim() || null;
+    const start = parseInt(fd.get('startNum'), 10);
+    const count = parseInt(fd.get('count'), 10);
+    const area = parseInt(fd.get('area_m2'), 10);
+    const shape = fd.get('shape');
+    if (count > 100 && !confirm(`建立 ${count} 個空殼？建議分批以免一次寫太多`)) return;
+
+    const submitBtn = f.querySelector('button[type=submit]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '建立中...';
+    try {
+      const colRef = fb.collection(fb.db, 'projects', project.id, 'plots');
+      let success = 0;
+      for (let i = 0; i < count; i++) {
+        const n = start + i;
+        const code = `${project.code}${fu ? '-' + fu : ''}-${String(n).padStart(3, '0')}`;
+        await fb.addDoc(colRef, {
+          code,
+          forestUnit: fu,
+          shape,
+          area_m2: area,
+          location: null,
+          locationTWD97: null,
+          locationAccuracy_m: null,
+          establishedAt: null,
+          notes: null,
+          assignedTo: null,
+          qaStatus: 'shell',  // v1.7.0：空殼狀態，不參與 QA 統計
+          createdBy: state.user.uid,
+          createdAt: fb.serverTimestamp(),
+          updatedAt: fb.serverTimestamp(),
+          insideBoundary: true
+        });
+        success++;
+      }
+      toast(`已建立 ${success} 個空殼樣區`);
+      closeModal();
+    } catch (e) {
+      toast('建立失敗：' + e.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '建立';
+    }
+  });
+  openModal('批量建立空殼樣區', f);
+}
+
+// ===== v1.7.0：批量指派樣區給 surveyor =====
+export async function assignPlotToSurveyor(project, plot, surveyorUid) {
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id), {
+      assignedTo: surveyorUid || null,
+      updatedAt: fb.serverTimestamp()
+    });
+    toast(surveyorUid ? '已指派' : '已解除指派');
+  } catch (e) { toast('指派失敗：' + e.message); }
+}
+
+// ===== QA 標記（pi 用）=====
 export async function markQA(project, plotId, subDoc, status) {
   const labels = { verified: '通過', flagged: '退回修正', rejected: '駁回' };
   const comment = status === 'verified' ? '' : (prompt(`為什麼${labels[status]}？（簡短說明）`) || '');
@@ -590,10 +1002,15 @@ export function openTreeForm(project, plot, existing = null) {
   function updateCalc() {
     const dbh = parseFloat(f.querySelector('[name=dbh_cm]').value);
     const h = parseFloat(f.querySelector('[name=height_m]').value);
-    const sci = SPECIES.find(x => x.zh === speciesInput.value)?.sci || '';
+    const zh = speciesInput.value;
+    const sci = SPECIES.find(x => x.zh === zh)?.sci || '';
     if (!dbh || !h) { calcOut.textContent = '輸入 DBH 與樹高即時試算'; return; }
-    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesSci: sci });
-    calcOut.innerHTML = `斷面積 ${m.basalArea_m2} m² ｜ 材積 ${m.volume_m3} m³ ｜ 碳量 ${m.carbon_kg} kg`;
+    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh: zh, speciesSci: sci });
+    // v1.6.20：顯示樹種別參數來源 + 完整碳/CO2 計算
+    calcOut.innerHTML =
+      `<div>斷面積 <b>${m.basalArea_m2}</b> m² ｜ 幹材積 <b>${m.volume_m3}</b> m³</div>` +
+      `<div>全株生物量 <b>${m.biomass_kg}</b> kg ｜ 碳蓄積 <b>${m.carbon_kg}</b> kg ｜ CO₂ 當量 <b>${m.co2_kg}</b> kg</div>` +
+      `<div class="text-[10px] text-stone-500 mt-1">${speciesParamsLabel(zh, sci)}</div>`;
   }
 
   // 病蟲害 checkbox（v1.6.9：inline style 寫死在 HTML，不依賴 CSS file，避開任何快取問題）
@@ -604,6 +1021,11 @@ export function openTreeForm(project, plot, existing = null) {
   pestBox.innerHTML = PEST_OPTIONS.map(p =>
     `<label style="${labStyle}"><input type="checkbox" name="pest" value="${p}"${existingPests.has(p) ? ' checked' : ''} style="${inpStyle}"> ${p}</label>`
   ).join('');
+
+  // v1.6.13：立木照片上傳（拍特徵：樹皮、葉、花果、整體外觀）
+  const treePhotoUp = photoUploader({ existing: existing?.photos || [] });
+  const treePhotoLabel = el('label', {}, '立木照片',
+    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（樹皮 / 葉 / 花果 / 整體，≤5MB / 張）'));
 
   const f = el('form', { class: 'space-y-2' },
     speciesList,
@@ -637,6 +1059,7 @@ export function openTreeForm(project, plot, existing = null) {
         { value: 'paint', label: '噴漆' },
         { value: 'tag', label: '號牌' }
       ], value: existing?.marking || 'none' }),
+    el('div', { class: 'field' }, treePhotoLabel, treePhotoUp.element),
     field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
@@ -657,7 +1080,7 @@ export function openTreeForm(project, plot, existing = null) {
     const sp = SPECIES.find(x => x.zh === speciesZh) || {};
     const dbh = parseFloat(fd.get('dbh_cm'));
     const h = parseFloat(fd.get('height_m'));
-    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesSci: sp.sci });
+    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh, speciesSci: sp.sci });
     const data = {
       treeNum: parseInt(fd.get('treeNum'), 10),
       speciesZh,
@@ -673,21 +1096,40 @@ export function openTreeForm(project, plot, existing = null) {
       ...m,
       updatedAt: fb.serverTimestamp()
     };
+    const submitBtn = f.querySelector('button[type=submit]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '儲存中...';
     try {
       const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees');
+      // v1.6.13：先建/更新 tree 取得 id，再上傳照片，最後寫回 photos URL
+      let treeId;
       if (existing) {
+        treeId = existing.id;
         applySurveyorReQaReset(data, existing);
-        await fb.updateDoc(fb.doc(colRef, existing.id), data);
-        toast(data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新');
+        await fb.updateDoc(fb.doc(colRef, treeId), data);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
-        data.qaStatus = 'pending';  // v1.5
-        await fb.addDoc(colRef, data);
-        toast('已建立（待審核）');
+        data.qaStatus = 'pending';
+        const ref = await fb.addDoc(colRef, data);
+        treeId = ref.id;
       }
+      if (treePhotoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
+        if (treePhotoUp.count > 0) submitBtn.textContent = '上傳照片中...';
+        const photos = await treePhotoUp.commit({
+          projectId: project.id, plotId: plot.id, prefix: `tree-${treeId}`
+        });
+        await fb.updateDoc(fb.doc(colRef, treeId), { photos });
+      }
+      toast(existing
+        ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
+        : '已建立（待審核）');
       closeModal();
-    } catch (e) { toast('儲存失敗：' + e.message); }
+    } catch (e) {
+      toast('儲存失敗：' + e.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '儲存';
+    }
   });
   openModal(existing ? `編輯立木 #${existing.treeNum}` : '新立木', f);
 }
@@ -785,7 +1227,7 @@ export async function seedDemoData(project) {
         const sp = SPECIES[Math.floor(Math.random() * 12)];
         const dbh = +(15 + Math.random() * 50).toFixed(1);
         const h = +(8 + Math.random() * 15).toFixed(1);
-        const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesSci: sp.sci });
+        const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh: sp.zh, speciesSci: sp.sci });
         const vitOpts = ['healthy', 'healthy', 'healthy', 'weak', 'standing-dead'];
         await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots', plotRef.id, 'trees'), {
           treeNum: i,

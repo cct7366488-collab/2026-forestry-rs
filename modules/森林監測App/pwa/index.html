@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=1610">
+  <link rel="stylesheet" href="style.css?v=1714">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -96,19 +96,19 @@
 
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
       <a href="#" data-tab="plots" class="tab-link px-3 py-2 border-b-2 border-forest-700 font-medium text-sm">樣區</a>
-      <a href="#" data-tab="design" data-role-show="pi-edit,dataManager,surveyor,reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設計</a>
-      <a href="#" data-tab="pending" data-role-show="pi,dataManager" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">待審核 <span id="pending-count" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
+      <a href="#" data-tab="design" data-role-show="pi-edit,surveyor,reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設計</a>
+      <a href="#" data-tab="pending" data-role-show="pi" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">待審核 <span id="pending-count" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
       <a href="#" data-tab="myflagged" data-role-show="surveyor" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">我被 flag <span id="myflagged-count" class="ml-1 text-xs bg-red-100 text-red-800 px-1.5 rounded-full"></span></a>
       <a href="#" data-tab="dashboard" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">儀表板</a>
       <a href="#" data-tab="map" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">地圖</a>
-      <a href="#" data-tab="export" data-role-show="pi,dataManager,reviewer" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">匯出</a>
-      <a href="#" data-tab="settings" data-role-show="pi" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設定</a>
+      <a href="#" data-tab="export" data-role-show="pi,reviewer" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">匯出</a>
+      <a href="#" data-tab="settings" data-role-show="pi,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設定</a>
     </nav>
 
     <section data-tab-content="plots">
       <div class="flex justify-between items-center mb-3">
         <h2 class="text-lg font-semibold">樣區清單 <span id="plot-progress" class="text-sm text-stone-500"></span></h2>
-        <button id="btn-new-plot" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,dataManager,surveyor">＋ 新樣區</button>
+        <button id="btn-new-plot" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新樣區</button>
       </div>
       <div id="lock-banner" class="hidden bg-stone-100 border border-stone-300 text-stone-700 text-sm px-3 py-2 rounded mb-3">
         🔒 本專案資料已鎖定（PI 已 Lock）— 所有寫入操作停用
@@ -120,7 +120,13 @@
       <h2 class="text-lg font-semibold mb-3">方法學設計</h2>
       <p class="text-sm text-stone-600 mb-4">PI 設定本專案的樣區規格、必填欄位、調查模組。surveyor 加新樣區時會自動套用。</p>
       <div id="methodology-display" class="bg-white rounded-lg shadow p-4 space-y-3 text-sm"></div>
-      <button id="btn-edit-methodology" class="mt-3 bg-forest-700 text-white px-4 py-2 rounded text-sm hidden" data-role-show="pi">編輯方法學</button>
+      <div class="mt-3 flex gap-2 flex-wrap">
+        <button id="btn-edit-methodology" class="bg-forest-700 text-white px-4 py-2 rounded text-sm hidden" data-role-show="pi">編輯方法學</button>
+        <button id="btn-batch-plots" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hidden" data-role-show="pi">＋ 批量建立空殼樣區</button>
+      </div>
+      <p class="text-xs text-stone-500 mt-2" data-role-show="pi">
+        💡 工作流：批量建立空殼 → 樣區分頁逐一指派給 surveyor → surveyor 現場填 GPS / 立木資料
+      </p>
     </section>
 
     <section data-tab-content="pending" class="hidden">
@@ -176,6 +182,8 @@
             <option value="pi">主持人</option>
             <option value="reviewer">審查委員</option>
           </select>
+          <!-- v1.7.0：dataManager 角色已移除（PI 一肩扛 QA 與資料管理）。舊資料自動 migrate -->
+
           <button type="submit" class="bg-forest-700 text-white px-3 py-1 rounded">加入</button>
         </form>
         <p class="text-xs text-stone-500 mt-2">v1：必須先讓對方登入過一次（建立 /users/{uid}），主持人才能加。</p>
@@ -217,7 +225,7 @@
     <section data-subtab-content="trees">
       <div class="flex justify-between items-center mb-3">
         <h2 class="text-lg font-semibold">立木列表 <span id="tree-count" class="text-sm text-stone-500"></span></h2>
-        <button id="btn-new-tree" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,dataManager,surveyor">＋ 新立木</button>
+        <button id="btn-new-tree" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新立木</button>
       </div>
       <div id="tree-summary" class="bg-white rounded-lg shadow p-3 mb-3 text-sm grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
       <div id="tree-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
@@ -226,7 +234,7 @@
     <section data-subtab-content="regen" class="hidden">
       <div class="flex justify-between items-center mb-3">
         <h2 class="text-lg font-semibold">自然更新記錄</h2>
-        <button id="btn-new-regen" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,dataManager,surveyor">＋ 新記錄</button>
+        <button id="btn-new-regen" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新記錄</button>
       </div>
       <div id="regen-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
     </section>
@@ -256,6 +264,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=1610"></script>
+<script type="module" src="js/app.js?v=1714"></script>
 </body>
 </html>

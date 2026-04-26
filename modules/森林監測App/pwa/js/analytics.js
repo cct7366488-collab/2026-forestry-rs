@@ -1,6 +1,6 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName } from './app.js';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 
 // 共用：抓取本專案所有樣區與立木
 async function fetchAllData(project) {
@@ -33,6 +33,7 @@ export async function renderDashboard(project) {
   const totalBA = trees.reduce((s, t) => s + (t.basalArea_m2 || 0), 0);
   const totalV = trees.reduce((s, t) => s + (t.volume_m3 || 0), 0);
   const totalC = trees.reduce((s, t) => s + (t.carbon_kg || 0), 0);
+  const totalCO2 = trees.reduce((s, t) => s + (t.co2_kg || 0), 0);  // v1.6.20
   const cBox = $('#dashboard-summary');
   cBox.innerHTML = '';
   const kpis = [
@@ -41,7 +42,8 @@ export async function renderDashboard(project) {
     ['立木總數', totalTrees],
     ['總材積', `${totalV.toFixed(2)} m³`],
     ['總斷面積', `${totalBA.toFixed(2)} m²`],
-    ['總碳蓄積', `${(totalC / 1000).toFixed(2)} t`]
+    ['總碳蓄積', `${(totalC / 1000).toFixed(2)} t-C`],
+    ['總 CO₂ 當量', `${(totalCO2 / 1000).toFixed(2)} t-CO₂`]
   ];
   kpis.forEach(([k, v]) => cBox.appendChild(
     el('div', { class: 'bg-white rounded-lg shadow p-3' },
@@ -155,7 +157,7 @@ export async function renderMap(project) {
     // QA 狀態決定顏色
     const qaColor = { pending: '#a8a29e', verified: '#15803d', flagged: '#eab308', rejected: '#dc2626' };
     const dotColor = qaColor[p.qaStatus] || '#15803d';
-    const surveyorLabel = isReviewer() ? anonName(p.createdBy) : (p.createdBy || '').slice(0, 8);
+    const surveyorLabel = isReviewer() ? anonName(p.createdBy) : userLabel(p.createdBy, '—');
     const marker = L.circleMarker([lat, lng], {
       radius: 8,
       color: p.insideBoundary === false ? '#dc2626' : dotColor,
@@ -212,7 +214,9 @@ export async function exportXlsx(project) {
     標記: t.marking,
     斷面積_m2: t.basalArea_m2,
     材積_m3: t.volume_m3,
+    生物量_kg: t.biomass_kg || '',
     碳量_kg: t.carbon_kg,
+    CO2當量_kg: t.co2_kg || '',
     建立者: anonOrReal(t.createdBy),
     QA狀態: t.qaStatus || 'pending',
     QA評論: t.qaComment || '',
