@@ -59,12 +59,31 @@ export function canCollect() { return isPi() || isSurveyor() || isSystemAdmin();
 export function isLocked() { return state.project?.locked === true; }
 
 // 預設方法學（v1.5 新專案/無 methodology 的舊專案 fallback）
+// v2.0：擴展 understory（地被植物）/ soilCons（水土保持）兩模組可開關
 export const DEFAULT_METHODOLOGY = {
   targetPlotCount: 50,
   plotShape: 'circle',
   plotAreaOptions: [400, 500, 1000],
   required: { photos: false, branchHeight: false, pestSymptoms: false },
-  modules: { plot: true, tree: true, regeneration: true, understory: false, soil: false, disturbance: false },
+  modules: {
+    plot: true, tree: true, regeneration: true,
+    understory: false,    // v2.0：地被植物 5 點樣方法
+    soilCons: false,      // v2.0：水土保持 5 點觀測（取代舊 soil 命名）
+    wildlife: false,      // v2.1（未實作）
+    harvest: false,       // v2.2（未實作）
+    disturbance: false    // 預留
+  },
+  // v2.0：各模組獨立必填規則
+  understoryConfig: {
+    quadratSize: '1x1',           // '1x1' | '2x2' | '5x5'
+    quadratCodes: ['N', 'E', 'S', 'W', 'C'],
+    requirePhotos: true            // 樣方俯拍照片強制
+  },
+  soilConsConfig: {
+    stationCodes: ['N', 'E', 'S', 'W', 'C'],
+    requirePhotos: true,            // 定點照片強制（比對基礎）
+    eventTypes: ['routine', 'post-typhoon', 'post-rain', 'post-construction']
+  },
   description: ''
 };
 
@@ -751,6 +770,9 @@ async function renderProjectHome(root, projectId) {
   $('#btn-export-csv-plots').addEventListener('click', () => analytics.exportCsv(state.project, 'plots'));
   $('#btn-export-csv-trees').addEventListener('click', () => analytics.exportCsv(state.project, 'trees'));
   $('#btn-export-csv-regen').addEventListener('click', () => analytics.exportCsv(state.project, 'regeneration'));
+  // v2.0
+  $('#btn-export-csv-understory')?.addEventListener('click', () => analytics.exportCsv(state.project, 'understory'));
+  $('#btn-export-csv-soilcons')?.addEventListener('click', () => analytics.exportCsv(state.project, 'soilCons'));
 }
 
 async function refreshBadgeCounts(projectId) {
@@ -1120,6 +1142,28 @@ async function renderPlotDetail(root, projectId, plotId) {
     forms.openPlotForm(state.project, state.plot);
   });
 
+  // v2.0：依 methodology 顯示新 subtabs（地被植物 / 水土保持）
+  const mods = state.project.methodology?.modules || {};
+  const understoryTab = $('[data-subtab="understory"]');
+  const soilConsTab = $('[data-subtab="soilcons"]');
+  if (understoryTab) understoryTab.classList.toggle('hidden', !mods.understory);
+  if (soilConsTab) soilConsTab.classList.toggle('hidden', !mods.soilCons);
+
+  const btnNewUnderstory = $('#btn-new-understory');
+  const btnNewSoilCons = $('#btn-new-soilcons');
+  if (btnNewUnderstory) {
+    btnNewUnderstory.addEventListener('click', () => {
+      if (isLocked()) return toast('資料已 Lock');
+      forms.openUnderstoryForm(state.project, state.plot);
+    });
+  }
+  if (btnNewSoilCons) {
+    btnNewSoilCons.addEventListener('click', () => {
+      if (isLocked()) return toast('資料已 Lock');
+      forms.openSoilConsForm(state.project, state.plot);
+    });
+  }
+
   const treesRef = collection(db, 'projects', projectId, 'plots', plotId, 'trees');
   const unsubT = onSnapshot(query(treesRef, orderBy('treeNum', 'asc')), snap => {
     renderTreeList(snap, projectId, plotId);
@@ -1131,6 +1175,23 @@ async function renderPlotDetail(root, projectId, plotId) {
     renderRegenList(snap, projectId, plotId);
   });
   state.unsubscribers.push(unsubR);
+
+  // v2.0：地被植物 list 訂閱
+  if (mods.understory) {
+    const usRef = collection(db, 'projects', projectId, 'plots', plotId, 'understory');
+    const unsubU = onSnapshot(query(usRef, orderBy('surveyDate', 'desc')), snap => {
+      renderUnderstoryList(snap, projectId, plotId);
+    });
+    state.unsubscribers.push(unsubU);
+  }
+  // v2.0：水保 list 訂閱
+  if (mods.soilCons) {
+    const scRef = collection(db, 'projects', projectId, 'plots', plotId, 'soilCons');
+    const unsubS = onSnapshot(query(scRef, orderBy('surveyDate', 'desc')), snap => {
+      renderSoilConsList(snap, projectId, plotId);
+    });
+    state.unsubscribers.push(unsubS);
+  }
 }
 
 // v1.5.2：subDoc 列上的 QA 按鈕組（直接 append 三顆按鈕到 td，不包 span）
@@ -1254,4 +1315,96 @@ function bindData(root, prefix, data) {
     const val = data[key];
     node.textContent = val == null ? '' : String(val);
   });
+}
+
+// ===== v2.0：地被植物列表渲染 =====
+function renderUnderstoryList(snap, projectId, plotId) {
+  const list = $('#understory-list');
+  if (!list) return;
+  $('#understory-count') && ($('#understory-count').textContent = `（${snap.size} 樣方次）`);
+  if (snap.empty) {
+    list.innerHTML = '<p class="p-4 text-stone-500 text-sm">尚無地被樣方紀錄。</p>';
+    return;
+  }
+  const rows = snap.docs.map(d => {
+    const u = d.data();
+    const dateStr = u.surveyDate?.toDate ? u.surveyDate.toDate().toISOString().slice(0, 10) : (u.surveyDate ? new Date(u.surveyDate).toISOString().slice(0, 10) : '—');
+    const speciesCount = (u.species || []).length;
+    const invasiveCount = u.invasiveCount || 0;
+    const photoTag = (u.photos || []).length > 0 ? ` <span style="font-size:11px;color:#57534e">📷${(u.photos || []).length}</span>` : '';
+    const stationLabel = { N: '北', E: '東', S: '南', W: '西', C: '中' }[u.quadratCode] || u.quadratCode;
+    const speciesCell = el('td', { html: `${stationLabel} (${u.quadratSize})${photoTag} ${qaBadge(u.qaStatus)}` });
+    if (canQA() && !isLocked()) {
+      appendQaButtons(speciesCell, plotId, { coll: 'understory', id: d.id });
+    }
+    return el('tr', {
+      class: invasiveCount > 0 ? 'bg-orange-50' : '',
+      onclick: () => {
+        if (isLocked()) return toast('資料已 Lock');
+        forms.openUnderstoryForm(state.project, state.plot, { id: d.id, ...u });
+      }
+    },
+      el('td', {}, dateStr),
+      el('td', {}, u.surveyRound || '—'),
+      speciesCell,
+      el('td', {}, `${u.totalCoverage ?? 0}%`),
+      el('td', {}, String(speciesCount)),
+      el('td', {}, invasiveCount > 0 ? el('span', { class: 'text-orange-700 font-medium' }, `⚠ ${invasiveCount}`) : '0')
+    );
+  });
+  const tbl = el('table', { class: 'tbl' },
+    el('thead', {}, el('tr', {},
+      el('th', {}, '調查日'), el('th', {}, '場次'), el('th', {}, '位置 / QA'),
+      el('th', {}, '總覆蓋'), el('th', {}, '物種數'), el('th', {}, '入侵種')
+    )),
+    el('tbody', {}, ...rows)
+  );
+  list.innerHTML = '';
+  list.appendChild(tbl);
+}
+
+// ===== v2.0：水土保持列表渲染 =====
+function renderSoilConsList(snap, projectId, plotId) {
+  const list = $('#soilcons-list');
+  if (!list) return;
+  $('#soilcons-count') && ($('#soilcons-count').textContent = `（${snap.size} 筆）`);
+  if (snap.empty) {
+    list.innerHTML = '<p class="p-4 text-stone-500 text-sm">尚無水保紀錄。</p>';
+    return;
+  }
+  const rows = snap.docs.map(d => {
+    const s = d.data();
+    const dateStr = s.surveyDate?.toDate ? s.surveyDate.toDate().toISOString().slice(0, 10) : (s.surveyDate ? new Date(s.surveyDate).toISOString().slice(0, 10) : '—');
+    const stationLabel = { N: '北', E: '東', S: '南', W: '西', C: '中' }[s.stationCode] || s.stationCode;
+    const eventLabel = { 'routine': '例行', 'post-typhoon': '颱風後', 'post-rain': '豪雨後', 'post-construction': '工程後' }[s.eventType] || s.eventType;
+    const erosionColor = ['', '#16a34a', '#84cc16', '#eab308', '#f97316', '#dc2626'][s.erosionLevel] || '#a8a29e';
+    const photoTag = (s.photos || []).length > 0 ? ` <span style="font-size:11px;color:#57534e">📷${(s.photos || []).length}</span>` : '';
+    const stationCell = el('td', { html: `${stationLabel}${photoTag} ${qaBadge(s.qaStatus)}` });
+    if (canQA() && !isLocked()) {
+      appendQaButtons(stationCell, plotId, { coll: 'soilCons', id: d.id });
+    }
+    return el('tr', {
+      class: s.erosionLevel >= 4 ? 'bg-red-50' : '',
+      onclick: () => {
+        if (isLocked()) return toast('資料已 Lock');
+        forms.openSoilConsForm(state.project, state.plot, { id: d.id, ...s });
+      }
+    },
+      el('td', {}, dateStr),
+      el('td', {}, eventLabel),
+      stationCell,
+      el('td', {}, `${s.vegCoverage ?? 0}%`),
+      el('td', { html: `<span style="color:${erosionColor};font-weight:600">${s.erosionLevel}</span>` }),
+      el('td', {}, { good: '良好', ponding: '積水', scouring: '淘刷', blocked: '阻塞' }[s.drainage] || '—')
+    );
+  });
+  const tbl = el('table', { class: 'tbl' },
+    el('thead', {}, el('tr', {},
+      el('th', {}, '調查日'), el('th', {}, '事件'), el('th', {}, '點位 / QA'),
+      el('th', {}, '植覆'), el('th', {}, '沖蝕'), el('th', {}, '排水')
+    )),
+    el('tbody', {}, ...rows)
+  );
+  list.innerHTML = '';
+  list.appendChild(tbl);
 }

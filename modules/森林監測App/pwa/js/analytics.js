@@ -2,12 +2,14 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 
-// 共用：抓取本專案所有樣區與立木
+// 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保
 async function fetchAllData(project) {
   const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
   const plots = [];
   const trees = [];
   const regen = [];
+  const understory = [];   // v2.0
+  const soilCons = [];     // v2.0
   for (const pd of plotsSnap.docs) {
     const plot = { id: pd.id, ...pd.data() };
     plots.push(plot);
@@ -15,8 +17,17 @@ async function fetchAllData(project) {
     tSnap.forEach(td => trees.push({ id: td.id, plotId: pd.id, plotCode: plot.code, ...td.data() }));
     const rSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'regeneration'));
     rSnap.forEach(rd => regen.push({ id: rd.id, plotId: pd.id, plotCode: plot.code, ...rd.data() }));
+    // v2.0：地被 + 水保
+    try {
+      const uSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'understory'));
+      uSnap.forEach(ud => understory.push({ id: ud.id, plotId: pd.id, plotCode: plot.code, ...ud.data() }));
+    } catch {}
+    try {
+      const sSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'soilCons'));
+      sSnap.forEach(sd => soilCons.push({ id: sd.id, plotId: pd.id, plotCode: plot.code, ...sd.data() }));
+    } catch {}
   }
-  return { plots, trees, regen };
+  return { plots, trees, regen, understory, soilCons };
 }
 
 // 全域 chart instances（避免重畫時重疊）
@@ -25,7 +36,7 @@ function killChart(key) { if (_charts[key]) { _charts[key].destroy(); delete _ch
 
 // ===== Dashboard =====
 export async function renderDashboard(project) {
-  const { plots, trees } = await fetchAllData(project);
+  const { plots, trees, understory, soilCons } = await fetchAllData(project);
 
   // 摘要 KPI
   const totalArea = plots.reduce((s, p) => s + (p.area_m2 || 0), 0);
@@ -109,9 +120,32 @@ export async function renderDashboard(project) {
     }
   });
 
-  // QA 狀態（plots + trees 合計）
+  // v2.0：新增模組摘要 KPI（若啟用）
+  const mods = project.methodology?.modules || {};
+  if (mods.understory && understory.length > 0) {
+    const totalSpecies = understory.reduce((s, u) => s + (u.species || []).length, 0);
+    const totalInvasive = understory.reduce((s, u) => s + (u.invasiveCount || 0), 0);
+    const avgCov = understory.reduce((s, u) => s + (u.totalCoverage || 0), 0) / understory.length;
+    cBox.appendChild(el('div', { class: 'bg-white rounded-lg shadow p-3 col-span-2 sm:col-span-2 border-l-4 border-emerald-500' },
+      el('div', { class: 'text-xs text-stone-500' }, '🌿 地被植物'),
+      el('div', { class: 'text-sm' }, `${understory.length} 樣方次 · 物種紀錄 ${totalSpecies}`),
+      el('div', { class: 'text-sm' }, `平均覆蓋 ${avgCov.toFixed(0)}% · ⚠ 入侵 ${totalInvasive}`)
+    ));
+  }
+  if (mods.soilCons && soilCons.length > 0) {
+    const highErosion = soilCons.filter(s => s.erosionLevel >= 4).length;
+    const avgVeg = soilCons.reduce((s, x) => s + (x.vegCoverage || 0), 0) / soilCons.length;
+    cBox.appendChild(el('div', { class: 'bg-white rounded-lg shadow p-3 col-span-2 sm:col-span-2 border-l-4 border-amber-600' },
+      el('div', { class: 'text-xs text-stone-500' }, '⛰️ 水土保持'),
+      el('div', { class: 'text-sm' }, `${soilCons.length} 紀錄 · 平均植覆 ${avgVeg.toFixed(0)}%`),
+      el('div', { class: 'text-sm' + (highErosion > 0 ? ' text-red-700 font-medium' : '') },
+        `沖蝕 ≥ 4 級：${highErosion} 點次${highErosion > 0 ? ' ⚠' : ''}`)
+    ));
+  }
+
+  // QA 狀態（plots + trees + understory + soilCons 合計）
   const qaCount = { pending: 0, verified: 0, flagged: 0, rejected: 0 };
-  [...plots, ...trees].forEach(d => {
+  [...plots, ...trees, ...understory, ...soilCons].forEach(d => {
     const s = d.qaStatus || 'pending';
     if (qaCount[s] != null) qaCount[s]++;
   });
@@ -179,7 +213,7 @@ export async function renderMap(project) {
 // ===== 匯出 =====
 export async function exportXlsx(project) {
   toast('準備匯出...');
-  const { plots, trees, regen } = await fetchAllData(project);
+  const { plots, trees, regen, understory, soilCons } = await fetchAllData(project);
   const wb = XLSX.utils.book_new();
 
   const anonOrReal = (uid) => isReviewer() ? anonName(uid) : uid;
@@ -236,6 +270,70 @@ export async function exportXlsx(project) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(treesRows), '立木');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(regenRows), '更新');
 
+  // v2.0：地被植物（將 species nested array 展平成多列，每物種一列）
+  if (understory.length > 0) {
+    const understoryRows = [];
+    understory.forEach(u => {
+      const baseFields = {
+        樣區: u.plotCode,
+        小樣方: u.quadratCode,
+        樣方大小: u.quadratSize,
+        調查日期: fmtDate(u.surveyDate),
+        場次: u.surveyRound || '',
+        整體覆蓋_pct: u.totalCoverage,
+        枯枝落葉厚_cm: u.litterDepth_cm || '',
+        入侵種數: u.invasiveCount || 0,
+        建立者: anonOrReal(u.createdBy),
+        QA狀態: u.qaStatus || 'pending',
+        QA評論: u.qaComment || '',
+        備註: u.notes || ''
+      };
+      const species = u.species || [];
+      if (species.length === 0) {
+        understoryRows.push({ ...baseFields, 物種中名: '', 物種學名: '', 生活型: '', 物種覆蓋_pct: '', 高_cm: '', 入侵種: '' });
+      } else {
+        species.forEach(sp => {
+          understoryRows.push({
+            ...baseFields,
+            物種中名: sp.speciesZh || '',
+            物種學名: sp.speciesSci || '',
+            生活型: sp.lifeForm || '',
+            物種覆蓋_pct: sp.coverage ?? '',
+            高_cm: sp.height_cm ?? '',
+            入侵種: sp.isInvasive ? '是' : ''
+          });
+        });
+      }
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(understoryRows), '地被植物');
+  }
+
+  // v2.0：水土保持
+  if (soilCons.length > 0) {
+    const soilConsRows = soilCons.map(s => ({
+      樣區: s.plotCode,
+      觀測點: s.stationCode,
+      事件類型: { 'routine': '例行', 'post-typhoon': '颱風後', 'post-rain': '豪雨後', 'post-construction': '工程後' }[s.eventType] || s.eventType,
+      事件名稱: s.eventName || '',
+      調查日期: fmtDate(s.surveyDate),
+      場次: s.surveyRound || '',
+      植生覆蓋_pct: s.vegCoverage,
+      裸露_pct: s.bareRatio,
+      沖蝕等級: s.erosionLevel,
+      沖蝕針_cm: s.erosionPin_cm ?? '',
+      坍塌面積_m2: s.collapseArea_m2 ?? '',
+      排水: { good: '良好', ponding: '積水', scouring: '淘刷', blocked: '阻塞' }[s.drainage] || '',
+      保護工狀況: { none: '無設置', intact: '完好', partial: '局部破損', failed: '失效' }[s.protectionStatus] || '',
+      保護工類型: s.protectionType || '',
+      入侵植物覆蓋_pct: s.invasiveCoverage ?? '',
+      建立者: anonOrReal(s.createdBy),
+      QA狀態: s.qaStatus || 'pending',
+      QA評論: s.qaComment || '',
+      備註: s.notes || ''
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(soilConsRows), '水土保持');
+  }
+
   const stamp = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `${project.code}_森林監測_${stamp}.xlsx`);
   toast('匯出完成');
@@ -244,7 +342,10 @@ export async function exportXlsx(project) {
 export async function exportCsv(project, kind) {
   toast('準備匯出...');
   const data = await fetchAllData(project);
-  const map = { plots: data.plots, trees: data.trees, regeneration: data.regen };
+  const map = {
+    plots: data.plots, trees: data.trees, regeneration: data.regen,
+    understory: data.understory, soilCons: data.soilCons   // v2.0
+  };
   const rows = map[kind];
   if (!rows || rows.length === 0) { toast('沒有資料'); return; }
   const ws = XLSX.utils.json_to_sheet(rows);

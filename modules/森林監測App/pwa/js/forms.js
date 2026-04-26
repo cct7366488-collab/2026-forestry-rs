@@ -1,131 +1,15 @@
-// ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
+﻿// ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
+// v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked } from './app.js';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=1714';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
+// v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 
-// ===== 內建樹種字典（v1.1：~100 種台灣常見種；v2 對接 species-conservation-lookup 拿全清單）=====
-const SPECIES = [
-  // 針葉 - 杉科
-  { zh: '台灣杉', sci: 'Taiwania cryptomerioides', cons: null },
-  { zh: '柳杉', sci: 'Cryptomeria japonica', cons: null },
-  { zh: '杉木', sci: 'Cunninghamia lanceolata', cons: null },
-  { zh: '香杉', sci: 'Cunninghamia konishii', cons: null },
-  // 針葉 - 柏科
-  { zh: '紅檜', sci: 'Chamaecyparis formosensis', cons: null },
-  { zh: '台灣扁柏', sci: 'Chamaecyparis obtusa var. formosana', cons: null },
-  { zh: '台灣肖楠', sci: 'Calocedrus macrolepis var. formosana', cons: null },
-  { zh: '玉山圓柏', sci: 'Juniperus squamata', cons: null },
-  // 針葉 - 松科
-  { zh: '台灣二葉松', sci: 'Pinus taiwanensis', cons: null },
-  { zh: '台灣五葉松', sci: 'Pinus morrisonicola', cons: null },
-  { zh: '台灣鐵杉', sci: 'Tsuga chinensis var. formosana', cons: null },
-  { zh: '台灣冷杉', sci: 'Abies kawakamii', cons: null },
-  { zh: '台灣雲杉', sci: 'Picea morrisonicola', cons: null },
-  { zh: '濕地松', sci: 'Pinus elliottii', cons: null },
-  { zh: '琉球松', sci: 'Pinus luchuensis', cons: null },
-  // 針葉 - 紅豆杉科
-  { zh: '台灣油杉', sci: 'Keteleeria davidiana var. formosana', cons: 'I' },
-  { zh: '台灣穗花杉', sci: 'Amentotaxus formosana', cons: 'I' },
-  { zh: '台灣紅豆杉', sci: 'Taxus mairei', cons: 'II' },
-  { zh: '蘭嶼羅漢松', sci: 'Podocarpus costalis', cons: 'II' },
-  // 闊葉 - 樟科
-  { zh: '牛樟', sci: 'Cinnamomum kanehirae', cons: 'II' },
-  { zh: '樟樹', sci: 'Cinnamomum camphora', cons: null },
-  { zh: '土肉桂', sci: 'Cinnamomum osmophloeum', cons: null },
-  { zh: '香桂', sci: 'Cinnamomum subavenium', cons: null },
-  { zh: '陰香', sci: 'Cinnamomum burmannii', cons: null },
-  { zh: '紅楠', sci: 'Machilus thunbergii', cons: null },
-  { zh: '大葉楠', sci: 'Machilus japonica var. kusanoi', cons: null },
-  { zh: '香楠', sci: 'Machilus zuihoensis', cons: null },
-  // 闊葉 - 殼斗科
-  { zh: '青剛櫟', sci: 'Cyclobalanopsis glauca', cons: null },
-  { zh: '赤皮', sci: 'Cyclobalanopsis gilva', cons: null },
-  { zh: '長尾尖葉櫧', sci: 'Castanopsis cuspidata var. carlesii', cons: null },
-  { zh: '印度栲', sci: 'Castanopsis indica', cons: null },
-  { zh: '小西氏石櫟', sci: 'Lithocarpus konishii', cons: null },
-  { zh: '油葉石櫟', sci: 'Lithocarpus konishii var. lanceolatus', cons: null },
-  { zh: '三斗石櫟', sci: 'Pasania hancei', cons: null },
-  { zh: '槲櫟', sci: 'Quercus aliena', cons: null },
-  // 闊葉 - 木蘭科
-  { zh: '烏心石', sci: 'Michelia compressa', cons: null },
-  // 闊葉 - 桑科
-  { zh: '雀榕', sci: 'Ficus superba var. japonica', cons: null },
-  { zh: '榕樹', sci: 'Ficus microcarpa', cons: null },
-  { zh: '大葉雀榕', sci: 'Ficus caulocarpa', cons: null },
-  { zh: '稜果榕', sci: 'Ficus septica', cons: null },
-  { zh: '牛奶榕', sci: 'Ficus erecta var. beecheyana', cons: null },
-  // 闊葉 - 楝科
-  { zh: '苦楝', sci: 'Melia azedarach', cons: null },
-  { zh: '大葉桃花心木', sci: 'Swietenia macrophylla', cons: null },
-  { zh: '桃花心木', sci: 'Swietenia mahagoni', cons: null },
-  { zh: '紅椿', sci: 'Toona sureni', cons: null },
-  { zh: '香椿', sci: 'Toona sinensis', cons: null },
-  // 闊葉 - 大戟科
-  { zh: '烏桕', sci: 'Sapium sebiferum', cons: null },
-  { zh: '茄苳', sci: 'Bischofia javanica', cons: null },
-  { zh: '血桐', sci: 'Macaranga tanarius', cons: null },
-  { zh: '蟲屎', sci: 'Melanolepis multiglandulosa', cons: null },
-  // 闊葉 - 漆樹科
-  { zh: '黃連木', sci: 'Pistacia chinensis', cons: null },
-  { zh: '羅氏鹽膚木', sci: 'Rhus chinensis var. roxburghii', cons: null },
-  { zh: '山漆', sci: 'Rhus succedanea', cons: null },
-  // 闊葉 - 楓樹科
-  { zh: '青楓', sci: 'Acer serrulatum', cons: null },
-  { zh: '樟葉楓', sci: 'Acer albopurpurascens', cons: null },
-  { zh: '尖葉槭', sci: 'Acer kawakamii', cons: null },
-  { zh: '台灣三角楓', sci: 'Acer buergerianum var. formosanum', cons: null },
-  // 闊葉 - 榆科
-  { zh: '櫸木', sci: 'Zelkova serrata', cons: null },
-  { zh: '台灣櫸', sci: 'Zelkova serrata var. tarokoensis', cons: null },
-  { zh: '山黃麻', sci: 'Trema orientalis', cons: null },
-  { zh: '朴樹', sci: 'Celtis sinensis', cons: null },
-  { zh: '沙朴', sci: 'Celtis formosana', cons: null },
-  // 闊葉 - 樺木科 / 桃金孃科
-  { zh: '台灣赤楊', sci: 'Alnus formosana', cons: null },
-  { zh: '台灣赤楠', sci: 'Syzygium formosanum', cons: null },
-  { zh: '賽赤楠', sci: 'Syzygium tetragonum', cons: null },
-  { zh: '蓮霧', sci: 'Syzygium samarangense', cons: null },
-  // 闊葉 - 蝶形花科
-  { zh: '相思樹', sci: 'Acacia confusa', cons: null },
-  { zh: '大葉合歡', sci: 'Albizia lebbeck', cons: null },
-  { zh: '印度紫檀', sci: 'Pterocarpus indicus', cons: null },
-  { zh: '大葉相思', sci: 'Acacia mangium', cons: null },
-  // 闊葉 - 木麻黃科 / 桉樹
-  { zh: '木麻黃', sci: 'Casuarina equisetifolia', cons: null },
-  { zh: '桉樹', sci: 'Eucalyptus robusta', cons: null },
-  { zh: '檸檬桉', sci: 'Corymbia citriodora', cons: null },
-  // 闊葉 - 杜英科 / 五加科 / 山茶科
-  { zh: '猴歡喜', sci: 'Sloanea formosana', cons: null },
-  { zh: '杜英', sci: 'Elaeocarpus sylvestris', cons: null },
-  { zh: '鵝掌柴', sci: 'Schefflera octophylla', cons: null },
-  { zh: '木荷', sci: 'Schima superba', cons: null },
-  { zh: '油茶', sci: 'Camellia oleifera', cons: null },
-  // 闊葉 - 安息香 / 千屈菜 / 金縷梅 / 木犀
-  { zh: '烏皮九芎', sci: 'Styrax suberifolia', cons: null },
-  { zh: '紅皮', sci: 'Styrax tonkinensis', cons: null },
-  { zh: '九芎', sci: 'Lagerstroemia subcostata', cons: null },
-  { zh: '大花紫薇', sci: 'Lagerstroemia speciosa', cons: null },
-  { zh: '楓香', sci: 'Liquidambar formosana', cons: null },
-  { zh: '光蠟樹', sci: 'Fraxinus formosana', cons: null },
-  { zh: '小葉白蠟樹', sci: 'Fraxinus floribunda', cons: null },
-  // 闊葉 - 無患子 / 山欖 / 紫葳 / 海桐
-  { zh: '無患子', sci: 'Sapindus mukorossi', cons: null },
-  { zh: '台灣欒樹', sci: 'Koelreuteria henryi', cons: null },
-  { zh: '荔枝', sci: 'Litchi chinensis', cons: null },
-  { zh: '龍眼', sci: 'Dimocarpus longan', cons: null },
-  { zh: '山欖', sci: 'Planchonella obovata', cons: null },
-  { zh: '黃花風鈴木', sci: 'Tabebuia chrysantha', cons: null },
-  { zh: '藍花楹', sci: 'Jacaranda mimosifolia', cons: null },
-  { zh: '台灣海桐', sci: 'Pittosporum pentandrum', cons: null },
-  // 紅樹林
-  { zh: '海茄苳', sci: 'Avicennia marina', cons: null },
-  { zh: '紅海欖', sci: 'Rhizophora stylosa', cons: null },
-  { zh: '水筆仔', sci: 'Kandelia obovata', cons: null },
-  { zh: '欖李', sci: 'Lumnitzera racemosa', cons: null },
-  // 經濟果樹
-  { zh: '芒果', sci: 'Mangifera indica', cons: null }
-];
+// 兼容舊 SPECIES 命名（forms.js 內部仍引用）
+const SPECIES = TREES;
 
+// （v2.0：原本內聯的 ~100 種樹種陣列已移到 species-dict.js TREES，本檔透過上面的 SPECIES = TREES 別名引用）
 const PEST_OPTIONS = ['葉斑', '潰瘍', '蟲孔', '空洞', '菌害', '枯梢', '無'];
 
 // ===== 共用：欄位工廠 =====
@@ -640,22 +524,89 @@ export function openMethodologyForm(project) {
     field({ label: '允許的樣區面積（m²，逗號分隔）', name: 'plotAreaOptions', required: true,
       value: (m.plotAreaOptions || []).join(','), placeholder: '400, 500, 1000' }),
     el('div', { class: 'field' },
-      el('label', {}, '強制必填欄位'),
-      el('div', { class: 'flex flex-wrap gap-3 text-sm' },
-        ...['photos', 'branchHeight', 'pestSymptoms'].map(k => el('label', { class: 'flex items-center gap-1 whitespace-nowrap' },
-          el('input', { type: 'checkbox', name: `req_${k}`, ...(m.required?.[k] ? { checked: 'true' } : {}) }),
+      el('label', {}, '強制必填欄位（立木調查）'),
+      el('div', { style: 'display:block' },
+        ...['photos', 'branchHeight', 'pestSymptoms'].map(k => el('label', {
+          style: 'display:block;font-size:14px;line-height:1.8;cursor:pointer'
+        },
+          el('input', {
+            type: 'checkbox', name: `req_${k}`,
+            style: 'vertical-align:middle;margin-right:6px;width:16px;height:16px',
+            ...(m.required?.[k] ? { checked: 'true' } : {})
+          }),
           { photos: '照片', branchHeight: '枝下高', pestSymptoms: '病蟲害' }[k]
         ))
       )
     ),
+    // v2.0：模組勾選改 inline style 寫死（避開 Tailwind CDN + 動態 DOM 在窄 modal 直書 bug）
     el('div', { class: 'field' },
-      el('label', {}, '啟用模組'),
-      el('div', { class: 'flex flex-wrap gap-3 text-sm' },
-        ...['plot', 'tree', 'regeneration'].map(k => el('label', { class: 'flex items-center gap-1 whitespace-nowrap' },
-          el('input', { type: 'checkbox', name: `mod_${k}`, ...(m.modules?.[k] !== false ? { checked: 'true' } : {}) }),
+      el('label', {}, '啟用模組（v1 既有）'),
+      el('div', { style: 'display:block' },
+        ...['plot', 'tree', 'regeneration'].map(k => el('label', {
+          style: 'display:block;font-size:14px;line-height:1.8;cursor:pointer'
+        },
+          el('input', {
+            type: 'checkbox', name: `mod_${k}`,
+            style: 'vertical-align:middle;margin-right:6px;width:16px;height:16px',
+            ...(m.modules?.[k] !== false ? { checked: 'true' } : {})
+          }),
           { plot: '永久樣區', tree: '立木', regeneration: '自然更新' }[k]
         ))
       )
+    ),
+    // v2.0：新增監測模組勾選 + 各自必填
+    el('div', { class: 'field', style: 'background:#ecfdf5;border:1px solid #6ee7b7;border-radius:6px;padding:10px' },
+      el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:6px' }, 'v2.0 新增監測模組'),
+      // 主模組勾選（每個一行）
+      ...[
+        { k: 'understory', label: '🌿 地被植物' },
+        { k: 'soilCons', label: '⛰️ 水土保持' }
+      ].map(({ k, label }) => el('label', {
+        style: 'display:block;font-size:14px;line-height:1.8;cursor:pointer'
+      },
+        el('input', {
+          type: 'checkbox', name: `mod_${k}`,
+          style: 'vertical-align:middle;margin-right:6px;width:16px;height:16px',
+          ...(m.modules?.[k] === true ? { checked: 'true' } : {})
+        }),
+        label
+      )),
+      // 必填子設定（每個一行，縮排）
+      el('div', { style: 'margin-top:8px;padding-left:8px;border-left:2px solid #a7f3d0' },
+        el('div', { style: 'font-size:12px;color:#57534e;margin-bottom:4px' }, '必填欄位設定'),
+        el('label', { style: 'display:block;font-size:13px;line-height:1.7;cursor:pointer' },
+          el('input', {
+            type: 'checkbox', name: 'us_photoReq',
+            style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+            ...(m.understoryConfig?.requirePhotos !== false ? { checked: 'true' } : {})
+          }),
+          '地被樣方照片必填'
+        ),
+        el('label', { style: 'display:block;font-size:13px;line-height:1.7;cursor:pointer' },
+          el('input', {
+            type: 'checkbox', name: 'sc_photoReq',
+            style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+            ...(m.soilConsConfig?.requirePhotos !== false ? { checked: 'true' } : {})
+          }),
+          '水保定點照片必填'
+        )
+      ),
+      // 樣方大小
+      el('div', { style: 'margin-top:8px' },
+        el('label', { style: 'display:block;font-size:13px;color:#57534e;margin-bottom:4px' }, '地被樣方大小'),
+        el('select', {
+          name: 'us_quadratSize',
+          style: 'border:1px solid #d6d3d1;border-radius:4px;padding:4px 8px;font-size:13px;background:#fff'
+        },
+          ...['1x1', '2x2', '5x5'].map(s => {
+            const opt = el('option', { value: s }, `${s.replace('x', ' × ')} m`);
+            if ((m.understoryConfig?.quadratSize || '1x1') === s) opt.setAttribute('selected', 'true');
+            return opt;
+          })
+        )
+      ),
+      el('p', { style: 'font-size:11px;color:#78716c;margin-top:8px' },
+        '💡 v2.1 將支援野生動物，v2.2 支援經濟收穫（土肉桂等）')
     ),
     field({ label: '方法學說明', name: 'description', type: 'textarea', rows: 5, value: m.description || '' }),
     el('div', { class: 'flex gap-2 pt-2' },
@@ -679,7 +630,23 @@ export function openMethodologyForm(project) {
         plot: fd.get('mod_plot') === 'on',
         tree: fd.get('mod_tree') === 'on',
         regeneration: fd.get('mod_regeneration') === 'on',
-        understory: false, soil: false, disturbance: false
+        understory: fd.get('mod_understory') === 'on',  // v2.0
+        soilCons: fd.get('mod_soilCons') === 'on',      // v2.0
+        wildlife: m.modules?.wildlife || false,         // v2.1
+        harvest: m.modules?.harvest || false,           // v2.2
+        disturbance: m.modules?.disturbance || false
+      },
+      // v2.0：新模組獨立 config
+      understoryConfig: {
+        ...DEFAULT_METHODOLOGY.understoryConfig,
+        ...(m.understoryConfig || {}),
+        quadratSize: fd.get('us_quadratSize') || '1x1',
+        requirePhotos: fd.get('us_photoReq') === 'on'
+      },
+      soilConsConfig: {
+        ...DEFAULT_METHODOLOGY.soilConsConfig,
+        ...(m.soilConsConfig || {}),
+        requirePhotos: fd.get('sc_photoReq') === 'on'
       },
       description: fd.get('description').trim()
     };
@@ -1192,6 +1159,410 @@ async function deleteSubdoc(project, plot, subColl, existing) {
     toast('已刪除');
     closeModal();
   } catch (e) { toast('刪除失敗：' + e.message); }
+}
+
+// ===== v2.0 共用：調查場次（surveyRound）helper =====
+// 自動產生當前季度標籤，如 'Q2-2026'。PI 可在 methodology 改設成月份模式。
+function currentSurveyRound() {
+  const now = new Date();
+  const q = Math.floor(now.getMonth() / 3) + 1;
+  return `Q${q}-${now.getFullYear()}`;
+}
+
+// ===== v2.0 模組一：地被植物（understory）— 5 點樣方法 =====
+// 一筆 = 一個小樣方一次調查；species[] 為 nested array 記多筆物種覆蓋度
+export function openUnderstoryForm(project, plot, existing = null) {
+  const cfg = project.methodology?.understoryConfig || DEFAULT_METHODOLOGY.understoryConfig;
+  const photoReq = !!cfg.requirePhotos;
+
+  // 物種子表：state 持有 species 陣列，動態加列/刪列
+  let speciesRows = existing?.species ? [...existing.species] : [];
+
+  // datalist 草本字典（依 lifeForm 分組註記）
+  const herbList = el('datalist', { id: 'dl-herbs' },
+    ...HERBS.map(h => el('option', { value: h.zh },
+      `${h.lifeForm}${h.isInvasive ? ' ⚠入侵' : ''} ｜ ${h.sci}`))
+  );
+
+  const speciesContainer = el('div', { class: 'space-y-2' });
+  function redrawSpecies() {
+    speciesContainer.innerHTML = '';
+    if (speciesRows.length === 0) {
+      speciesContainer.appendChild(el('p', { class: 'text-xs text-stone-500 italic' }, '尚無物種紀錄，按下方「＋ 加物種」開始'));
+      return;
+    }
+    speciesRows.forEach((sr, idx) => {
+      const card = el('div', {
+        class: 'border rounded p-2 space-y-1 ' + (sr.isInvasive ? 'bg-orange-50 border-orange-300' : 'bg-stone-50')
+      });
+      const speciesIn = el('input', {
+        type: 'text', list: 'dl-herbs', placeholder: '物種中文', value: sr.speciesZh || '',
+        class: 'border rounded px-2 py-1 w-full text-sm', autocomplete: 'off'
+      });
+      speciesIn.addEventListener('input', () => {
+        sr.speciesZh = speciesIn.value;
+        const h = findHerb(speciesIn.value);
+        if (h) {
+          sr.speciesSci = h.sci;
+          sr.lifeForm = h.lifeForm;
+          sr.isInvasive = h.isInvasive || isInvasive(speciesIn.value);
+          lifeFormSel.value = h.lifeForm;
+        } else {
+          sr.isInvasive = isInvasive(speciesIn.value);
+        }
+        redrawSpecies();
+      });
+      const lifeFormSel = el('select', { class: 'border rounded px-2 py-1 text-sm' },
+        ...['草本', '蕨類', '苔蘚', '藤本', '灌木幼株'].map(lf => {
+          const opt = el('option', { value: lf }, lf);
+          if (sr.lifeForm === lf) opt.setAttribute('selected', 'true');
+          return opt;
+        })
+      );
+      lifeFormSel.addEventListener('change', () => { sr.lifeForm = lifeFormSel.value; });
+      const covInput = el('input', {
+        type: 'number', min: '0', max: '100', step: '1', placeholder: '覆蓋%',
+        value: sr.coverage ?? '', class: 'border rounded px-2 py-1 w-20 text-sm'
+      });
+      covInput.addEventListener('input', () => { sr.coverage = parseInt(covInput.value, 10) || 0; });
+      const heightInput = el('input', {
+        type: 'number', min: '0', step: '1', placeholder: '高cm',
+        value: sr.height_cm ?? '', class: 'border rounded px-2 py-1 w-20 text-sm'
+      });
+      heightInput.addEventListener('input', () => { sr.height_cm = parseInt(heightInput.value, 10) || null; });
+      const delBtn = el('button', {
+        type: 'button', class: 'text-red-600 text-sm px-2',
+        onclick: () => { speciesRows.splice(idx, 1); redrawSpecies(); }
+      }, '✕');
+      const invasiveTag = sr.isInvasive
+        ? el('div', { class: 'text-xs text-orange-700 font-medium' }, '⚠ 公告外來入侵種')
+        : null;
+      card.appendChild(speciesIn);
+      card.appendChild(el('div', { class: 'flex gap-2 items-center' },
+        lifeFormSel,
+        covInput, el('span', { class: 'text-xs text-stone-500' }, '%'),
+        heightInput, el('span', { class: 'text-xs text-stone-500' }, 'cm'),
+        delBtn
+      ));
+      if (invasiveTag) card.appendChild(invasiveTag);
+      speciesContainer.appendChild(card);
+    });
+  }
+  redrawSpecies();
+
+  const addSpeciesBtn = el('button', {
+    type: 'button', class: 'border border-dashed border-stone-400 rounded w-full py-2 text-sm text-stone-600',
+    onclick: () => {
+      speciesRows.push({ speciesZh: '', speciesSci: null, lifeForm: '草本', coverage: 0, height_cm: null, isInvasive: false });
+      redrawSpecies();
+    }
+  }, '＋ 加物種');
+
+  // 樣方照片
+  const photoUp = photoUploader({ existing: existing?.photos || [] });
+  const photoLabel = el('label', {}, '樣方俯拍照片', photoReq ? el('span', { class: 'req' }, ' *') : null,
+    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（從正上方拍 1m×1m 範圍）'));
+
+  const f = el('form', { class: 'space-y-2' },
+    herbList,
+    el('div', { class: 'field-row' },
+      field({ label: '小樣方位置', name: 'quadratCode', required: true,
+        options: cfg.quadratCodes.map(c => ({ value: c, label: { N: '北', E: '東', S: '南', W: '西', C: '中央' }[c] || c })),
+        value: existing?.quadratCode || 'C' }),
+      field({ label: '樣方大小', name: 'quadratSize', required: true,
+        options: [
+          { value: '1x1', label: '1 × 1 m' },
+          { value: '2x2', label: '2 × 2 m' },
+          { value: '5x5', label: '5 × 5 m' }
+        ], value: existing?.quadratSize || cfg.quadratSize || '1x1' })
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '調查日期', name: 'surveyDate', type: 'date', required: true,
+        value: existing?.surveyDate ? (existing.surveyDate.toDate ? existing.surveyDate.toDate() : new Date(existing.surveyDate)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
+      field({ label: '調查場次', name: 'surveyRound', required: true,
+        value: existing?.surveyRound || currentSurveyRound(), placeholder: 'Q2-2026' })
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '整體覆蓋度 (%)', name: 'totalCoverage', type: 'number', step: '1', min: '0', max: '100',
+        required: true, value: existing?.totalCoverage ?? '' }),
+      field({ label: '枯枝落葉層厚 (cm)', name: 'litterDepth_cm', type: 'number', step: '0.5', min: '0',
+        value: existing?.litterDepth_cm ?? '' })
+    ),
+    el('div', { class: 'field' },
+      el('label', {}, '物種紀錄（覆蓋度可加總超過 100% — 多層交疊允許）'),
+      speciesContainer,
+      addSpeciesBtn
+    ),
+    el('div', { class: 'field' }, photoLabel, photoUp.element),
+    field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      existing ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-red-600',
+        onclick: () => deleteSubdoc(project, plot, 'understory', existing) }, '刪除') : null,
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張樣方照片'); return; }
+    // 過濾空物種列
+    const cleanSpecies = speciesRows.filter(s => s.speciesZh && s.speciesZh.trim());
+    const fd = new FormData(f);
+    const data = {
+      quadratCode: fd.get('quadratCode'),
+      quadratSize: fd.get('quadratSize'),
+      surveyDate: new Date(fd.get('surveyDate')),
+      surveyRound: fd.get('surveyRound').trim(),
+      totalCoverage: parseInt(fd.get('totalCoverage'), 10),
+      litterDepth_cm: fd.get('litterDepth_cm') ? parseFloat(fd.get('litterDepth_cm')) : null,
+      species: cleanSpecies,
+      invasiveCount: cleanSpecies.filter(s => s.isInvasive).length,
+      notes: fd.get('notes').trim() || null,
+      updatedAt: fb.serverTimestamp()
+    };
+    const submitBtn = f.querySelector('button[type=submit]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '儲存中...';
+    try {
+      const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'understory');
+      let docId;
+      if (existing) {
+        docId = existing.id;
+        applySurveyorReQaReset(data, existing);
+        await fb.updateDoc(fb.doc(colRef, docId), data);
+      } else {
+        data.createdBy = state.user.uid;
+        data.createdAt = fb.serverTimestamp();
+        data.qaStatus = 'pending';
+        const ref = await fb.addDoc(colRef, data);
+        docId = ref.id;
+      }
+      if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
+        if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
+        const photos = await photoUp.commit({
+          projectId: project.id, plotId: plot.id, prefix: `understory-${docId}`
+        });
+        await fb.updateDoc(fb.doc(colRef, docId), { photos });
+      }
+      toast(existing
+        ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
+        : '已建立（待審核）');
+      closeModal();
+    } catch (e) {
+      toast('儲存失敗：' + e.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '儲存';
+    }
+  });
+  openModal(existing ? `編輯地被樣方 ${existing.quadratCode}` : '新地被樣方', f);
+}
+
+// ===== v2.0 模組二：水土保持（soilCons）— 5 點定點觀測 =====
+// 一筆 = 一個觀測點一次調查；自動帶上次同 stationCode 代表照供比對
+export async function openSoilConsForm(project, plot, existing = null) {
+  const cfg = project.methodology?.soilConsConfig || DEFAULT_METHODOLOGY.soilConsConfig;
+  const photoReq = !!cfg.requirePhotos;
+
+  // 抓上一筆同 stationCode 的紀錄（給比對照片）
+  let lastRecord = null;
+  const stationCode = existing?.stationCode || 'C';
+  try {
+    const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'soilCons');
+    const qSnap = await fb.getDocs(fb.query(colRef,
+      fb.where('stationCode', '==', stationCode),
+      fb.orderBy('surveyDate', 'desc')
+    ));
+    for (const d of qSnap.docs) {
+      if (existing && d.id === existing.id) continue;
+      lastRecord = { id: d.id, ...d.data() };
+      break;
+    }
+  } catch (e) { /* 無索引或無資料時略過 */ }
+
+  // 比對照片區
+  const compareBox = el('div', { class: 'bg-stone-50 rounded p-2 text-xs' });
+  function updateCompareBox(curStation) {
+    compareBox.innerHTML = '';
+    if (!lastRecord || lastRecord.stationCode !== curStation) {
+      compareBox.appendChild(el('div', { class: 'text-stone-500 italic' }, '尚無同點位歷史紀錄'));
+      return;
+    }
+    const lastPhoto = (lastRecord.photos || [])[0];
+    compareBox.appendChild(el('div', { class: 'font-medium mb-1' },
+      `📅 上次調查：${(lastRecord.surveyDate?.toDate ? lastRecord.surveyDate.toDate() : new Date(lastRecord.surveyDate || 0)).toISOString().slice(0, 10)} `,
+      `（${lastRecord.surveyRound || '—'}）`
+    ));
+    compareBox.appendChild(el('div', {},
+      `沖蝕等級 ${lastRecord.erosionLevel} · 植生覆蓋 ${lastRecord.vegCoverage}% · 排水 ${lastRecord.drainage || '—'}`
+    ));
+    if (lastPhoto?.url) {
+      compareBox.appendChild(el('div', { class: 'mt-1' },
+        el('img', { src: lastPhoto.url, style: 'width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #d6d3d1' })
+      ));
+    }
+  }
+
+  const photoUp = photoUploader({ existing: existing?.photos || [] });
+  const photoLabel = el('label', {}, '定點照片', photoReq ? el('span', { class: 'req' }, ' *') : null,
+    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（建議朝固定方位拍，便於比對）'));
+
+  const stationSelect = el('select', { name: 'stationCode', required: 'true', class: 'border rounded px-2 py-1 w-full' },
+    ...cfg.stationCodes.map(c => {
+      const lab = { N: '北 N', E: '東 E', S: '南 S', W: '西 W', C: '中央 C' }[c] || c;
+      const opt = el('option', { value: c }, lab);
+      if (c === stationCode) opt.setAttribute('selected', 'true');
+      return opt;
+    })
+  );
+  stationSelect.addEventListener('change', () => updateCompareBox(stationSelect.value));
+
+  const f = el('form', { class: 'space-y-2' },
+    el('div', { class: 'field-row' },
+      el('div', { class: 'field' },
+        el('label', {}, '觀測點 ', el('span', { class: 'req' }, '*')),
+        stationSelect
+      ),
+      field({ label: '事件類型', name: 'eventType', required: true,
+        options: [
+          { value: 'routine', label: '例行季調' },
+          { value: 'post-typhoon', label: '颱風後' },
+          { value: 'post-rain', label: '豪雨後' },
+          { value: 'post-construction', label: '工程後' }
+        ], value: existing?.eventType || 'routine' })
+    ),
+    field({ label: '事件名稱（如颱風名／豪雨日期，例行可留空）', name: 'eventName',
+      value: existing?.eventName || '', placeholder: '丹娜絲颱風 / 0822 豪雨' }),
+    el('div', { class: 'field-row' },
+      field({ label: '調查日期', name: 'surveyDate', type: 'date', required: true,
+        value: existing?.surveyDate ? (existing.surveyDate.toDate ? existing.surveyDate.toDate() : new Date(existing.surveyDate)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
+      field({ label: '調查場次', name: 'surveyRound', required: true,
+        value: existing?.surveyRound || currentSurveyRound(), placeholder: 'Q2-2026' })
+    ),
+    compareBox,
+    el('div', { class: 'field-row' },
+      field({ label: '植生覆蓋率 (%)', name: 'vegCoverage', type: 'number', step: '1', min: '0', max: '100',
+        required: true, value: existing?.vegCoverage ?? '' }),
+      field({ label: '裸露面積率 (%)', name: 'bareRatio', type: 'number', step: '1', min: '0', max: '100',
+        required: true, value: existing?.bareRatio ?? '' })
+    ),
+    field({ label: '沖蝕等級 (1-5)', name: 'erosionLevel', required: true,
+      options: [
+        { value: 1, label: '1 — 無明顯沖蝕' },
+        { value: 2, label: '2 — 輕微面蝕' },
+        { value: 3, label: '3 — 溝蝕 < 5 cm' },
+        { value: 4, label: '4 — 溝蝕 5–30 cm' },
+        { value: 5, label: '5 — 崩塌或大型溝蝕' }
+      ], value: existing?.erosionLevel || 1 }),
+    el('div', { class: 'field-row' },
+      field({ label: '沖蝕針讀值 (cm)', name: 'erosionPin_cm', type: 'number', step: '0.1',
+        value: existing?.erosionPin_cm ?? '', placeholder: '無沖蝕針可留空' }),
+      field({ label: '坍塌面積 (m²)', name: 'collapseArea_m2', type: 'number', step: '0.5', min: '0',
+        value: existing?.collapseArea_m2 ?? '', placeholder: '無坍塌可留空' })
+    ),
+    el('div', { class: 'field-row' },
+      field({ label: '排水狀況', name: 'drainage', required: true,
+        options: [
+          { value: 'good', label: '良好' },
+          { value: 'ponding', label: '積水' },
+          { value: 'scouring', label: '淘刷' },
+          { value: 'blocked', label: '阻塞' }
+        ], value: existing?.drainage || 'good' }),
+      field({ label: '保護工狀況', name: 'protectionStatus',
+        options: [
+          { value: 'none', label: '無設置' },
+          { value: 'intact', label: '完好' },
+          { value: 'partial', label: '局部破損' },
+          { value: 'failed', label: '失效' }
+        ], value: existing?.protectionStatus || 'none' })
+    ),
+    field({ label: '保護工類型（若有設置）', name: 'protectionType',
+      options: [
+        { value: '', label: '— 無 —' },
+        { value: 'contour', label: '等高溝' },
+        { value: 'staking', label: '打樁編柵' },
+        { value: 'vegetation', label: '植生帶' },
+        { value: 'concrete', label: '混凝土' },
+        { value: 'masonry', label: '砌石' },
+        { value: 'other', label: '其他' }
+      ], value: existing?.protectionType || '' }),
+    field({ label: '入侵植物覆蓋 (%)', name: 'invasiveCoverage', type: 'number', step: '1', min: '0', max: '100',
+      value: existing?.invasiveCoverage ?? '' }),
+    el('div', { class: 'field' }, photoLabel, photoUp.element),
+    field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
+      existing ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-red-600',
+        onclick: () => deleteSubdoc(project, plot, 'soilCons', existing) }, '刪除') : null,
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
+    )
+  );
+
+  // 自動算 bareRatio = 100 - vegCoverage
+  f.querySelector('[name=vegCoverage]').addEventListener('input', (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (!isNaN(v)) f.querySelector('[name=bareRatio]').value = Math.max(0, 100 - v);
+  });
+
+  updateCompareBox(stationCode);
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張定點照片'); return; }
+    const fd = new FormData(f);
+    const data = {
+      stationCode: fd.get('stationCode'),
+      eventType: fd.get('eventType'),
+      eventName: fd.get('eventName').trim() || null,
+      surveyDate: new Date(fd.get('surveyDate')),
+      surveyRound: fd.get('surveyRound').trim(),
+      vegCoverage: parseInt(fd.get('vegCoverage'), 10),
+      bareRatio: parseInt(fd.get('bareRatio'), 10),
+      erosionLevel: parseInt(fd.get('erosionLevel'), 10),
+      erosionPin_cm: fd.get('erosionPin_cm') ? parseFloat(fd.get('erosionPin_cm')) : null,
+      collapseArea_m2: fd.get('collapseArea_m2') ? parseFloat(fd.get('collapseArea_m2')) : null,
+      drainage: fd.get('drainage'),
+      protectionStatus: fd.get('protectionStatus'),
+      protectionType: fd.get('protectionType') || null,
+      invasiveCoverage: fd.get('invasiveCoverage') ? parseInt(fd.get('invasiveCoverage'), 10) : null,
+      notes: fd.get('notes').trim() || null,
+      updatedAt: fb.serverTimestamp()
+    };
+    const submitBtn = f.querySelector('button[type=submit]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '儲存中...';
+    try {
+      const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'soilCons');
+      let docId;
+      if (existing) {
+        docId = existing.id;
+        applySurveyorReQaReset(data, existing);
+        await fb.updateDoc(fb.doc(colRef, docId), data);
+      } else {
+        data.createdBy = state.user.uid;
+        data.createdAt = fb.serverTimestamp();
+        data.qaStatus = 'pending';
+        const ref = await fb.addDoc(colRef, data);
+        docId = ref.id;
+      }
+      if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
+        if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
+        const photos = await photoUp.commit({
+          projectId: project.id, plotId: plot.id, prefix: `soilcons-${docId}`
+        });
+        await fb.updateDoc(fb.doc(colRef, docId), { photos });
+      }
+      toast(existing
+        ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
+        : '已建立（待審核）');
+      closeModal();
+    } catch (e) {
+      toast('儲存失敗：' + e.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '儲存';
+    }
+  });
+  openModal(existing ? `編輯水保紀錄 ${existing.stationCode}` : '新水保紀錄', f);
 }
 
 // ===== Seed Demo Data =====

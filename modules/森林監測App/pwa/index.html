@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=1714">
+  <link rel="stylesheet" href="style.css?v=2002">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -162,12 +162,14 @@
     </section>
 
     <section data-tab-content="export" class="hidden space-y-3">
-      <p class="text-sm text-stone-600">匯出本專案全部資料供後續 R/Python/QGIS 分析。</p>
-      <div class="flex gap-2">
-        <button id="btn-export-xlsx" class="bg-forest-700 text-white px-4 py-2 rounded">匯出 Excel</button>
-        <button id="btn-export-csv-plots" class="border px-4 py-2 rounded">CSV: 樣區</button>
-        <button id="btn-export-csv-trees" class="border px-4 py-2 rounded">CSV: 立木</button>
-        <button id="btn-export-csv-regen" class="border px-4 py-2 rounded">CSV: 更新</button>
+      <p class="text-sm text-stone-600">匯出本專案全部資料供後續 R/Python/QGIS 分析。Excel 一檔含全部分頁；CSV 單一表格匯出。</p>
+      <div class="flex gap-2 flex-wrap">
+        <button id="btn-export-xlsx" class="bg-forest-700 text-white px-4 py-2 rounded">匯出 Excel（全部）</button>
+        <button id="btn-export-csv-plots" class="border px-4 py-2 rounded text-sm">CSV: 樣區</button>
+        <button id="btn-export-csv-trees" class="border px-4 py-2 rounded text-sm">CSV: 立木</button>
+        <button id="btn-export-csv-regen" class="border px-4 py-2 rounded text-sm">CSV: 更新</button>
+        <button id="btn-export-csv-understory" class="border px-4 py-2 rounded text-sm">CSV: 地被</button>
+        <button id="btn-export-csv-soilcons" class="border px-4 py-2 rounded text-sm">CSV: 水保</button>
       </div>
     </section>
 
@@ -216,9 +218,11 @@
       </p>
     </div>
 
-    <nav class="flex gap-2 border-b">
+    <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
       <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">立木調查</a>
       <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">自然更新</a>
+      <a href="#" data-subtab="understory" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌿 地被植物</a>
+      <a href="#" data-subtab="soilcons" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">⛰️ 水土保持</a>
       <a href="#" data-subtab="info" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">樣區資訊</a>
     </nav>
 
@@ -237,6 +241,26 @@
         <button id="btn-new-regen" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新記錄</button>
       </div>
       <div id="regen-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
+    <!-- v2.0：地被植物（5 點樣方法） -->
+    <section data-subtab-content="understory" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">🌿 地被植物 <span id="understory-count" class="text-sm text-stone-500"></span></h2>
+        <button id="btn-new-understory" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新樣方</button>
+      </div>
+      <p class="text-xs text-stone-500 mb-2">5 點樣方法（北/東/南/西/中央）— 入侵種以橘色標註</p>
+      <div id="understory-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
+    <!-- v2.0：水土保持（5 點定點觀測） -->
+    <section data-subtab-content="soilcons" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">⛰️ 水土保持 <span id="soilcons-count" class="text-sm text-stone-500"></span></h2>
+        <button id="btn-new-soilcons" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新觀測</button>
+      </div>
+      <p class="text-xs text-stone-500 mb-2">5 點定點觀測 — 颱風/豪雨後可加事件紀錄；自動帶上次同點位代表照供比對</p>
+      <div id="soilcons-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
     </section>
 
     <section data-subtab-content="info" class="hidden">
@@ -264,6 +288,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=1714"></script>
+<script type="module" src="js/app.js?v=2002"></script>
 </body>
 </html>
