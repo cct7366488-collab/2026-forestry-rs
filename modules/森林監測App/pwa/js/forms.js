@@ -1,10 +1,12 @@
 ﻿// ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked } from './app.js';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab } from './app.js';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
+// v2.3：階段 2 狀態機（自動偵測送審）
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=2300';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -500,6 +502,16 @@ export function openProjectForm(existing = null) {
       memberUids: piUids,
       methodology: { ...DEFAULT_METHODOLOGY },
       locked: false,
+      // v2.3：階段 2 狀態機初始狀態
+      status: STATUS.CREATED,
+      statusChangedAt: fb.serverTimestamp(),
+      statusChangedBy: state.user.uid,
+      autoLockReason: null,
+      migratedV2_3: true,
+      // 階段 3 預留欄位
+      reviews: [],
+      verifiedBy: null,
+      verifiedAt: null,
       createdBy: state.user.uid,
       createdAt: fb.serverTimestamp()
     };
@@ -739,6 +751,8 @@ export function openMethodologyForm(project) {
       await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), { methodology: newM });
       project.methodology = newM;
       state.project.methodology = newM;
+      // v2.3：methodology 第一次儲存（status='created'）→ 'planning'
+      try { await applyStatusAfterMethodologySaved(state.project); } catch (e) { console.warn('[v2.3 methodology status] failed', e); }
       toast('方法學已更新');
       closeModal();
       location.reload();  // 簡單重整讓設計頁重繪
@@ -854,6 +868,9 @@ export async function assignPlotToSurveyor(project, plot, surveyorUid) {
 }
 
 // ===== QA 標記（pi 用）=====
+// v2.3：標記後跑狀態機
+//   - verified 後若全 6 子集合 verified → 自動 review + auto-Lock
+//   - 從 verified 退回 flagged/rejected 且 status='review' → 退回 active + auto-unlock
 export async function markQA(project, plotId, subDoc, status) {
   const labels = { verified: '通過', flagged: '退回修正', rejected: '駁回' };
   const comment = status === 'verified' ? '' : (prompt(`為什麼${labels[status]}？（簡短說明）`) || '');
@@ -862,6 +879,9 @@ export async function markQA(project, plotId, subDoc, status) {
     const ref = subDoc
       ? fb.doc(fb.db, 'projects', project.id, 'plots', plotId, subDoc.coll, subDoc.id)
       : fb.doc(fb.db, 'projects', project.id, 'plots', plotId);
+    // v2.3：先讀 oldQa 才能判斷狀態機要 promote 還是 demote
+    const oldSnap = await fb.getDoc(ref);
+    const oldQa = oldSnap.exists() ? oldSnap.data().qaStatus : null;
     await fb.updateDoc(ref, {
       qaStatus: status,
       qaMarkedBy: state.user.uid,
@@ -869,6 +889,25 @@ export async function markQA(project, plotId, subDoc, status) {
       qaComment: comment
     });
     toast(`已標記為 ${status}`);
+    // v2.3：狀態機分派（不擋 toast；跑完再 toast 結果）
+    let stateChanged = false;
+    try {
+      const result = await applyStatusAfterQA(project, oldQa, status);
+      if (result === 'promoted-review') {
+        toast('🔍 全資料 verified — 專案已自動進入審查階段並鎖定', 5000);
+        stateChanged = true;
+      } else if (result === 'demoted-active') {
+        toast('▶ 專案自動退回「進行中」（已解除鎖定）', 4000);
+        stateChanged = true;
+      }
+    } catch (e) { console.warn('[v2.3 status update] failed', e); }
+    // v2.3.1：重繪當前 view 即時反映新 qaStatus（plot detail / pending list / row）
+    // v2.3.4：reroute 前記住當前 sub-tab（在野生動物分頁按 verified 不會跳回立木）
+    captureCurrentSubtab();
+    // 清空 state cache 強制重 fetch project + plot
+    state.project = null;
+    state.plot = null;
+    try { await rerouteCurrentView(); } catch (e) { console.warn('[reroute] failed', e); }
   } catch (e) { toast('標記失敗：' + e.message); }
 }
 
@@ -979,8 +1018,9 @@ export async function openPlotForm(project, existing = null) {
       let plotId;
       if (existing) {
         plotId = existing.id;
-        applySurveyorReQaReset(data, existing);
+        const _didReset = applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plotId), data);
+        await maybeDemoteAfterReset(project, _didReset);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -1008,13 +1048,27 @@ export async function openPlotForm(project, existing = null) {
 
 // v1.5.1 bug #3：surveyor 修正自己被 flag/reject 的資料 → 自動回 pending
 // 保留 qaComment 給 dataManager 看歷史
+// v2.3：return boolean 讓 caller 知道是否觸發了 reset，以便接著跑專案層狀態機
 function applySurveyorReQaReset(data, existing) {
-  if (!existing) return;
-  if (existing.createdBy !== state.user.uid) return;
-  if (!['flagged', 'rejected'].includes(existing.qaStatus)) return;
+  if (!existing) return false;
+  if (existing.createdBy !== state.user.uid) return false;
+  if (!['flagged', 'rejected'].includes(existing.qaStatus)) return false;
   data.qaStatus = 'pending';
   data.qaMarkedBy = null;
   data.qaMarkedAt = null;
+  return true;
+}
+
+// v2.3：surveyor reset 後若 project.status='review' 退回 active + auto-unlock
+async function maybeDemoteAfterReset(project, didReset) {
+  if (!didReset) return;
+  try {
+    const result = await applyStatusAfterSurveyorReset(project, true);
+    if (result === 'demoted-active') {
+      toast('▶ 專案自動退回「進行中」（已解除鎖定）', 4000);
+      setTimeout(() => location.reload(), 1800);
+    }
+  } catch (e) { console.warn('[v2.3 surveyor reset status] failed', e); }
 }
 
 async function deletePlot(project, plot) {
@@ -1028,7 +1082,22 @@ async function deletePlot(project, plot) {
 }
 
 // ===== 立木表單 =====
-export function openTreeForm(project, plot, existing = null) {
+// v2.3.3：個體編號自動帶 plotCode + 下一個未用流水號（DEMO-010-001 格式）
+//   - prefix 顯示 plot.code-（唯讀），右側 input 預設下一個流水號
+//   - 編輯既有：保留原 treeNum，prefix 仍顯示但不可改
+//   - submit 寫入 treeCode（完整字串）+ treeNum（流水號 number）
+export async function openTreeForm(project, plot, existing = null) {
+  // v2.3.3：算下一個未用流水號（query 同 plot 已存在的 trees）
+  let nextNum = 1;
+  if (!existing) {
+    try {
+      const ts = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees'));
+      const usedNums = ts.docs.map(d => parseInt(d.data().treeNum, 10)).filter(n => Number.isFinite(n));
+      nextNum = usedNums.length ? Math.max(...usedNums) + 1 : 1;
+    } catch (e) { console.warn('[openTreeForm] count trees failed', e); }
+  }
+  const padNum = (n) => String(n).padStart(3, '0');
+
   // 樹種 autocomplete（datalist）
   const speciesList = el('datalist', { id: 'dl-species' },
     ...SPECIES.map(s => el('option', { value: s.zh }, `${s.sci}${s.cons ? ` [${s.cons}]` : ''}`))
@@ -1079,10 +1148,36 @@ export function openTreeForm(project, plot, existing = null) {
   const treePhotoLabel = el('label', {}, '立木照片',
     el('span', { class: 'text-xs text-stone-500 ml-1' }, '（樹皮 / 葉 / 花果 / 整體，≤5MB / 張）'));
 
+  // v2.3.3：個體編號 — prefix（plot.code-）+ 序號 input + 即時預覽
+  const treeNumInput = el('input', {
+    type: 'number', name: 'treeNum', step: '1', min: '1', required: 'true',
+    value: existing?.treeNum ?? nextNum,
+    style: 'flex:1;border:1px solid #d6d3d1;border-left:none;border-radius:0 6px 6px 0;padding:8px 10px;font-size:16px;min-width:0'
+  });
+  const treeCodePreview = el('div', {
+    class: 'text-xs text-stone-600 mt-1',
+    style: 'font-family:ui-monospace,SFMono-Regular,Menlo,monospace'
+  }, `最終編號：${plot.code}-${padNum(parseInt(treeNumInput.value, 10) || nextNum)}`);
+  function updateTreeCodePreview() {
+    const n = parseInt(treeNumInput.value, 10);
+    treeCodePreview.textContent = Number.isFinite(n) && n > 0
+      ? `最終編號：${plot.code}-${padNum(n)}`
+      : `最終編號：${plot.code}-???（請輸入流水號）`;
+  }
+  treeNumInput.addEventListener('input', updateTreeCodePreview);
+
   const f = el('form', { class: 'space-y-2' },
     speciesList,
-    field({ label: '個體編號', name: 'treeNum', type: 'number', step: '1', min: '1', required: true,
-      value: existing?.treeNum ?? '' }),
+    el('div', { class: 'field' },
+      el('label', {}, '個體編號 ', el('span', { class: 'req' }, '*')),
+      el('div', { style: 'display:flex;align-items:stretch' },
+        el('span', {
+          style: 'background:#f5f5f4;border:1px solid #d6d3d1;border-right:none;border-radius:6px 0 0 6px;padding:8px 10px;font-size:16px;color:#57534e;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap'
+        }, `${plot.code}-`),
+        treeNumInput
+      ),
+      treeCodePreview
+    ),
     el('div', { class: 'field' },
       el('label', {}, '樹種 ', el('span', { class: 'req' }, '*')),
       speciesInput,
@@ -1133,8 +1228,11 @@ export function openTreeForm(project, plot, existing = null) {
     const dbh = parseFloat(fd.get('dbh_cm'));
     const h = parseFloat(fd.get('height_m'));
     const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh, speciesSci: sp.sci });
+    const treeNumVal = parseInt(fd.get('treeNum'), 10);
     const data = {
-      treeNum: parseInt(fd.get('treeNum'), 10),
+      treeNum: treeNumVal,
+      // v2.3.3：完整字串編號（DEMO-010-001 格式），方便顯示與匯出
+      treeCode: `${plot.code}-${String(treeNumVal).padStart(3, '0')}`,
       speciesZh,
       speciesSci: sp.sci || null,
       conservationGrade: sp.cons || null,
@@ -1157,8 +1255,9 @@ export function openTreeForm(project, plot, existing = null) {
       let treeId;
       if (existing) {
         treeId = existing.id;
-        applySurveyorReQaReset(data, existing);
+        const _didReset = applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, treeId), data);
+        await maybeDemoteAfterReset(project, _didReset);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -1183,7 +1282,9 @@ export function openTreeForm(project, plot, existing = null) {
       submitBtn.textContent = '儲存';
     }
   });
-  openModal(existing ? `編輯立木 #${existing.treeNum}` : '新立木', f);
+  // v2.3.3：標題顯示完整 treeCode（舊資料 fallback：plot.code + 補零 treeNum）
+  const titleCode = existing ? (existing.treeCode || `${plot.code}-${String(existing.treeNum || 0).padStart(3, '0')}`) : null;
+  openModal(existing ? `編輯立木 ${titleCode}` : '新立木', f);
 }
 
 // ===== 自然更新表單 =====
@@ -1221,9 +1322,10 @@ export function openRegenForm(project, plot, existing = null) {
     try {
       const colRef = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'regeneration');
       if (existing) {
-        applySurveyorReQaReset(data, existing);
+        const _didReset = applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, existing.id), data);
         toast(data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新');
+        await maybeDemoteAfterReset(project, _didReset);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -1414,8 +1516,9 @@ export function openUnderstoryForm(project, plot, existing = null) {
       let docId;
       if (existing) {
         docId = existing.id;
-        applySurveyorReQaReset(data, existing);
+        const _didReset = applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, docId), data);
+        await maybeDemoteAfterReset(project, _didReset);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -1621,8 +1724,9 @@ export async function openSoilConsForm(project, plot, existing = null) {
       let docId;
       if (existing) {
         docId = existing.id;
-        applySurveyorReQaReset(data, existing);
+        const _didReset = applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, docId), data);
+        await maybeDemoteAfterReset(project, _didReset);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -1877,8 +1981,9 @@ export function openWildlifeForm(project, plot, existing = null) {
       let docId;
       if (existing) {
         docId = existing.id;
-        applySurveyorReQaReset(data, existing);
+        const _didReset = applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, docId), data);
+        await maybeDemoteAfterReset(project, _didReset);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
@@ -2119,8 +2224,9 @@ export async function openHarvestForm(project, plot, existing = null) {
       let docId;
       if (existing) {
         docId = existing.id;
-        applySurveyorReQaReset(data, existing);
+        const _didReset = applySurveyorReQaReset(data, existing);
         await fb.updateDoc(fb.doc(colRef, docId), data);
+        await maybeDemoteAfterReset(project, _didReset);
       } else {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();

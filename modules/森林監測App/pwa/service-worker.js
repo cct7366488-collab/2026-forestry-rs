@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.2.0';  // v2.2.0：v2.1 野生動物 + v2.2 經濟收穫（土肉桂為首）上線
+const CACHE = 'forest-monitor-v2.3.4';  // v2.3.4：markQA reroute 後恢復原 sub-tab（不再跳回立木）
 const SHELL = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const SHELL = [
   './js/species-equations.js',
   './js/species-dict.js',     // v2.0：物種字典（樹種/動物/草本/入侵）
   './js/code-tables.js',
+  './js/project-status.js',   // v2.3：階段 2 狀態機
   './firebase-config.js'
 ];
 

@@ -15,10 +15,12 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=1714";
-import * as forms from "./forms.js?v=1714";
-import * as analytics from "./analytics.js?v=1714";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=1714";
+import { firebaseConfig } from "../firebase-config.js?v=2304";
+import * as forms from "./forms.js?v=2304";
+import * as analytics from "./analytics.js?v=2304";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2304";
+// v2.3：階段 2 — 狀態機 + 自動偵測送審
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2304";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -198,6 +200,44 @@ export function userLabel(uid, fallback = '?') {
   return _userLabelCache.get(uid) || uid.slice(0, 8);
 }
 
+// v2.3：狀態列 banner（取代原本只顯示 lock 的 banner，加 status 顏色 + 原因）
+function renderStatusBanner() {
+  const banner = $('#lock-banner');
+  if (!banner) return;
+  const p = state.project;
+  if (!p) return;
+  const status = p.status || STATUS.ACTIVE;
+  const meta = STATUS_META[status] || STATUS_META.active;
+  const isLockedNow = p.locked === true;
+  const reason = p.autoLockReason;
+  const reasonText = AUTO_LOCK_REASON_LABEL[reason] || '';
+
+  // 不顯示 banner 的狀況：未鎖定 且 active/planning/created（讓主畫面乾淨）
+  if (!isLockedNow && (status === STATUS.ACTIVE || status === STATUS.PLANNING || status === STATUS.CREATED)) {
+    banner.classList.add('hidden');
+    return;
+  }
+  banner.classList.remove('hidden');
+  banner.className = `${meta.bannerCls} border text-sm px-3 py-2 rounded mb-3`;
+
+  const parts = [`<div class="flex items-center gap-2 flex-wrap"><b>${meta.label}</b>`];
+  if (isLockedNow) parts.push(`<span class="text-xs px-2 py-0.5 bg-stone-700 text-white rounded">🔒 已鎖定</span>`);
+  parts.push(`</div>`);
+
+  if (isLockedNow && reasonText) {
+    const at = p.lockedAt ? fmtDate(p.lockedAt) : '';
+    const by = p.lockedBy ? userLabel(p.lockedBy, '系統') : '系統';
+    parts.push(`<div class="text-xs mt-1 opacity-80">${reasonText}${at ? ` · ${at}` : ''}${by && by !== '系統' && reason !== 'all-verified' ? ` · 由 ${by}` : ''}</div>`);
+  }
+  if (status === STATUS.VERIFIED) {
+    parts.push(`<div class="text-xs mt-1 opacity-80">已通過 reviewer 審查（階段 3 才實作 reviewer 流程）</div>`);
+  }
+  if (status === STATUS.ARCHIVED) {
+    parts.push(`<div class="text-xs mt-1 opacity-80">本專案已歸檔（資料保留唯讀）</div>`);
+  }
+  banner.innerHTML = parts.join('');
+}
+
 // 套用 data-role-show 屬性，僅顯示符合當前角色的元素
 export function applyRoleVisibility(root = document) {
   const r = projectRole();
@@ -374,6 +414,22 @@ let _initialNav = true;
 // v1.6.10：route token 防止 onAuthStateChanged 雙觸發或 hashchange 競態導致兩份畫面疊加
 let _routeId = 0;
 
+// v2.3.1：export 給 forms.js 在 markQA / submit 後觸發重繪
+// 用法：state.project = null; state.plot = null; await rerouteCurrentView();
+export async function rerouteCurrentView() { return route(); }
+
+// v2.3.4：reroute 前記住 plot detail 當前 sub-tab，重繪後恢復（避免每次 markQA 都跳回立木調查）
+let _pendingSubtab = null;
+export function captureCurrentSubtab() {
+  const active = document.querySelector('.subtab-link.font-medium');
+  if (active?.dataset.subtab) _pendingSubtab = active.dataset.subtab;
+}
+export function consumePendingSubtab() {
+  const t = _pendingSubtab;
+  _pendingSubtab = null;
+  return t;
+}
+
 async function route() {
   const myId = ++_routeId;
   state.unsubscribers.forEach(u => u());
@@ -461,12 +517,13 @@ async function renderProjects(root) {
     const renderCard = (data, isArchived) => {
       const role = data.members?.[state.user.uid] || (isSystemAdmin() ? 'admin' : '?');
       const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', admin: '系統管理者' }[role] || role;
-      const lockBadge = (data.locked && !isArchived)
-        ? el('span', { class: 'text-xs bg-stone-200 text-stone-700 px-2 py-0.5 rounded ml-1' }, '🔒 已 Lock')
+      // v2.3：status badge（archived 用 archivedBadge 表示，其他狀態都顯示）
+      const statusVal = isArchived ? STATUS.ARCHIVED : (data.status || STATUS.ACTIVE);
+      const statusBadge = el('span', { html: statusBadgeHTML(statusVal) });
+      const lockBadge = (data.locked && !isArchived && data.status !== STATUS.REVIEW && data.status !== STATUS.VERIFIED)
+        ? el('span', { class: 'text-xs bg-stone-200 text-stone-700 px-2 py-0.5 rounded ml-1', title: AUTO_LOCK_REASON_LABEL[data.autoLockReason] || '已鎖定' }, '🔒 已 Lock')
         : null;
-      const archivedBadge = isArchived
-        ? el('span', { class: 'text-xs bg-stone-300 text-stone-700 px-2 py-0.5 rounded ml-1' }, '📦 已封存')
-        : null;
+      const archivedBadge = null;  // v2.3：合併到 statusBadge
       // admin only：依封存狀態顯示不同按鈕組
       const adminActions = isSystemAdmin() ? el('div', { class: 'flex gap-1 ml-1' },
         ...(isArchived ? [
@@ -495,6 +552,7 @@ async function renderProjects(root) {
         el('div', { class: 'flex justify-between items-start gap-2 flex-wrap' },
           el('h3', { class: 'font-semibold' }, data.name),
           el('div', { class: 'flex items-center flex-wrap gap-1' },
+            statusBadge,
             el('span', { class: 'text-xs bg-stone-100 px-2 py-0.5 rounded' }, roleLabel),
             lockBadge,
             archivedBadge,
@@ -621,6 +679,22 @@ async function renderProjectHome(root, projectId) {
   // 補預設 methodology（舊專案 fallback，給非 pi 看時用）
   if (!state.project.methodology) state.project.methodology = { ...DEFAULT_METHODOLOGY };
 
+  // 🩹 v2.3 階段 2：缺 status 自動推導（含 legacy locked → review）
+  // 所有角色都可觸發（rules 對 status / autoLockReason / migratedV2_3 寫入限 PI/admin，其他角色 silent fail）
+  if (!state.project.status && (state.project.members?.[state.user.uid] === 'pi' || isSystemAdmin())) {
+    try {
+      const inferred = await ensureStatusMigrated(state.project);
+      if (inferred) {
+        console.log('[v2.3 status migration]', inferred);
+        if (inferred === 'review' && state.project.autoLockReason === 'legacy') {
+          toast(`已升級到 v2.3：保留既有 Lock 為審查中狀態`, 4000);
+        }
+      }
+    } catch (e) { console.warn('Status migration failed:', e); }
+  }
+  // 非 PI/admin 看到舊專案：先在 client state 補 status 避免 UI undefined
+  if (!state.project.status) state.project.status = STATUS.ACTIVE;
+
   if (myId !== _routeId) return;
   // v1.6.12：DOM 寫入前再清 root，雙重保險（onAuthStateChanged 雙觸發 race）
   root.innerHTML = '';
@@ -631,8 +705,8 @@ async function renderProjectHome(root, projectId) {
   // 套用角色顯示矩陣
   applyRoleVisibility();
 
-  // Lock banner
-  if (isLocked()) $('#lock-banner').classList.remove('hidden');
+  // v2.3：lock-banner 升級為狀態列（同時顯示 status 與 lock 原因）
+  renderStatusBanner();
 
   // tab 切換
   $$('.tab-link').forEach(a => a.addEventListener('click', e => {
@@ -962,33 +1036,56 @@ async function renderSettings() {
   };
   // v1.7.0：dataManager 選項已從 HTML 移除，舊資料 auto migrate 到 pi（在 renderProjectHome 處理）
 
-  // Lock 切換
+  // v2.3：狀態 + Lock 切換（合併顯示）
   const lockStatus = $('#lock-status');
   const lockBtn = $('#btn-toggle-lock');
+  const curStatus = state.project.status || STATUS.ACTIVE;
+  const meta = STATUS_META[curStatus] || STATUS_META.active;
+  const reason = state.project.autoLockReason;
+  const reasonText = AUTO_LOCK_REASON_LABEL[reason] || '';
+  const lines = [`<div class="flex items-center gap-2 flex-wrap mb-1"><span class="${meta.badgeCls} text-sm px-3 py-1 rounded font-semibold">${meta.label}</span></div>`];
   if (state.project.locked) {
-    lockStatus.innerHTML = `🔒 <b>已 Lock</b> — 由 ${userLabel(state.project.lockedBy)} 於 ${fmtDate(state.project.lockedAt)} 鎖定`;
-    lockBtn.textContent = 'Unlock 專案';
-    lockBtn.className = 'bg-amber-600 text-white px-4 py-2 rounded text-sm';
+    lines.push(`<div>🔒 <b>已 Lock</b>${reasonText ? `（${reasonText}）` : ''} — 由 ${userLabel(state.project.lockedBy, '系統')} 於 ${fmtDate(state.project.lockedAt)} 鎖定</div>`);
   } else {
-    lockStatus.innerHTML = '🔓 未鎖定 — 所有授權成員可正常寫入';
-    lockBtn.textContent = 'Lock 專案';
-    lockBtn.className = 'bg-stone-700 text-white px-4 py-2 rounded text-sm';
+    lines.push(`<div>🔓 未鎖定 — 所有授權成員可正常寫入</div>`);
   }
-  lockBtn.onclick = async () => {
-    const newState = !state.project.locked;
-    if (!confirm(newState ? '確定 Lock 整個專案？所有成員將無法寫入。' : '確定 Unlock 專案？')) return;
-    await updateDoc(doc(db, 'projects', state.project.id), {
-      locked: newState,
-      lockedAt: newState ? serverTimestamp() : null,
-      lockedBy: newState ? state.user.uid : null
-    });
-    // v1.5.2 Bug #4：本地 state 同步 lockedAt/lockedBy（serverTimestamp 還沒回，先用 client 時間頂著；下次 load 會被覆蓋為精確值）
-    state.project.locked = newState;
-    state.project.lockedAt = newState ? new Date() : null;
-    state.project.lockedBy = newState ? state.user.uid : null;
-    toast(newState ? '已 Lock' : '已 Unlock');
-    renderSettings();
-  };
+  if (reason === 'all-verified') {
+    lines.push(`<div class="text-xs text-stone-500 mt-1">⚙️ 系統自動鎖定。若需修正資料，請對某筆標 ⚠ flag / ✕ reject 即會自動退回 active 並解鎖。</div>`);
+  }
+  lockStatus.innerHTML = lines.join('');
+
+  // Lock 按鈕：review / verified 隱藏（系統管控）；其他狀態給 PI 手動切換
+  const isAutoLocked = state.project.locked && (reason === 'all-verified' || reason === 'legacy');
+  if (curStatus === STATUS.VERIFIED || curStatus === STATUS.ARCHIVED) {
+    lockBtn.classList.add('hidden');
+  } else if (isAutoLocked) {
+    // 系統自動 lock：顯示提示按鈕但禁用，引導使用者用 markQA 退回
+    lockBtn.classList.remove('hidden');
+    lockBtn.textContent = '🔒 系統自動鎖定（請對任一筆標 flag 退回）';
+    lockBtn.className = 'bg-stone-300 text-stone-600 px-4 py-2 rounded text-sm cursor-not-allowed';
+    lockBtn.disabled = true;
+    lockBtn.onclick = (e) => { e.preventDefault(); toast('系統自動鎖定無法手動解除，請對某筆 markQA flag/reject'); };
+  } else {
+    lockBtn.classList.remove('hidden');
+    lockBtn.disabled = false;
+    if (state.project.locked) {
+      lockBtn.textContent = 'Unlock 專案';
+      lockBtn.className = 'bg-amber-600 text-white px-4 py-2 rounded text-sm';
+    } else {
+      lockBtn.textContent = 'Lock 專案';
+      lockBtn.className = 'bg-stone-700 text-white px-4 py-2 rounded text-sm';
+    }
+    lockBtn.onclick = async () => {
+      const newState = !state.project.locked;
+      if (!confirm(newState ? '確定 Lock 整個專案？所有成員將無法寫入。' : '確定 Unlock 專案？')) return;
+      try {
+        await applyStatusAfterManualLock(state.project, newState);
+        toast(newState ? '已 Lock（手動）' : '已 Unlock');
+        renderSettings();
+        renderStatusBanner();
+      } catch (e) { toast('操作失敗：' + e.message); }
+    };
+  }
 
   // seed demo（admin/pi 可見）
   const seedBtn = $('#btn-seed');
@@ -1144,6 +1241,15 @@ async function renderPlotDetail(root, projectId, plotId) {
     $(`[data-subtab-content="${t}"]`).classList.remove('hidden');
   }));
 
+  // v2.3.4：reroute 後恢復原 sub-tab（避免每次 markQA 跳回「立木調查」預設）
+  // 必須在 methodology 顯示控制（toggle hidden）之後才呼叫，否則點到 hidden tab
+  setTimeout(() => {
+    const restore = consumePendingSubtab();
+    if (!restore || restore === 'trees') return;
+    const tab = $(`.subtab-link[data-subtab="${restore}"]`);
+    if (tab && !tab.classList.contains('hidden')) tab.click();
+  }, 0);
+
   $('#btn-new-tree').addEventListener('click', () => {
     if (isLocked()) return toast('資料已 Lock');
     forms.openTreeForm(state.project, state.plot);
@@ -1289,7 +1395,8 @@ function renderTreeList(snap, projectId, plotId) {
         forms.openTreeForm(state.project, state.plot, { id: d.id, ...t });
       }
     },
-      el('td', {}, String(t.treeNum)),
+      // v2.3.3：# 欄位顯示完整 treeCode（舊資料 fallback：plot.code + 補零 treeNum）
+      el('td', {}, t.treeCode || `${state.plot.code}-${String(t.treeNum || 0).padStart(3, '0')}`),
       speciesCell,
       el('td', {}, (t.dbh_cm || 0).toFixed(1)),
       el('td', {}, (t.height_m || 0).toFixed(1)),

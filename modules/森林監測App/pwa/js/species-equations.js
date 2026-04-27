@@ -59,9 +59,12 @@ const SP = {
   '雲杉': { sci: 'Picea morrisonicola', category: 'conifer',
     calcV: (D) => ev.poly_d({ a: -1.0731, b: 0.021053, c: 0.000797 }, D),
     bef: 0.52, cf: 0.49, source: '楊寶霖 石子材 1963 中部 V=a+bD+cD²' },
+  // v2.3.2 修正：原 calcV: ev.log_d({a:0.713, b:1.34335}, D) 對 D=6cm 算出 57 m³ 嚴重爆量
+  // 推測原始文獻 V 單位為 dm³（劉慎孝 1969 logV=a+blogD），但程式當 m³ 用，量級差 ~1000 倍
+  // 安全做法：proxy 到台灣杉式（power D+H 雙變量、同為 Cupressaceae/Taxodioideae 親緣）
   '杉木': { sci: 'Cunninghamia lanceolata', category: 'conifer',
-    calcV: (D) => ev.log_d({ a: 0.713, b: 1.34335 }, D),
-    bef: 0.52, cf: 0.49, source: '劉慎孝 1969 全省 logV=a+blogD' },
+    calcV: (D, H) => ev.power({ a: 9.44e-05, b: 1.994741, c: 0.656961 }, D, H),
+    bef: 0.52, cf: 0.49, source: 'v2.3.2 借用台灣杉式（劉慎孝 1969 原參數疑單位錯，待覆核）' },
   '柳杉': { sci: 'Cryptomeria japonica', category: 'conifer',
     calcV: (D, H) => ev.log_d2h({ a: -4.193148, b: 0.933828 }, D, H),
     bef: 0.519, cf: 0.4903, source: '楊榮啟 1972 臺大實驗林 logV=a+blogD²H' },
@@ -187,6 +190,12 @@ export function calcTreeMetrics({ dbh_cm, height_m, speciesZh, speciesSci }) {
   const basalArea_m2 = Math.PI * Math.pow(D / 200, 2);
   let volume_m3 = sp.calcV(D, H);
   if (!isFinite(volume_m3) || volume_m3 < 0) volume_m3 = 0;  // 保護：極端值或公式溢位
+  // v2.3.2 sanity check：單株 V 上限 100 m³（台灣巨木紅檜 Aboriginal 級也不超過 80 m³）
+  // 超過視為公式異常 → 歸零並 warn，避免類似杉木 bug 滲入碳匯統計
+  if (volume_m3 > 100) {
+    console.warn(`[species-equations] 異常材積 ${volume_m3.toFixed(1)} m³ — D=${D}cm H=${H}m 物種=${speciesZh}（疑似公式異常，已歸零）`);
+    volume_m3 = 0;
+  }
   const biomass_t = volume_m3 * sp.bef;       // tonnes
   const carbon_t = biomass_t * sp.cf;         // tonnes
   const co2_t = carbon_t * 44 / 12;           // tonnes

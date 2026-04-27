@@ -1,6 +1,8 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
+// v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=2300';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -46,6 +48,9 @@ function killChart(key) { if (_charts[key]) { _charts[key].destroy(); delete _ch
 // ===== Dashboard =====
 export async function renderDashboard(project) {
   const { plots, trees, understory, soilCons, wildlife, harvest } = await fetchAllData(project);
+  // v2.3：QA 進度（全 6 子集合 + plots，排除 shell）
+  let progress = null;
+  try { progress = await computeProgress(project.id); } catch {}
 
   // 摘要 KPI
   const totalArea = plots.reduce((s, p) => s + (p.area_m2 || 0), 0);
@@ -56,6 +61,33 @@ export async function renderDashboard(project) {
   const totalCO2 = trees.reduce((s, t) => s + (t.co2_kg || 0), 0);  // v1.6.20
   const cBox = $('#dashboard-summary');
   cBox.innerHTML = '';
+
+  // v2.3：進度狀態卡（跨 2 欄寬度，最顯眼位置）
+  if (progress) {
+    const status = project.status || STATUS.ACTIVE;
+    const meta = STATUS_META[status] || STATUS_META.active;
+    const pct = progress.total > 0 ? Math.round(100 * progress.verified / progress.total) : 0;
+    const card = el('div', { class: 'bg-white rounded-lg shadow p-3 col-span-2' },
+      el('div', { class: 'flex items-center justify-between mb-2' },
+        el('div', { class: 'text-xs text-stone-500' }, '專案進度'),
+        el('span', { html: `<span class="${meta.badgeCls} text-xs px-2 py-0.5 rounded">${meta.label}</span>` })
+      ),
+      el('div', { class: 'flex items-baseline gap-2' },
+        el('div', { class: 'text-2xl font-bold' }, `${pct}%`),
+        el('div', { class: 'text-xs text-stone-500' }, `${progress.verified} / ${progress.total} verified`)
+      ),
+      el('div', { class: 'mt-2 w-full bg-stone-100 rounded-full h-2 overflow-hidden' },
+        el('div', { class: 'bg-green-500 h-2 rounded-full transition-all', style: `width:${pct}%` })
+      ),
+      el('div', { class: 'flex gap-2 text-xs text-stone-500 mt-1 flex-wrap' },
+        progress.pending > 0  ? el('span', {}, `⏳ ${progress.pending} 待審`) : null,
+        progress.flagged > 0  ? el('span', { class: 'text-amber-700' }, `⚠ ${progress.flagged} flagged`) : null,
+        progress.rejected > 0 ? el('span', { class: 'text-red-600' }, `✕ ${progress.rejected} rejected`) : null
+      )
+    );
+    cBox.appendChild(card);
+  }
+
   const kpis = [
     ['樣區數', plots.length],
     ['總調查面積', `${totalArea} m²`],
@@ -270,6 +302,8 @@ export async function exportXlsx(project) {
   const treesRows = trees.map(t => ({
     樣區: t.plotCode,
     序號: t.treeNum,
+    // v2.3.3：完整個體編號（DEMO-010-001 格式），舊資料即時 derive
+    個體編號: t.treeCode || `${t.plotCode}-${String(t.treeNum || 0).padStart(3, '0')}`,
     中名: t.speciesZh,
     學名: t.speciesSci || '',
     保育等級: t.conservationGrade || '',
