@@ -1,4 +1,4 @@
-// === preview 版 — 自動同步自 js/import-wizard.js（只改 import 路徑指向 preview-app-mock.js）===
+// === preview 版 — 自動同步自 js/import-wizard.js ===
 
 // ===== import-wizard.js — Excel 批次匯入雛形（v2.5.0-prototype）=====
 // 5 步驟 wizard：選檔 → 樣區對應 → 欄位對應 → 樹種/狀態碼比對 → 預覽

@@ -1,7 +1,7 @@
 ﻿// ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab } from './app.js';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
@@ -1010,10 +1010,27 @@ export async function markQA(project, plotId, subDoc, status) {
         stateChanged = true;
       }
     } catch (e) { console.warn('[v2.3 status update] failed', e); }
-    // v2.3.1：重繪當前 view 即時反映新 qaStatus（plot detail / pending list / row）
-    // v2.3.4：reroute 前記住當前 sub-tab（在野生動物分頁按 verified 不會跳回立木）
+    // v2.6.1：sub-doc + 沒觸發狀態機 → 局部更新該 row 的 badge（不 reroute、不閃畫面）
+    //         plot 本身 / 觸發 promote-demote → 仍 reroute（更新 lock banner、status badge、全部 row 的 QA 按鈕）
+    if (subDoc && !stateChanged) {
+      const cell = document.querySelector(`[data-qa-cell-id="qa-cell-${subDoc.coll}-${subDoc.id}"]`);
+      if (cell) {
+        const badge = cell.querySelector('.qa-badge');
+        if (badge) {
+          badge.outerHTML = qaBadge(status);
+          // v2.6.1b：broadcast event 給樣區清單頁的 chip 做增量更新
+          //   （plot listener 對 sub-doc 變動無感，需手動通知）
+          window.dispatchEvent(new CustomEvent('mrv:qa-changed', {
+            detail: { plotId, subColl: subDoc.coll, oldStatus: oldQa, newStatus: status }
+          }));
+          return;  // 局部更新成功 → 不 reroute
+        }
+      }
+      console.warn('[markQA local-update] cell/badge not found, fallback to reroute', subDoc);
+    }
+    // v2.3.1：fallback / 狀態機觸發 / plot 本身 → 重繪當前 view
+    // v2.3.4：reroute 前記住當前 sub-tab
     captureCurrentSubtab();
-    // 清空 state cache 強制重 fetch project + plot
     state.project = null;
     state.plot = null;
     try { await rerouteCurrentView(); } catch (e) { console.warn('[reroute] failed', e); }

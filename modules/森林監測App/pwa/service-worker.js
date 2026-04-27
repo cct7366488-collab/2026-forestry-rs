@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.6.0';  // v2.6.0：Excel 匯入 wizard 真實寫入（Phase 1，DRY-RUN → 真實匯入）
+const CACHE = 'forest-monitor-v2.6.1b';  // v2.6.1b：chip 即時更新（broadcast event 通知樣區清單增量更新，不用切頁回來）
 const SHELL = [
   './',
   './index.html',
