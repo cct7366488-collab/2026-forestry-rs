@@ -15,13 +15,14 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2612";
-import * as forms from "./forms.js?v=2612";
-import * as analytics from "./analytics.js?v=2612";
-import * as importWizard from "./import-wizard.js?v=2612";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2612";
+import { firebaseConfig } from "../firebase-config.js?v=2620";
+import * as forms from "./forms.js?v=2620";
+import * as analytics from "./analytics.js?v=2620";
+import * as importWizard from "./import-wizard.js?v=2620";
+import { renderTreeDistribution } from "./distribution.js?v=2620";   // v2.6.2：立木分布散布圖
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2620";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2612";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2620";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -1278,6 +1279,8 @@ async function renderPlotDetail(root, projectId, plotId) {
     a.classList.remove('border-transparent', 'text-stone-600');
     $$('[data-subtab-content]').forEach(s => s.classList.add('hidden'));
     $(`[data-subtab-content="${t}"]`).classList.remove('hidden');
+    // v2.6.2：切到 distribution 時重 render（hidden → visible 後容器寬度才正確）
+    if (t === 'distribution') rerenderDistribution();
   }));
 
   // v2.3.4：reroute 後恢復原 sub-tab（避免每次 markQA 跳回「立木調查」預設）
@@ -1471,12 +1474,26 @@ function appendQaButtons(parent, plotId, subDoc) {
   parent.appendChild(mk('bg-red-600', '✕', 'rejected'));
 }
 
+// v2.6.2：散布圖共用最後一次 snapshot — 切到 distribution sub-tab 時不需重 fetch
+let _lastTreeSnap = null;
+function rerenderDistribution() {
+  if (!_lastTreeSnap || !state.plot || !state.project) return;
+  renderTreeDistribution(_lastTreeSnap, state.plot, state.project.methodology, {
+    onTreeClick: (id, data) => {
+      if (isLocked()) return toast('資料已 Lock');
+      forms.openTreeForm(state.project, state.plot, { id, ...data });
+    }
+  });
+}
+
 function renderTreeList(snap, projectId, plotId) {
+  _lastTreeSnap = snap;   // v2.6.2：留給 distribution 用
   const list = $('#tree-list');
   $('#tree-count').textContent = `（${snap.size} 株）`;
   if (snap.empty) {
     list.innerHTML = '<p class="p-4 text-stone-500 text-sm">尚無立木記錄。</p>';
     $('#tree-summary').innerHTML = '';
+    rerenderDistribution();   // v2.6.2：空樣區也讓 distribution 顯示「尚無立木」
     return;
   }
   let totalBA = 0, totalV = 0, sumDbh = 0, sumH = 0;
@@ -1543,6 +1560,9 @@ function renderTreeList(snap, projectId, plotId) {
       el('div', { class: 'font-semibold' }, v)
     ))
   );
+
+  // v2.6.2：每次 snap 更新都重 render distribution（即使在 hidden 也存 _lastTreeSnap，sub-tab 切過去用 rerender）
+  rerenderDistribution();
 }
 
 function renderRegenList(snap, projectId, plotId) {

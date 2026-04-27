@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=2612">
+  <link rel="stylesheet" href="style.css?v=2620">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -248,6 +248,7 @@
 
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
       <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">🌳 立木調查</a>
+      <a href="#" data-subtab="distribution" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">📍 立木分布</a>
       <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌱 自然更新</a>
       <a href="#" data-subtab="understory" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌿 地被植物</a>
       <a href="#" data-subtab="soilcons" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">⛰️ 水土保持</a>
@@ -263,6 +264,20 @@
       </div>
       <div id="tree-summary" class="bg-white rounded-lg shadow p-3 mb-3 text-sm grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
       <div id="tree-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
+    <!-- v2.6.2：立木分布散布圖（樣區內 X/Y 視覺化）-->
+    <section data-subtab-content="distribution" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">📍 立木分布散布圖 <span id="dist-count" class="text-sm text-stone-500"></span></h2>
+        <div id="dist-controls"></div>
+      </div>
+      <p class="text-xs text-stone-500 mb-2">樣區內每株立木的 X/Y 局部座標散布。色 = 活力，大小 = DBH。Hover 顯示詳情、Click 編輯。</p>
+      <div class="bg-white rounded-lg shadow p-3">
+        <div id="dist-info" class="text-xs text-stone-600 mb-2"></div>
+        <div id="dist-canvas-wrap" class="relative max-w-2xl mx-auto"></div>
+        <div id="dist-legend" class="flex flex-wrap gap-3 mt-3 text-xs justify-center"></div>
+      </div>
     </section>
 
     <section data-subtab-content="regen" class="hidden">
@@ -338,6 +353,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=2612"></script>
+<script type="module" src="js/app.js?v=2620"></script>
 </body>
 </html>
