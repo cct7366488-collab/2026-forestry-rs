@@ -15,12 +15,13 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2400";
-import * as forms from "./forms.js?v=2400";
-import * as analytics from "./analytics.js?v=2400";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2400";
+import { firebaseConfig } from "../firebase-config.js?v=2500";
+import * as forms from "./forms.js?v=2500";
+import * as analytics from "./analytics.js?v=2500";
+import * as importWizard from "./import-wizard.js?v=2500";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2500";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2400";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2500";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -66,6 +67,10 @@ export const DEFAULT_METHODOLOGY = {
   targetPlotCount: 50,
   plotShape: 'circle',
   plotAreaOptions: [400, 500, 1000],
+  // v2.5：plotOriginType 決定立木 X/Y 座標如何解釋
+  //   'center'：plot.GPS = 樣區中心點，皮尺距中心 4 象限（X/Y 可正可負）— 林保署永久樣區常用
+  //   'corner'：plot.GPS = 樣區左下角，皮尺從左下往右北（X/Y 恆為正）
+  plotOriginType: 'center',
   required: { photos: false, branchHeight: false, pestSymptoms: false },
   modules: {
     plot: true, tree: true, regeneration: true,
@@ -1095,6 +1100,15 @@ async function renderSettings() {
     seedBtn.closest('.bg-white').classList.add('hidden');
   }
 
+  // Excel 批次匯入（雛形 / DRY-RUN）— PI 與 admin 可見
+  const importBtn = $('#btn-import-excel');
+  if (importBtn && (isPi() || isSystemAdmin())) {
+    importBtn.onclick = () => {
+      if (isLocked()) return toast('資料已 Lock，無法匯入');
+      importWizard.openImportWizard(state.project);
+    };
+  }
+
   // v1.6.19：admin 專案管理區塊（封存 / 永久刪除依狀態切換顯示）
   if (isSystemAdmin()) {
     const settingsView = $('[data-tab-content="settings"]');
@@ -1413,6 +1427,10 @@ function renderTreeList(snap, projectId, plotId) {
     if (canQA() && !isLocked()) {
       appendQaButtons(speciesCell, plotId, { coll: 'trees', id: d.id });
     }
+    // v2.5：X/Y 欄（兩數都有才顯示，否則顯示 —）
+    const xyText = (Number.isFinite(t.localX_m) && Number.isFinite(t.localY_m))
+      ? `${t.localX_m.toFixed(1)}, ${t.localY_m.toFixed(1)}`
+      : '—';
     return el('tr', {
       onclick: () => {
         if (isLocked()) return toast('資料已 Lock');
@@ -1424,6 +1442,7 @@ function renderTreeList(snap, projectId, plotId) {
       speciesCell,
       el('td', {}, (t.dbh_cm || 0).toFixed(1)),
       el('td', {}, (t.height_m || 0).toFixed(1)),
+      el('td', { class: 'text-xs text-stone-600 font-mono' }, xyText),  // v2.5
       el('td', {}, el('span', { class: `badge badge-${v}` }, vlabel)),
       el('td', {}, (t.volume_m3 || 0).toFixed(3))
     );
@@ -1433,6 +1452,7 @@ function renderTreeList(snap, projectId, plotId) {
       el('tr', {},
         el('th', {}, '#'), el('th', {}, '樹種 / QA'),
         el('th', {}, 'DBH (cm)'), el('th', {}, 'H (m)'),
+        el('th', {}, 'X, Y (m)'),  // v2.5
         el('th', {}, '活力'), el('th', {}, '材積 (m³)')
       )
     ),

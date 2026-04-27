@@ -1,5 +1,6 @@
 # 資料 Schema（Firestore）
 
+> v2.5（2026-04-27）：立木個體座標（localX/Y + absolute TWD97/WGS84）+ methodology.plotOriginType
 > v1.5（2026-04-25）：5 角色 + 方法學 + Lock + QA 機制
 > 歷史：v1.0 簡易 schema（無 methodology / qa / lock）
 
@@ -56,6 +57,7 @@
   targetPlotCount: 50,             // 目標樣區數
   plotShape: 'circle',             // 'circle' | 'square'
   plotAreaOptions: [500, 1000],    // 允許的面積選項（surveyor 只能挑這些）
+  plotOriginType: 'center',        // v2.5：'center'（plot.GPS=樣區中心，皮尺四象限） | 'corner'（plot.GPS=左下角，皮尺第一象限）
   required: {                      // 必填欄位開關
     photos: false,
     branchHeight: false,
@@ -99,6 +101,25 @@
 ### 四、`/projects/{projectId}/plots/{plotId}/trees/{treeId}`
 
 新增同樣 4 欄 QA 欄位（qaStatus / qaMarkedBy / qaMarkedAt / qaComment），其餘同 v1.0。
+
+#### v2.5：立木個體座標（4 欄，林保署永久樣區格式）
+
+| 欄位 | 型別 | 必填 | 說明 |
+|------|------|------|------|
+| **localX_m** | number | ⭕ | 樣區內局部 X 座標（m）；center 模式可正可負，corner 模式恆為正 |
+| **localY_m** | number | ⭕ | 樣區內局部 Y 座標（m）；同上 |
+| **locationTWD97** | map | ⭕ | `{ x, y }`：absolute = plot.locationTWD97 + (localX, localY)，自動算 |
+| **location** | geopoint | ⭕ | WGS84：由 locationTWD97 反投影（proj4 EPSG:3826→EPSG:4326）自動算 |
+
+**換算公式**（兩種 plotOriginType 公式相同，差別在 plot.locationTWD97 的語意）：
+```
+absX = plot.locationTWD97.x + localX_m
+absY = plot.locationTWD97.y + localY_m
+```
+- **plotOriginType='center'**：plot.locationTWD97 是樣區中心；皮尺距中心可正可負
+- **plotOriginType='corner'**：plot.locationTWD97 是樣區左下角；皮尺距左下恆為正
+
+寫入時：filled by `forms.js openTreeForm` submit handler；schema 允許 null（既有立木 migration 補 null 即可）。
 
 ### 五、`/projects/{projectId}/plots/{plotId}/regeneration/{regenId}`
 

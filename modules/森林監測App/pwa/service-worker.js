@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.4.0';  // v2.4.0：品牌升級為「ForestMRV 智慧森林監測平臺」（呼應 MRV 原則）
+const CACHE = 'forest-monitor-v2.5.0';  // v2.5.0：立木個體座標（localX/Y + abs TWD97/WGS84）+ Excel 匯入 wizard 雛形
 const SHELL = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const SHELL = [
   './js/species-dict.js',     // v2.0：物種字典（樹種/動物/草本/入侵）
   './js/code-tables.js',
   './js/project-status.js',   // v2.3：階段 2 狀態機
+  './js/import-wizard.js',    // v2.5：Excel 匯入 wizard（雛形 / DRY-RUN）
   './firebase-config.js'
 ];
 

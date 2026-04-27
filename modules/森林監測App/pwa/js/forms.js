@@ -1,7 +1,7 @@
 ﻿// ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab } from './app.js';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab } from './app.js';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
@@ -622,6 +622,27 @@ export function openMethodologyForm(project) {
       value: m.plotShape }),
     field({ label: '允許的樣區面積（m²，逗號分隔）', name: 'plotAreaOptions', required: true,
       value: (m.plotAreaOptions || []).join(','), placeholder: '400, 500, 1000' }),
+    // v2.5：plotOriginType — 立木 X/Y 座標系統的原點位置
+    el('div', { class: 'field', style: 'background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;padding:10px' },
+      el('label', { style: 'font-weight:600;font-size:14px;display:block;margin-bottom:6px' },
+        '樣區原點位置（v2.5）'),
+      ...[
+        { v: 'center', label: '中心點原點', desc: 'plot.GPS = 樣區中心；皮尺距中心可正可負（林保署永久樣區常用）' },
+        { v: 'corner', label: '左下角原點', desc: 'plot.GPS = 樣區左下角；皮尺從左下往右北恆為正' }
+      ].map(({ v, label, desc }) => el('label', {
+        style: 'display:block;font-size:13px;line-height:1.5;cursor:pointer;padding:4px 0'
+      },
+        el('input', {
+          type: 'radio', name: 'plotOriginType', value: v,
+          style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+          ...((m.plotOriginType || 'center') === v ? { checked: 'true' } : {})
+        }),
+        el('b', {}, label),
+        el('div', { style: 'font-size:11px;color:#57534e;margin-left:20px' }, desc)
+      )),
+      el('p', { style: 'font-size:11px;color:#1e40af;margin-top:6px' },
+        '💡 設定後，立木表單會出現 X / Y 座標欄位，自動換算每株絕對 TWD97 + WGS84 座標。')
+    ),
     el('div', { class: 'field' },
       el('label', {}, '強制必填欄位（立木調查）'),
       el('div', { style: 'display:block' },
@@ -790,6 +811,7 @@ export function openMethodologyForm(project) {
       targetPlotCount: parseInt(fd.get('targetPlotCount'), 10),
       plotShape: fd.get('plotShape'),
       plotAreaOptions: fd.get('plotAreaOptions').split(',').map(s => parseInt(s.trim(), 10)).filter(n => n > 0),
+      plotOriginType: fd.get('plotOriginType') || 'center',  // v2.5
       required: {
         photos: fd.get('req_photos') === 'on',
         branchHeight: fd.get('req_branchHeight') === 'on',
@@ -1213,6 +1235,64 @@ export async function openTreeForm(project, plot, existing = null) {
   const treePhotoLabel = el('label', {}, '立木照片',
     el('span', { class: 'text-xs text-stone-500 ml-1' }, '（樹皮 / 葉 / 花果 / 整體，≤5MB / 張）'));
 
+  // v2.5：立木個體座標 X/Y（樣區內局部，自動換算 absolute TWD97 + WGS84）
+  const meth = project.methodology || DEFAULT_METHODOLOGY;
+  const originType = meth.plotOriginType || 'center';
+  const originLabel = originType === 'center' ? '中心點' : '左下角';
+  const xyHint = originType === 'center'
+    ? '皮尺距樣區中心點的偏移量（東向 X / 北向 Y，可正可負）'
+    : '皮尺距樣區左下角的距離（向東 X / 向北 Y，皆為正）';
+  const xInput = el('input', {
+    type: 'number', name: 'localX_m', step: '0.01',
+    value: existing?.localX_m ?? '',
+    style: 'width:100%;border:1px solid #d6d3d1;border-radius:6px;padding:8px 10px;font-size:16px'
+  });
+  const yInput = el('input', {
+    type: 'number', name: 'localY_m', step: '0.01',
+    value: existing?.localY_m ?? '',
+    style: 'width:100%;border:1px solid #d6d3d1;border-radius:6px;padding:8px 10px;font-size:16px'
+  });
+  const xyCalc = el('div', { class: 'text-xs', style: 'background:#f5f5f4;border-radius:6px;padding:6px 8px;margin-top:6px' });
+  function updateXyCalc() {
+    const lx = parseFloat(xInput.value);
+    const ly = parseFloat(yInput.value);
+    const px = plot.locationTWD97?.x;
+    const py = plot.locationTWD97?.y;
+    if (!Number.isFinite(lx) || !Number.isFinite(ly)) {
+      xyCalc.innerHTML = '<span class="text-stone-500">輸入 X / Y 即時換算絕對座標</span>';
+      return;
+    }
+    if (!Number.isFinite(px) || !Number.isFinite(py)) {
+      xyCalc.innerHTML = '<span class="text-amber-700">⚠ 樣區尚未設定 GPS 座標 — 無法換算絕對位置</span>';
+      return;
+    }
+    const absX = px + lx;
+    const absY = py + ly;
+    let lngLat = '—';
+    try {
+      const w = twd97ToWgs84(absX, absY);
+      if (w?.lng != null) lngLat = `${w.lng.toFixed(6)}, ${w.lat.toFixed(6)}`;
+    } catch (e) {}
+    xyCalc.innerHTML =
+      `<div>絕對 TWD97：<b>X=${absX.toFixed(2)} m, Y=${absY.toFixed(2)} m</b></div>` +
+      `<div>WGS84（lng, lat）：<b>${lngLat}</b></div>`;
+  }
+  xInput.addEventListener('input', updateXyCalc);
+  yInput.addEventListener('input', updateXyCalc);
+  const xyBox = el('div', { class: 'field', style: 'background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;padding:10px' },
+    el('label', { style: 'font-weight:600;font-size:14px;display:block;margin-bottom:4px' },
+      `📍 立木位置（${originLabel}原點）`,
+      el('span', { class: 'text-xs text-stone-500 ml-1' }, '（v2.5 新欄位 / 選填）')),
+    el('div', { class: 'text-xs text-stone-600 mb-2' }, xyHint),
+    el('div', { class: 'field-row' },
+      el('div', { class: 'field' }, el('label', {}, 'X (m)'), xInput),
+      el('div', { class: 'field' }, el('label', {}, 'Y (m)'), yInput)
+    ),
+    xyCalc
+  );
+  // 延遲一拍以等 DOM 接上才更新提示
+  setTimeout(updateXyCalc, 0);
+
   // v2.3.3：個體編號 — prefix（plot.code-）+ 序號 input + 即時預覽
   const treeNumInput = el('input', {
     type: 'number', name: 'treeNum', step: '1', min: '1', required: 'true',
@@ -1248,6 +1328,8 @@ export async function openTreeForm(project, plot, existing = null) {
       speciesInput,
       consWarn
     ),
+    // v2.5：立木個體座標（樣區內局部 X/Y → 自動算 absolute TWD97 + WGS84）
+    xyBox,
     el('div', { class: 'field-row' },
       field({ label: 'DBH (cm)', name: 'dbh_cm', type: 'number', step: '0.1', min: '0', required: true, value: existing?.dbh_cm ?? '' }),
       field({ label: '樹高 H (m)', name: 'height_m', type: 'number', step: '0.1', min: '0', required: true, value: existing?.height_m ?? '' })
@@ -1294,6 +1376,22 @@ export async function openTreeForm(project, plot, existing = null) {
     const h = parseFloat(fd.get('height_m'));
     const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh, speciesSci: sp.sci });
     const treeNumVal = parseInt(fd.get('treeNum'), 10);
+    // v2.5：立木座標換算（local X/Y → absolute TWD97 + WGS84 geopoint）
+    const localX = parseFloat(fd.get('localX_m'));
+    const localY = parseFloat(fd.get('localY_m'));
+    let treeLocationTWD97 = null, treeLocationWGS84 = null;
+    if (Number.isFinite(localX) && Number.isFinite(localY)
+        && Number.isFinite(plot.locationTWD97?.x) && Number.isFinite(plot.locationTWD97?.y)) {
+      const absX = plot.locationTWD97.x + localX;
+      const absY = plot.locationTWD97.y + localY;
+      treeLocationTWD97 = { x: absX, y: absY };
+      try {
+        const w = twd97ToWgs84(absX, absY);
+        if (w?.lng != null && w?.lat != null) {
+          treeLocationWGS84 = new fb.GeoPoint(w.lat, w.lng);
+        }
+      } catch (e) { console.warn('[v2.5 tree wgs84]', e); }
+    }
     const data = {
       treeNum: treeNumVal,
       // v2.3.3：完整字串編號（DEMO-010-001 格式），方便顯示與匯出
@@ -1308,6 +1406,11 @@ export async function openTreeForm(project, plot, existing = null) {
       pestSymptoms: fd.getAll('pest'),
       marking: fd.get('marking'),
       notes: fd.get('notes').trim() || null,
+      // v2.5 立木個體座標
+      localX_m: Number.isFinite(localX) ? localX : null,
+      localY_m: Number.isFinite(localY) ? localY : null,
+      locationTWD97: treeLocationTWD97,
+      location: treeLocationWGS84,
       ...m,
       updatedAt: fb.serverTimestamp()
     };
