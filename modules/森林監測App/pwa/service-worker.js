@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.3.4';  // v2.3.4：markQA reroute 後恢復原 sub-tab（不再跳回立木）
+const CACHE = 'forest-monitor-v2.4.0';  // v2.4.0：品牌升級為「ForestMRV 智慧森林監測平臺」（呼應 MRV 原則）
 const SHELL = [
   './',
   './index.html',

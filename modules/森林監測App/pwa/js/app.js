@@ -15,12 +15,12 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2304";
-import * as forms from "./forms.js?v=2304";
-import * as analytics from "./analytics.js?v=2304";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2304";
+import { firebaseConfig } from "../firebase-config.js?v=2400";
+import * as forms from "./forms.js?v=2400";
+import * as analytics from "./analytics.js?v=2400";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2400";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2304";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2400";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -1262,6 +1262,30 @@ async function renderPlotDetail(root, projectId, plotId) {
     if (isLocked()) return toast('資料已 Lock');
     forms.openPlotForm(state.project, state.plot);
   });
+  // v2.3.9：標題行常駐「✎ 編輯樣區」按鈕 — 跟 sub-tab 內的舊按鈕同行為
+  const editPlotHeaderBtn = $('#btn-edit-plot-header');
+  if (editPlotHeaderBtn) {
+    editPlotHeaderBtn.addEventListener('click', () => {
+      if (isLocked()) return toast('資料已 Lock');
+      forms.openPlotForm(state.project, state.plot);
+    });
+  }
+  // v2.3.9：GPS 缺失警示（plot.location 為 null 時顯示）— 直接連到編輯表單
+  const gpsWarning = $('#plot-gps-warning');
+  if (gpsWarning && !state.plot.location) {
+    gpsWarning.innerHTML = '';
+    const canEditNow = canCollect() && !isLocked();
+    const warning = el('div', {
+      class: 'mt-2 inline-flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 px-3 py-1.5 rounded text-xs flex-wrap'
+    },
+      el('span', { class: 'font-semibold' }, '⚠ 尚未設定 GPS 座標'),
+      canEditNow ? el('button', {
+        class: 'bg-amber-600 hover:bg-amber-700 text-white px-2 py-0.5 rounded text-xs font-medium',
+        onclick: () => forms.openPlotForm(state.project, state.plot)
+      }, '✎ 點此設定') : el('span', { class: 'text-amber-700' }, '（無編輯權限）')
+    );
+    gpsWarning.appendChild(warning);
+  }
 
   // v2.0/v2.1/v2.2：依 methodology 顯示新 subtabs
   const mods = state.project.methodology?.modules || {};

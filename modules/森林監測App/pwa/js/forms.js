@@ -14,6 +14,93 @@ const SPECIES = TREES;
 // （v2.0：原本內聯的 ~100 種樹種陣列已移到 species-dict.js TREES，本檔透過上面的 SPECIES = TREES 別名引用）
 const PEST_OPTIONS = ['葉斑', '潰瘍', '蟲孔', '空洞', '菌害', '枯梢', '無'];
 
+// ===== v2.3.6：共用 GPS button helper =====
+// plot 表單與 wildlife 表單共用，避免 drift；行為 100% 一致
+// 用法：const { gpsBtn, gpsStatus, lngInput, latInput, accInput } = createGpsButton({...});
+function createGpsButton({
+  initialLat = null,        // 已存的緯度（編輯既有資料用）
+  initialLng = null,        // 已存的經度
+  initialAccuracy = null,   // 已存的精度（plot 表單用）
+  showTwd97 = false,        // true: 顯示 TWD97 座標（plot 表單用）
+  showInitialAsExisting = false, // true: 初始顯示「已存：lat, lng」（wildlife 用）
+  plotForDistance = null    // 若提供，定位後顯示與 plot 中心距離（wildlife 用）
+} = {}) {
+  // 三個 hidden input（lng/lat 必有，accuracy 視 showTwd97 決定）
+  const lngInput = el('input', { type: 'hidden', name: 'lng', value: initialLng ?? '' });
+  const latInput = el('input', { type: 'hidden', name: 'lat', value: initialLat ?? '' });
+  const accInput = showTwd97
+    ? el('input', { type: 'hidden', name: 'accuracy', value: initialAccuracy ?? '' })
+    : null;
+
+  // 初始狀態文字
+  let initText = '尚未定位';
+  if (initialLat != null && initialLng != null) {
+    if (showInitialAsExisting) {
+      initText = `已存：${Number(initialLat).toFixed(6)}, ${Number(initialLng).toFixed(6)}`;
+    } else if (showTwd97) {
+      initText = `WGS84: ${Number(initialLat).toFixed(6)}, ${Number(initialLng).toFixed(6)}`;
+    } else {
+      initText = `${Number(initialLat).toFixed(6)}, ${Number(initialLng).toFixed(6)}`;
+    }
+  }
+  const gpsStatus = el('span', { class: 'text-xs text-stone-600 ml-2' }, initText);
+
+  // 先創建 button（給 click handler 引用）
+  const gpsBtn = el('button', { type: 'button', class: 'gps-btn' }, '📍 抓取 GPS');
+
+  gpsBtn.addEventListener('click', () => {
+    console.log('[createGpsButton] click triggered');
+    if (!navigator.geolocation) { toast('此裝置不支援 GPS'); return; }
+    gpsBtn.disabled = true;
+    gpsBtn.textContent = '⏳ 定位中...';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        try {
+          const { longitude, latitude, accuracy } = pos.coords;
+          lngInput.value = longitude;
+          latInput.value = latitude;
+          if (accInput) accInput.value = accuracy;
+
+          // 距 plot 中心訊息（wildlife 用）
+          let extraMsg = '';
+          if (plotForDistance) {
+            const plotLoc = plotForDistance.location;
+            const plotLat = plotLoc?.latitude ?? plotLoc?._lat ?? null;
+            const plotLng = plotLoc?.longitude ?? plotLoc?._long ?? null;
+            if (plotLat != null && plotLng != null) {
+              const d = haversine(latitude, longitude, plotLat, plotLng);
+              extraMsg = `<br>距 plot 中心 ${Math.round(d)} m${d > 100 ? ' ⚠ 超過 100 m 邊界' : ''}`;
+            }
+          }
+
+          // TWD97 顯示（plot 用）
+          if (showTwd97) {
+            const t = wgs84ToTwd97(longitude, latitude);
+            gpsStatus.innerHTML = `WGS84: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>TWD97: (${t.x}, ${t.y}) ｜ ±${Math.round(accuracy)}m${extraMsg}`;
+          } else {
+            gpsStatus.innerHTML = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} ±${Math.round(accuracy)}m${extraMsg}`;
+          }
+        } catch (e) {
+          console.error('[createGpsButton] success callback error', e);
+          toast('GPS 處理錯誤：' + e.message);
+        } finally {
+          gpsBtn.disabled = false;
+          gpsBtn.textContent = '📍 重新定位';
+        }
+      },
+      (err) => {
+        console.warn('[createGpsButton] error', err);
+        toast('GPS 失敗：' + (err.message || '權限被拒或超時'));
+        gpsBtn.disabled = false;
+        gpsBtn.textContent = '📍 抓取 GPS';
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+
+  return { gpsBtn, gpsStatus, lngInput, latInput, accInput };
+}
+
 // ===== 共用：欄位工廠 =====
 function field({ label, name, type = 'text', required = false, value = '', placeholder = '', options = null, step, min, max, rows }) {
   const id = `f-${name}`;
@@ -926,34 +1013,12 @@ export async function openPlotForm(project, existing = null) {
     } catch {}
   }
 
-  const gpsBtn = el('button', { type: 'button', class: 'gps-btn' }, '📍 抓取 GPS');
-  const gpsStatus = el('span', { class: 'text-xs text-stone-600 ml-2' }, loc ? `WGS84: ${loc.latitude.toFixed(6)}, ${loc.longitude.toFixed(6)}` : '尚未定位');
-  const lngInput = el('input', { type: 'hidden', name: 'lng', value: loc?.longitude || '' });
-  const latInput = el('input', { type: 'hidden', name: 'lat', value: loc?.latitude || '' });
-  const accInput = el('input', { type: 'hidden', name: 'accuracy', value: existing?.locationAccuracy_m || '' });
-
-  gpsBtn.addEventListener('click', () => {
-    if (!navigator.geolocation) { toast('此裝置不支援 GPS'); return; }
-    gpsBtn.disabled = true;
-    gpsBtn.textContent = '⏳ 定位中...';
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { longitude, latitude, accuracy } = pos.coords;
-        lngInput.value = longitude;
-        latInput.value = latitude;
-        accInput.value = accuracy;
-        const t = wgs84ToTwd97(longitude, latitude);
-        gpsStatus.innerHTML = `WGS84: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>TWD97: (${t.x}, ${t.y}) ｜ ±${Math.round(accuracy)}m`;
-        gpsBtn.disabled = false;
-        gpsBtn.textContent = '📍 重新定位';
-      },
-      (err) => {
-        toast('GPS 失敗：' + err.message);
-        gpsBtn.disabled = false;
-        gpsBtn.textContent = '📍 抓取 GPS';
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+  // v2.3.6：plot GPS 用共用 helper（顯示 TWD97 + accuracy）
+  const { gpsBtn, gpsStatus, lngInput, latInput, accInput } = createGpsButton({
+    initialLat: loc?.latitude ?? null,
+    initialLng: loc?.longitude ?? null,
+    initialAccuracy: existing?.locationAccuracy_m ?? null,
+    showTwd97: true
   });
 
   // v1.6：照片上傳元件
@@ -1841,36 +1906,14 @@ export function openWildlifeForm(project, plot, existing = null) {
   }
   methodSelect.addEventListener('change', updateMethodVisibility);
 
-  // GPS 抓取（顯示與 plot 中心距離）
-  const gpsStatus = el('span', { class: 'text-xs text-stone-600 ml-2' },
-    existing?.location ? `已存：${existing.location.latitude?.toFixed(6) || existing.location._lat?.toFixed(6)}, ${existing.location.longitude?.toFixed(6) || existing.location._long?.toFixed(6)}` : '尚未定位');
-  const gpsBtn = el('button', { type: 'button', class: 'gps-btn' }, '📍 抓取 GPS');
-  const lngInput = el('input', { type: 'hidden', name: 'lng',
-    value: existing?.location?.longitude || existing?.location?._long || '' });
-  const latInput = el('input', { type: 'hidden', name: 'lat',
-    value: existing?.location?.latitude || existing?.location?._lat || '' });
-  gpsBtn.addEventListener('click', () => {
-    if (!navigator.geolocation) { toast('此裝置不支援 GPS'); return; }
-    gpsBtn.disabled = true; gpsBtn.textContent = '⏳ 定位中...';
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { longitude, latitude, accuracy } = pos.coords;
-        lngInput.value = longitude; latInput.value = latitude;
-        // 算距 plot 中心
-        const plotLoc = plot.location;
-        const plotLat = plotLoc?.latitude || plotLoc?._lat;
-        const plotLng = plotLoc?.longitude || plotLoc?._long;
-        let distMsg = '';
-        if (plotLat && plotLng) {
-          const d = haversine(latitude, longitude, plotLat, plotLng);
-          distMsg = `<br>距 plot 中心 ${Math.round(d)} m${d > 100 ? ' ⚠ 超過 100 m 邊界' : ''}`;
-        }
-        gpsStatus.innerHTML = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} ±${Math.round(accuracy)}m${distMsg}`;
-        gpsBtn.disabled = false; gpsBtn.textContent = '📍 重新定位';
-      },
-      (err) => { toast('GPS 失敗：' + err.message); gpsBtn.disabled = false; gpsBtn.textContent = '📍 抓取 GPS'; },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+  // v2.3.6：wildlife GPS 用共用 helper（與 plot 表單同款行為，加距 plot 中心顯示）
+  const wlInitLat = existing?.location?.latitude ?? existing?.location?._lat ?? null;
+  const wlInitLng = existing?.location?.longitude ?? existing?.location?._long ?? null;
+  const { gpsBtn, gpsStatus, lngInput, latInput } = createGpsButton({
+    initialLat: wlInitLat,
+    initialLng: wlInitLng,
+    showInitialAsExisting: true,
+    plotForDistance: plot
   });
 
   const photoUp = photoUploader({ existing: existing?.photos || [] });

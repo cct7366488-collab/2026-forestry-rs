@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#15803d">
-  <title>森林監測 App</title>
+  <title>ForestMRV 智慧森林監測平臺</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%F0%9F%8C%B2%3C/text%3E%3C/svg%3E">
 
@@ -29,15 +29,19 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=2304">
+  <link rel="stylesheet" href="style.css?v=2400">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
 <!-- ===== Header ===== -->
 <header id="topbar" class="bg-forest-800 text-white sticky top-0 z-50 shadow">
   <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-    <a href="#/" class="text-lg font-bold flex items-center gap-2">
-      🌲 <span>森林監測</span>
+    <a href="#/" class="flex items-center gap-2 leading-tight">
+      <span class="text-2xl">🌲</span>
+      <span class="flex flex-col">
+        <span class="text-base font-bold tracking-wide">ForestMRV</span>
+        <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
+      </span>
     </a>
     <nav id="topnav" class="flex items-center gap-3 text-sm"></nav>
   </div>
@@ -56,8 +60,9 @@
 
 <template id="view-login">
   <div class="max-w-sm mx-auto bg-white rounded-2xl shadow p-6 mt-8">
-    <h1 class="text-2xl font-bold mb-1">登入</h1>
-    <p class="text-sm text-stone-600 mb-6">森林監測資料收集平台</p>
+    <h1 class="text-2xl font-bold mb-1">ForestMRV</h1>
+    <p class="text-sm text-stone-600 mb-1">智慧森林監測平臺</p>
+    <p class="text-xs text-stone-500 mb-6">符合 IPCC LULUCF + MRV（測量 / 報告 / 查證）原則</p>
     <button id="btn-google" class="w-full bg-white border border-stone-300 hover:bg-stone-50 rounded-lg px-4 py-2 font-medium flex items-center justify-center gap-2 mb-3">
       <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5h-1.9V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.5-4.5 2.4-7.2 2.4-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.6l6.2 5.2c-.4.4 6.6-4.8 6.6-14.8 0-1.3-.1-2.4-.4-4z"/></svg>
       使用 Google 登入
@@ -89,7 +94,10 @@
 <template id="view-project-home">
   <div class="space-y-6">
     <div>
-      <a href="#/" class="text-sm text-stone-600">← 我的專案</a>
+      <a href="#/" class="inline-flex items-center gap-2 text-sm font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 px-3 py-1.5 rounded-lg transition shadow-sm">
+        <span class="text-base leading-none">←</span>
+        <span>返回我的專案</span>
+      </a>
       <h1 class="text-2xl font-bold mt-1" data-bind="project.name"></h1>
       <p class="text-sm text-stone-600" data-bind="project.code"></p>
     </div>
@@ -210,24 +218,37 @@
 <template id="view-plot-detail">
   <div class="space-y-6">
     <div>
-      <a href="#" data-back-to-project class="text-sm text-stone-600">← 樣區清單</a>
-      <h1 class="text-2xl font-bold mt-1" data-bind="plot.code"></h1>
-      <p class="text-sm text-stone-600">
-        <span data-bind="plot.forestUnit"></span> · 形狀 <span data-bind="plot.shape"></span> · 面積 <span data-bind="plot.area_m2"></span> m²
-      </p>
-      <p class="text-xs text-stone-500 mt-1">
-        WGS84: <span data-bind="plot.wgs84"></span> ｜ TWD97 TM2: <span data-bind="plot.twd97"></span>
-      </p>
+      <a href="#" data-back-to-project class="inline-flex items-center gap-2 text-sm font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 px-3 py-1.5 rounded-lg transition shadow-sm">
+        <span class="text-base leading-none">←</span>
+        <span>返回樣區清單</span>
+      </a>
+      <div class="flex justify-between items-start gap-2 mt-1 flex-wrap">
+        <div class="flex-1 min-w-0">
+          <h1 class="text-2xl font-bold" data-bind="plot.code"></h1>
+          <p class="text-sm text-stone-600">
+            <span data-bind="plot.forestUnit"></span> · 形狀 <span data-bind="plot.shape"></span> · 面積 <span data-bind="plot.area_m2"></span> m²
+          </p>
+          <p class="text-xs text-stone-500 mt-1">
+            WGS84: <span data-bind="plot.wgs84"></span> ｜ TWD97 TM2: <span data-bind="plot.twd97"></span>
+          </p>
+          <!-- v2.3.9：GPS 缺失警示放這裡（renderPlotDetail 動態插入） -->
+          <div id="plot-gps-warning"></div>
+        </div>
+        <!-- v2.3.9：標題行常駐「編輯樣區」入口（PI / surveyor / admin 才可見）-->
+        <button id="btn-edit-plot-header" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm shadow-sm hidden flex-shrink-0 self-start" data-role-show="pi,surveyor,admin">
+          ✎ 編輯樣區
+        </button>
+      </div>
     </div>
 
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
-      <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">立木調查</a>
-      <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">自然更新</a>
+      <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">🌳 立木調查</a>
+      <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌱 自然更新</a>
       <a href="#" data-subtab="understory" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌿 地被植物</a>
       <a href="#" data-subtab="soilcons" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">⛰️ 水土保持</a>
       <a href="#" data-subtab="wildlife" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🦌 野生動物</a>
       <a href="#" data-subtab="harvest" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌰 經濟收穫</a>
-      <a href="#" data-subtab="info" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">樣區資訊</a>
+      <a href="#" data-subtab="info" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">📋 樣區資訊</a>
     </nav>
 
     <section data-subtab-content="trees">
@@ -312,6 +333,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=2304"></script>
+<script type="module" src="js/app.js?v=2400"></script>
 </body>
 </html>

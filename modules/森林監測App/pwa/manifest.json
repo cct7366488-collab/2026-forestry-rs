@@ -1,7 +1,7 @@
 {
-  "name": "森林監測 App",
-  "short_name": "森林監測",
-  "description": "野外森林資源調查資料收集（永久樣區 / 立木 / 自然更新）+ Firebase 即時同步",
+  "name": "ForestMRV 智慧森林監測平臺",
+  "short_name": "ForestMRV",
+  "description": "符合 IPCC LULUCF + MRV 原則的森林資源調查與碳匯認證平臺：6 大監測模組（立木 / 自然更新 / 地被 / 水保 / 野生動物 / 經濟收穫）+ 自動偵測送審 + Firebase 即時同步",
   "start_url": "./",
   "display": "standalone",
   "orientation": "portrait",
