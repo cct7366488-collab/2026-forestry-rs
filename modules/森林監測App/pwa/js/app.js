@@ -15,13 +15,13 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2500";
-import * as forms from "./forms.js?v=2500";
-import * as analytics from "./analytics.js?v=2500";
-import * as importWizard from "./import-wizard.js?v=2500";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2500";
+import { firebaseConfig } from "../firebase-config.js?v=2600";
+import * as forms from "./forms.js?v=2600";
+import * as analytics from "./analytics.js?v=2600";
+import * as importWizard from "./import-wizard.js?v=2600";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2600";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2500";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2600";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);

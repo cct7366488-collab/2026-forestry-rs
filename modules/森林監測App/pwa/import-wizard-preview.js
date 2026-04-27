@@ -10,7 +10,7 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84 } from './preview-app-mock.js';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './preview-app-mock.js';
 
 // ===== 內部 wizard state =====
 let W = null;  // { step, file, workbook, sheetMeta, plotMapping, fieldMapping, speciesIssues, statusMap }
@@ -78,6 +78,9 @@ export function openImportWizard(project) {
     speciesIssues: { unknown: [], known: [] },
     statusMap: { ...DEFAULT_STATUS_VITALITY_MAP },
     dryRunResult: null,
+    importing: false,         // v2.6：真實匯入進行中
+    importProgress: null,     // { phase, current, total, message }
+    importResult: null,       // { successPlots, skipPlots, failedPlots, successTrees, skipTrees, failedTrees, errors, durationSec }
   };
   const container = el('div', { id: 'import-wizard-root' });
   openModal('📥 從 Excel 匯入樣區資料（雛形 / DRY-RUN）', container);
@@ -120,10 +123,25 @@ function renderStepper() {
 }
 
 function renderNavBar() {
+  // v2.6：匯入中時隱藏全部按鈕（防止使用者中途切走），匯入完成顯示「關閉」
+  if (W.importing) {
+    return el('div', { class: 'flex justify-end pt-4 border-t mt-4 text-sm text-stone-500' },
+      '匯入進行中，請勿關閉視窗或重整頁面...');
+  }
+  if (W.importResult) {
+    return el('div', { class: 'flex justify-end gap-2 pt-4 border-t mt-4' },
+      el('button', {
+        type: 'button',
+        class: 'bg-forest-700 text-white px-4 py-2 rounded',
+        onclick: () => { restoreModal(); closeModal(); W = null; }
+      }, '完成')
+    );
+  }
+
   const canBack = W.step > 1 && !W.dryRunResult;
   const canNext = canGoNext();
   const isLast = W.step === STEPS.length;
-  const hasResult = !!W.dryRunResult;
+  const hasDryRun = !!W.dryRunResult;
   return el('div', { class: 'flex justify-between gap-2 pt-4 border-t mt-4' },
     el('button', {
       type: 'button',
@@ -135,14 +153,14 @@ function renderNavBar() {
         type: 'button',
         class: 'border px-3 py-2 rounded text-sm text-stone-600',
         onclick: () => { restoreModal(); closeModal(); W = null; }
-      }, hasResult ? '關閉' : '取消'),
+      }, hasDryRun ? '關閉' : '取消'),
       isLast
-        ? (hasResult
+        ? (hasDryRun
             ? el('button', {
                 type: 'button',
                 class: 'border border-amber-600 text-amber-700 px-4 py-2 rounded',
                 onclick: () => { W.dryRunResult = null; render(); }
-              }, '↻ 重新執行')
+              }, '↻ 重新 DRY-RUN')
             : el('button', {
                 type: 'button',
                 class: 'bg-amber-600 text-white px-4 py-2 rounded font-semibold',
@@ -444,8 +462,12 @@ function renderStep4() {
   return box;
 }
 
-// ===== STEP 5：DRY-RUN 預覽 =====
+// ===== STEP 5：DRY-RUN 預覽 / 真實匯入進度 / 真實匯入結果 =====
 function renderStep5() {
+  // v2.6：真實匯入結果（最高優先）
+  if (W.importResult) return renderImportResult();
+  // v2.6：真實匯入進行中
+  if (W.importing) return renderImportProgress();
   // 已執行 DRY-RUN — 顯示結果區
   if (W.dryRunResult) return renderDryRunResult();
 
@@ -592,7 +614,7 @@ function renderDryRunResult() {
     ),
   ));
 
-  // 下載 / 複製按鈕
+  // 下載 / 複製 / 真實匯入按鈕
   box.appendChild(el('div', { class: 'flex gap-2 flex-wrap' },
     el('button', {
       type: 'button',
@@ -604,6 +626,13 @@ function renderDryRunResult() {
       class: 'border px-4 py-2 rounded text-sm',
       onclick: () => copyPayload(r)
     }, '📋 複製到剪貼簿'),
+    // v2.6：真實匯入按鈕（紅色顯眼）
+    el('button', {
+      type: 'button',
+      class: 'bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm font-semibold ml-auto',
+      onclick: handleRealImport,
+      title: '將以上資料寫入 Firestore'
+    }, '✅ 執行真實匯入到 Firestore'),
   ));
 
   // 樹種待補清單
@@ -662,4 +691,321 @@ async function copyPayload(r) {
   } catch (e) {
     toast('複製失敗：' + e.message);
   }
+}
+
+// ===== v2.6：真實匯入到 Firestore =====
+//
+// 流程：
+//   1. 確認 dialog
+//   2. Pre-fetch 既有 plot codes（idempotent 用）
+//   3. Plot 寫入：每筆 addDoc + 反推 plot.locationTWD97（從第一筆 tree 的 abs - local）
+//   4. Tree 寫入：每筆 calcTreeMetrics + addDoc，已存在則 skip
+//   5. 結果摘要 + 錯誤明細
+//
+// Phase 1 取捨：序列寫入（非 batch）— 簡單、進度條精確、失敗點明確；900 筆約 60 秒
+async function handleRealImport() {
+  const r = W.dryRunResult;
+  if (!r) return toast('請先執行 DRY-RUN');
+  if (W.importing) return;
+
+  const ok = confirm(
+    `將寫入到專案「${W.project.name || W.project.code}」：\n\n` +
+    `  • ${r.plotCount} 樣區（已存在的 code 會自動跳過）\n` +
+    `  • ${r.treeCount} 立木（含材積/碳量自動計算）\n` +
+    `  • 樣區面積固定 500 m²（0.05 公頃）、形狀=方形\n` +
+    `  • ${r.unknownSpecies.length} 種未知樹種仍會寫入（材積套用「其他闊」fallback）\n\n` +
+    `匯入過程約需 ${Math.ceil(r.treeCount * 0.07)} 秒，期間請勿關閉視窗。\n\n` +
+    `確定執行嗎？`
+  );
+  if (!ok) return;
+
+  W.importing = true;
+  W.importProgress = { phase: 'init', current: 0, total: r.plotCount + r.treeCount, message: '準備中...' };
+  W.importResult = null;
+  render();
+
+  const result = {
+    successPlots: 0, skipPlots: 0, failedPlots: [],
+    successTrees: 0, skipTrees: 0, failedTrees: [],
+    startTime: Date.now(),
+    plotCodeToId: {},
+  };
+
+  try {
+    // ===== 1. Pre-fetch existing plot codes =====
+    W.importProgress.phase = 'plots';
+    W.importProgress.message = '查詢既有樣區...';
+    render();
+    const plotsRef = fb.collection(fb.db, 'projects', W.project.id, 'plots');
+    const existingPlotsSnap = await fb.getDocs(plotsRef);
+    const existingPlotsByCode = new Map();
+    existingPlotsSnap.forEach(d => existingPlotsByCode.set(d.data().code, d.id));
+
+    // ===== 2. Write plots =====
+    for (const item of r.payload) {
+      const code = item.plot.code;
+      if (existingPlotsByCode.has(code)) {
+        result.skipPlots++;
+        result.plotCodeToId[code] = existingPlotsByCode.get(code);
+      } else {
+        // 從第一筆有 absolute 的 tree 反推 plot.locationTWD97（中心點）
+        let plotTWD97 = null, plotLocation = null;
+        const firstTree = item.trees.find(t =>
+          t.locationTWD97 && Number.isFinite(t.locationTWD97.x) &&
+          Number.isFinite(t.localX_m) && Number.isFinite(t.localY_m));
+        if (firstTree) {
+          const px = firstTree.locationTWD97.x - firstTree.localX_m;
+          const py = firstTree.locationTWD97.y - firstTree.localY_m;
+          plotTWD97 = { x: px, y: py };
+          try {
+            const w = twd97ToWgs84(px, py);
+            if (w?.lng != null && w?.lat != null) {
+              plotLocation = new fb.GeoPoint(w.lat, w.lng);
+            }
+          } catch (e) {}
+        }
+        const plotDoc = {
+          code,
+          forestUnit: null,
+          shape: 'square',
+          area_m2: 500,                    // 0.05 公頃
+          location: plotLocation,
+          locationTWD97: plotTWD97,
+          locationAccuracy_m: null,
+          insideBoundary: true,
+          establishedAt: fb.serverTimestamp(),
+          notes: `從 Excel 匯入 — sourceSheet: ${item.plot.sourceSheet}`,
+          photos: [],
+          qaStatus: 'pending',
+          assignedTo: null,
+          importedAt: fb.serverTimestamp(),
+          importedBy: state.user.uid,
+          createdBy: state.user.uid,
+          createdAt: fb.serverTimestamp(),
+          updatedAt: fb.serverTimestamp(),
+        };
+        try {
+          const newRef = await fb.addDoc(plotsRef, plotDoc);
+          result.successPlots++;
+          result.plotCodeToId[code] = newRef.id;
+        } catch (e) {
+          result.failedPlots.push({ code, error: e.message });
+          console.error('[import plot]', code, e);
+        }
+      }
+      W.importProgress.current = result.successPlots + result.skipPlots + result.failedPlots.length;
+      W.importProgress.message = `寫入樣區 ${W.importProgress.current}/${r.plotCount}`;
+      render();
+    }
+
+    // ===== 3. Write trees =====
+    W.importProgress.phase = 'trees';
+    let treeWritten = 0;
+    for (const item of r.payload) {
+      const plotId = result.plotCodeToId[item.plot.code];
+      if (!plotId) continue;  // plot 失敗 → 跳過該樣區的 trees
+      const treesRef = fb.collection(fb.db, 'projects', W.project.id, 'plots', plotId, 'trees');
+      // Pre-fetch tree codes for idempotency
+      const existingTreesSnap = await fb.getDocs(treesRef);
+      const existingTreeCodes = new Set();
+      existingTreesSnap.forEach(d => {
+        const c = d.data().treeCode;
+        if (c) existingTreeCodes.add(c);
+      });
+
+      for (const t of item.trees) {
+        treeWritten++;
+        if (!t.treeCode) {
+          result.failedTrees.push({ plotCode: item.plot.code, treeNum: t.treeNum, error: '缺 treeCode' });
+        } else if (existingTreeCodes.has(t.treeCode)) {
+          result.skipTrees++;
+        } else {
+          // 自動算材積/碳量（fallback 到「其他闊」對未知樹種）
+          let m;
+          try {
+            m = calcTreeMetrics({
+              dbh_cm: t.dbh_cm, height_m: t.height_m,
+              speciesZh: t.speciesZh, speciesSci: null
+            });
+          } catch (e) {
+            m = { basalArea_m2: 0, volume_m3: 0, biomass_kg: 0, carbon_kg: 0, co2_kg: 0 };
+          }
+          // 反算 location（WGS84 GeoPoint）
+          let treeLocation = null;
+          if (t.locationTWD97 && Number.isFinite(t.locationTWD97.x) && Number.isFinite(t.locationTWD97.y)) {
+            try {
+              const w = twd97ToWgs84(t.locationTWD97.x, t.locationTWD97.y);
+              if (w?.lng != null && w?.lat != null) {
+                treeLocation = new fb.GeoPoint(w.lat, w.lng);
+              }
+            } catch (e) {}
+          }
+          const treeDoc = {
+            treeNum: t.treeNum,
+            treeCode: t.treeCode,
+            speciesZh: t.speciesZh,
+            speciesSci: null,
+            conservationGrade: null,
+            dbh_cm: t.dbh_cm,
+            height_m: t.height_m,
+            branchHeight_m: null,
+            vitality: t.vitality || 'healthy',
+            pestSymptoms: [],
+            marking: 'none',
+            notes: t.notes,
+            // v2.5 個體座標
+            localX_m: t.localX_m,
+            localY_m: t.localY_m,
+            locationTWD97: t.locationTWD97,
+            location: treeLocation,
+            // v2.6 計算結果（fallback 到「其他闊」）
+            ...m,
+            // v2.6 匯入元資料（保留來源代碼供審計）
+            statusCodeRaw: t.statusCodeRaw,
+            recordTypeRaw: t.recordTypeRaw,
+            volume_m3_imported: t.volume_m3_imported,
+            // QA + 審計
+            qaStatus: 'pending',
+            importedAt: fb.serverTimestamp(),
+            importedBy: state.user.uid,
+            createdBy: state.user.uid,
+            createdAt: fb.serverTimestamp(),
+            updatedAt: fb.serverTimestamp(),
+          };
+          try {
+            await fb.addDoc(treesRef, treeDoc);
+            result.successTrees++;
+          } catch (e) {
+            result.failedTrees.push({ plotCode: item.plot.code, treeCode: t.treeCode, error: e.message });
+            console.error('[import tree]', t.treeCode, e);
+          }
+        }
+        W.importProgress.current = r.plotCount + treeWritten;
+        // 每 5 筆更新 UI（避免每筆都 re-render 拖慢）
+        if (treeWritten % 5 === 0 || treeWritten === r.treeCount) {
+          W.importProgress.message = `寫入立木 ${treeWritten}/${r.treeCount}`;
+          render();
+        }
+      }
+    }
+
+    result.endTime = Date.now();
+    result.durationSec = ((result.endTime - result.startTime) / 1000).toFixed(1);
+    W.importResult = result;
+    W.importing = false;
+    W.importProgress = null;
+    render();
+    toast(`✅ 匯入完成：${result.successPlots} 樣區 / ${result.successTrees} 立木`, 5000);
+    console.group('[ImportWizard 真實匯入完成]');
+    console.log(result);
+    console.groupEnd();
+  } catch (e) {
+    result.fatalError = e.message;
+    result.endTime = Date.now();
+    result.durationSec = ((result.endTime - result.startTime) / 1000).toFixed(1);
+    W.importResult = result;
+    W.importing = false;
+    W.importProgress = null;
+    render();
+    toast('匯入失敗：' + e.message, 5000);
+    console.error('[ImportWizard 真實匯入致命錯誤]', e);
+  }
+}
+
+// ===== 真實匯入進行中 — 進度條 =====
+function renderImportProgress() {
+  const p = W.importProgress;
+  const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0;
+  const phaseLabel = { init: '初始化', plots: '樣區', trees: '立木' }[p.phase] || p.phase;
+  return el('div', { class: 'space-y-4' },
+    el('h3', { class: 'font-semibold text-base' }, '🚀 寫入中...'),
+    el('div', { class: 'bg-blue-50 border-2 border-blue-300 rounded p-4 space-y-3' },
+      el('div', { class: 'flex justify-between items-center text-sm' },
+        el('span', { class: 'font-semibold text-blue-900' }, `階段：${phaseLabel}`),
+        el('span', { class: 'text-stone-700' }, `${p.current} / ${p.total}（${pct}%）`)
+      ),
+      // 進度條
+      el('div', { class: 'w-full bg-stone-200 rounded-full h-3 overflow-hidden' },
+        el('div', { class: 'bg-blue-600 h-3 transition-all', style: `width: ${pct}%` })
+      ),
+      el('div', { class: 'text-sm text-stone-700' }, p.message)
+    ),
+    el('div', { class: 'text-xs text-stone-500 bg-stone-50 rounded p-2' },
+      '⚠ 寫入過程請勿關閉視窗或重整頁面。如不慎關閉，已寫入的資料不會遺失（可重跑 DRY-RUN 確認，再次匯入會自動跳過已存在項目）。'
+    )
+  );
+}
+
+// ===== 真實匯入完成 — 結果區 =====
+function renderImportResult() {
+  const r = W.importResult;
+  const box = el('div', { class: 'space-y-3' });
+
+  if (r.fatalError) {
+    box.appendChild(el('div', { class: 'bg-red-50 border-2 border-red-400 rounded p-4' },
+      el('div', { class: 'text-xl font-bold text-red-800 mb-1' }, '✗ 匯入失敗'),
+      el('div', { class: 'text-sm text-stone-700' }, '致命錯誤：' + r.fatalError),
+      el('div', { class: 'text-xs text-stone-600 mt-2' },
+        `已成功：${r.successPlots} 樣區 / ${r.successTrees} 立木（已寫入 Firestore，不會回滾）`)
+    ));
+    return box;
+  }
+
+  // 成功 banner
+  box.appendChild(el('div', { class: 'bg-green-50 border-2 border-green-400 rounded p-4' },
+    el('div', { class: 'text-xl font-bold text-green-800 mb-1' }, '✅ 匯入完成'),
+    el('div', { class: 'text-sm text-stone-700' },
+      `已寫入 Firestore：${r.successPlots} 樣區 / ${r.successTrees} 立木（耗時 ${r.durationSec} 秒）`)
+  ));
+
+  // 統計卡：成功 / 跳過 / 失敗
+  box.appendChild(el('div', { class: 'grid grid-cols-2 gap-3 text-sm' },
+    // 樣區
+    el('div', { class: 'bg-stone-100 rounded p-3' },
+      el('div', { class: 'font-semibold text-stone-700 mb-1' }, '樣區'),
+      el('div', { class: 'text-xs text-green-700' }, `✓ 成功 ${r.successPlots}`),
+      el('div', { class: 'text-xs text-amber-700' }, `↷ 跳過 ${r.skipPlots}（已存在）`),
+      el('div', { class: 'text-xs text-red-700' }, `✗ 失敗 ${r.failedPlots.length}`),
+    ),
+    // 立木
+    el('div', { class: 'bg-stone-100 rounded p-3' },
+      el('div', { class: 'font-semibold text-stone-700 mb-1' }, '立木'),
+      el('div', { class: 'text-xs text-green-700' }, `✓ 成功 ${r.successTrees}`),
+      el('div', { class: 'text-xs text-amber-700' }, `↷ 跳過 ${r.skipTrees}（已存在）`),
+      el('div', { class: 'text-xs text-red-700' }, `✗ 失敗 ${r.failedTrees.length}`),
+    ),
+  ));
+
+  // 錯誤明細
+  if (r.failedPlots.length || r.failedTrees.length) {
+    const errBox = el('details', { class: 'border border-red-300 rounded' },
+      el('summary', { class: 'bg-red-50 px-3 py-2 text-sm font-semibold text-red-900 cursor-pointer' },
+        `⚠ 失敗清單（${r.failedPlots.length + r.failedTrees.length} 筆 — 點此展開）`),
+    );
+    if (r.failedPlots.length) {
+      errBox.appendChild(el('div', { class: 'p-3 text-xs space-y-1' },
+        el('div', { class: 'font-semibold' }, '失敗樣區：'),
+        ...r.failedPlots.map(f => el('div', { class: 'font-mono' }, `  • ${f.code}：${f.error}`))
+      ));
+    }
+    if (r.failedTrees.length) {
+      errBox.appendChild(el('div', { class: 'p-3 text-xs space-y-1 max-h-48 overflow-y-auto' },
+        el('div', { class: 'font-semibold' }, `失敗立木（顯示前 50 筆，共 ${r.failedTrees.length}）：`),
+        ...r.failedTrees.slice(0, 50).map(f =>
+          el('div', { class: 'font-mono' }, `  • ${f.treeCode || '(no code)'} @ ${f.plotCode}：${f.error}`))
+      ));
+    }
+    box.appendChild(errBox);
+  }
+
+  // 提示
+  box.appendChild(el('div', { class: 'text-xs text-stone-600 bg-stone-50 rounded p-3 space-y-1' },
+    el('div', {}, '✨ 後續建議：'),
+    el('div', {}, '1. 進「樣區」分頁檢視匯入的 19 樣區（plot.locationTWD97 已從第一筆立木反推樣區中心）'),
+    el('div', {}, '2. 進任一樣區檢視 ~50 筆立木 + 個體 X/Y 座標'),
+    el('div', {}, '3. 未知樹種（44 種中 ~37 種）的 speciesSci / 保育等級為 null，可逐筆編輯補上'),
+    el('div', {}, '4. 材積/碳量已用「其他闊」fallback 公式自動算，PI 可逐筆 verified 或 flag 重算'),
+  ));
+
+  return box;
 }

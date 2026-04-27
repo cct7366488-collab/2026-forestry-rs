@@ -2,14 +2,40 @@
 // 用於 preview-import-wizard.html — 取代真實 app.js 的 export，讓 wizard 雛形可獨立運行
 // 不連 Firebase、不需登入、純前端 UI 預覽
 
+// Mock GeoPoint class（preview 不真寫入，只需 constructor 不爆）
+class MockGeoPoint {
+  constructor(lat, lng) { this.latitude = lat; this.longitude = lng; }
+}
+
 export const fb = {
   collection: () => null,
   doc: () => null,
-  addDoc: () => Promise.resolve({ id: 'mock-id' }),
+  addDoc: () => Promise.resolve({ id: 'mock-' + Math.random().toString(36).slice(2, 8) }),
+  getDocs: () => Promise.resolve({ forEach: () => {}, docs: [], size: 0, empty: true }),
   updateDoc: () => Promise.resolve(),
   serverTimestamp: () => 'SERVER_TIMESTAMP',
+  GeoPoint: MockGeoPoint,
   db: null,
 };
+
+// v2.6 mock：preview 環境的 calcTreeMetrics — 用粗略 broadleaf fallback 公式（V = 4.64e-5 × D^1.53578 × H^1.50657）
+export function calcTreeMetrics({ dbh_cm, height_m }) {
+  if (!dbh_cm || !height_m) {
+    return { basalArea_m2: 0, volume_m3: 0, biomass_kg: 0, carbon_kg: 0, co2_kg: 0 };
+  }
+  const D = dbh_cm, H = height_m;
+  const basalArea_m2 = Math.PI * Math.pow(D / 200, 2);
+  const volume_m3 = 4.64e-5 * Math.pow(D, 1.53578) * Math.pow(H, 1.50657);
+  const biomass_t = volume_m3 * 0.6;
+  const carbon_t = biomass_t * 0.47;
+  return {
+    basalArea_m2: +basalArea_m2.toFixed(4),
+    volume_m3: +volume_m3.toFixed(3),
+    biomass_kg: +(biomass_t * 1000).toFixed(1),
+    carbon_kg: +(carbon_t * 1000).toFixed(1),
+    co2_kg: +(carbon_t * 1000 * 44 / 12).toFixed(1),
+  };
+}
 
 export const state = {
   user: { uid: 'preview-uid-0001', email: 'preview@local' },
