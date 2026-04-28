@@ -6,7 +6,7 @@ import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCo
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=2760';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=2770';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -102,7 +102,7 @@ function createGpsButton({
 }
 
 // ===== 共用：欄位工廠 =====
-function field({ label, name, type = 'text', required = false, value = '', placeholder = '', options = null, step, min, max, rows }) {
+function field({ label, name, type = 'text', required = false, value = '', placeholder = '', options = null, step, min, max, rows, list = null }) {
   const id = `f-${name}`;
   const lab = el('label', { for: id }, label, required ? el('span', { class: 'req' }, ' *') : null);
   let input;
@@ -124,6 +124,9 @@ function field({ label, name, type = 'text', required = false, value = '', place
     if (step != null) attrs.step = step;
     if (min != null) attrs.min = min;
     if (max != null) attrs.max = max;
+    // v2.7.7：list 對應 <datalist id="..."> 的 ID，提供 autocomplete 下拉
+    //         autocomplete=off 避免瀏覽器原生記憶提示遮蓋 datalist 選項
+    if (list) { attrs.list = list; attrs.autocomplete = 'off'; }
     input = el('input', attrs);
   }
   return el('div', { class: 'field' }, lab, input);
@@ -1492,8 +1495,14 @@ export async function openTreeForm(project, plot, existing = null) {
 
 // ===== 自然更新表單 =====
 export function openRegenForm(project, plot, existing = null) {
+  // v2.7.7：樹種 datalist（與立木表單共用 species-dict.js TREES）
+  //         獨立 ID 避免與立木表單 dl-species 衝突
+  const speciesList = el('datalist', { id: 'dl-regen-species' },
+    ...SPECIES.map(s => el('option', { value: s.zh }, `${s.sci}${s.cons ? ` [${s.cons}]` : ''}`))
+  );
   const f = el('form', { class: 'space-y-2' },
-    field({ label: '樹種', name: 'speciesZh', required: true, value: existing?.speciesZh || '' }),
+    speciesList,
+    field({ label: '樹種', name: 'speciesZh', required: true, list: 'dl-regen-species', placeholder: '輸入或選擇', value: existing?.speciesZh || '' }),
     field({ label: '苗高分級', name: 'heightClass', required: true,
       options: [
         { value: '<30', label: '< 30 cm' },

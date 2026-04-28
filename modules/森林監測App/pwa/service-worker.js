@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.6';  // v2.7.6：wizard 防呆第二層 — per-plot 立木座標跨度 >40 m 軟警告（抓單位錯/TWD97 誤填/多樣區混 sheet）
+const CACHE = 'forest-monitor-v2.7.7';  // v2.7.7：自然更新表單樹種欄位加 datalist 下拉（field() helper 擴增 list 屬性）
 const SHELL = [
   './',
   './index.html',
