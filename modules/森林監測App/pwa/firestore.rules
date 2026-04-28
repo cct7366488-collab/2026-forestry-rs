@@ -131,6 +131,16 @@ service cloud.firestore {
     match /species/{docId} {
       allow read:  if isSignedIn();
       allow write: if isSystemAdmin();
+
+      // v2.7.11 🆔e：變更歷史 sub-collection — admin 編輯/批次/CSV 匯入時併寫一筆
+      //   read：所有登入者可查（追溯誰改了什麼）
+      //   create：僅 systemAdmin（與主 doc write 一致）
+      //   update / delete：永遠拒絕（歷史不可修改，append-only audit log）
+      match /history/{histId} {
+        allow read:   if isSignedIn();
+        allow create: if isSystemAdmin();
+        allow update, delete: if false;
+      }
     }
   }
 }

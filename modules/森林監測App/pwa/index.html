@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=27100">
+  <link rel="stylesheet" href="style.css?v=27110">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -107,21 +107,34 @@
       <p id="species-stats" class="text-xs text-stone-500 mt-1">載入中…</p>
     </div>
 
-    <div class="flex gap-2 flex-wrap">
+    <div class="flex gap-2 flex-wrap items-center">
       <button class="species-filter-btn bg-stone-100 text-stone-700 border border-stone-300 px-3 py-1.5 rounded text-sm font-medium" data-filter="unverified">⏳ 待補充</button>
       <button class="species-filter-btn bg-stone-100 text-stone-700 border border-stone-300 px-3 py-1.5 rounded text-sm font-medium" data-filter="verified">✅ 已驗證</button>
       <button class="species-filter-btn bg-stone-100 text-stone-700 border border-stone-300 px-3 py-1.5 rounded text-sm font-medium" data-filter="all">全部</button>
+      <span class="ml-auto flex gap-2">
+        <button id="btn-species-bulk-import" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm font-medium">📥 CSV 批次匯入</button>
+      </span>
+    </div>
+
+    <!-- v2.7.11 🆔c：批次操作列（選擇 ≥1 列才出現） -->
+    <div id="species-batch-bar" class="hidden bg-amber-50 border border-amber-300 rounded p-2 flex items-center gap-2 text-sm">
+      <span class="font-medium text-amber-900">已選 <span id="species-batch-count">0</span> 筆：</span>
+      <button id="btn-species-batch-verify" class="bg-green-700 hover:bg-green-800 text-white px-3 py-1 rounded text-xs font-medium">☑ 批次標已驗證</button>
+      <button id="btn-species-batch-unverify" class="border border-amber-400 text-amber-800 hover:bg-amber-100 px-3 py-1 rounded text-xs font-medium">⏳ 批次標待補充</button>
+      <button id="btn-species-batch-delete" class="border border-red-400 text-red-700 hover:bg-red-50 px-3 py-1 rounded text-xs font-medium">🗑 批次刪除</button>
+      <button id="btn-species-batch-clear" class="ml-auto text-stone-600 hover:text-stone-900 text-xs">取消選取</button>
     </div>
 
     <div class="bg-white rounded-lg shadow overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-stone-100 text-xs text-stone-700">
           <tr>
+            <th class="px-2 py-2 text-center w-8"><input type="checkbox" id="species-check-all" class="w-4 h-4 accent-forest-700" title="全選 / 取消全選（當前篩選）"></th>
             <th class="px-2 py-2 text-left">中名</th>
             <th class="px-2 py-2 text-left">學名（sci）</th>
             <th class="px-2 py-2 text-left">保育級</th>
             <th class="px-2 py-2 text-center">已驗證</th>
-            <th class="px-2 py-2 text-left">來源</th>
+            <th class="px-2 py-2 text-left">來源 / 別名</th>
             <th class="px-2 py-2 text-left">操作</th>
           </tr>
         </thead>
@@ -129,7 +142,60 @@
       </table>
     </div>
 
-    <p class="text-xs text-stone-500">💡 改動會即時透過 <code class="bg-stone-100 px-1 rounded">onSnapshot</code> 反映；標 verified=true 後會補 <code class="bg-stone-100 px-1 rounded">verifiedAt / verifiedBy</code> 永久紀錄。</p>
+    <p class="text-xs text-stone-500">💡 改動會即時透過 <code class="bg-stone-100 px-1 rounded">onSnapshot</code> 反映；標 verified=true 後會補 <code class="bg-stone-100 px-1 rounded">verifiedAt / verifiedBy</code> 永久紀錄；每次儲存會寫一筆變更歷史到 <code class="bg-stone-100 px-1 rounded">species/&lt;id&gt;/history</code>。</p>
+  </div>
+</template>
+
+<!-- v2.7.11 🆔d：CSV 匯入 modal 的 inline template（用 cloneNode 不污染 DOM） -->
+<template id="tpl-species-csv-import">
+  <div class="space-y-3">
+    <div class="text-sm text-stone-700">
+      <p class="font-medium mb-1">CSV 格式（UTF-8，第一列為標題）：</p>
+      <pre class="bg-stone-100 rounded p-2 text-xs overflow-x-auto">zh,sci,conservationGrade,verified
+台灣杉,Taiwania cryptomerioides,,true
+紅檜,Chamaecyparis formosensis,,true
+牛樟,Cinnamomum kanehirae,II,true</pre>
+      <ul class="list-disc list-inside text-xs text-stone-600 mt-1">
+        <li><code class="bg-stone-100 px-1 rounded">zh</code> 必填、為 docId（中文名）</li>
+        <li><code class="bg-stone-100 px-1 rounded">conservationGrade</code> 限 I / II / III / 空白</li>
+        <li><code class="bg-stone-100 px-1 rounded">verified</code> = true / false（預設 false）</li>
+        <li>已存在的 zh 用 <b>merge</b> 更新（保留既有 verified=true 不會被誤覆蓋）</li>
+      </ul>
+    </div>
+    <input type="file" id="species-csv-file" accept=".csv,text/csv" class="block w-full text-sm">
+    <div id="species-csv-preview" class="hidden bg-stone-50 border rounded p-2 max-h-60 overflow-y-auto text-xs"></div>
+    <div class="flex gap-2 justify-end">
+      <button id="btn-species-csv-cancel" class="border px-3 py-1.5 rounded text-sm">取消</button>
+      <button id="btn-species-csv-confirm" class="bg-forest-700 hover:bg-forest-800 text-white px-3 py-1.5 rounded text-sm font-medium hidden">確認匯入</button>
+    </div>
+  </div>
+</template>
+
+<!-- v2.7.11 🆔b：alias 設定 modal -->
+<template id="tpl-species-alias-set">
+  <div class="space-y-3">
+    <p class="text-sm text-stone-700">把 <span id="alias-source-zh" class="font-medium"></span> 設為某個樹種的別名。之後 import wizard 會把此名稱對應到目標主名（已存在的 tree.speciesZh 不會被改動）。</p>
+    <div>
+      <label class="text-sm font-medium block mb-1">目標主名</label>
+      <input type="text" id="alias-target-input" list="dl-alias-targets" placeholder="輸入或選擇樹種中名" class="border rounded px-2 py-1.5 text-sm w-full" autocomplete="off">
+      <datalist id="dl-alias-targets"></datalist>
+    </div>
+    <div class="flex gap-2 justify-end">
+      <button id="btn-alias-clear" class="border border-amber-400 text-amber-800 hover:bg-amber-50 px-3 py-1.5 rounded text-sm hidden">清除別名</button>
+      <button id="btn-alias-cancel" class="border px-3 py-1.5 rounded text-sm">取消</button>
+      <button id="btn-alias-confirm" class="bg-forest-700 hover:bg-forest-800 text-white px-3 py-1.5 rounded text-sm font-medium">確認設為別名</button>
+    </div>
+  </div>
+</template>
+
+<!-- v2.7.11 🆔e：history modal -->
+<template id="tpl-species-history">
+  <div class="space-y-2">
+    <p class="text-sm text-stone-700"><span id="history-zh" class="font-medium"></span> 的變更歷史</p>
+    <div id="history-list" class="bg-stone-50 border rounded max-h-80 overflow-y-auto text-xs"></div>
+    <div class="flex gap-2 justify-end">
+      <button id="btn-history-close" class="border px-3 py-1.5 rounded text-sm">關閉</button>
+    </div>
   </div>
 </template>
 
@@ -402,6 +468,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=27100"></script>
+<script type="module" src="js/app.js?v=27110"></script>
 </body>
 </html>
