@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.4';  // v2.7.4：import wizard Phase 2 — 樹種字典自動 seed unverified + 錯誤行明細表格/CSV + writeBatch 平行寫入加速
+const CACHE = 'forest-monitor-v2.7.5';  // v2.7.5：樹種字元 normalize + alias map + garbage filter（臺/台、棱/稜、江某→鵝掌柴、缺牌過濾）
 const SHELL = [
   './',
   './index.html',

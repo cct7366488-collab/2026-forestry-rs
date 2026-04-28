@@ -8,9 +8,9 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2740';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2750';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=2740';
+import { TREES } from './species-dict.js?v=2750';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
@@ -20,6 +20,35 @@ function speciesDocId(zh) {
   let id = String(zh || '').trim().replace(/\//g, '_');
   if (id === '.' || id === '..') id = '_' + id;
   return id;
+}
+
+// ===== v2.7.5：樹種字元 normalization + alias map + garbage filter =====
+// 動機：v2.7.4 紙漿廠匯入揭露 33 筆未知樹種，多為異體字（臺/台、棱/稜）、
+//      俗名（江某/鴨腳木 = dict 標準名「鵝掌柴」）、或非樹種 garbage（缺牌）。
+//      在比對 dict 與 seed species 之前先 normalize，避免「同種兩名」污染共享字典。
+//      套用點：① Step 4 lookup（speciesSet 收集前）② buildTreeDoc.speciesZh（寫入前）
+const SPECIES_CHAR_NORMALIZE = {
+  '臺': '台',  // 異體字：dict 一律用「台」（臺灣櫸 → 台灣櫸 命中）
+  '棱': '稜',  // 罕用字：dict 用「稜」（棱果榕 → 稜果榕 命中）
+};
+const SPECIES_ALIAS_MAP = {
+  // dict 收錄「鵝掌柴」(Schefflera octophylla)，俗稱江某 / 鴨腳木
+  '江某': '鵝掌柴',
+  '鴨腳木': '鵝掌柴',
+};
+const SPECIES_GARBAGE = new Set([
+  '缺牌',  // Excel 樹種欄位填了樣木狀態而非樹種 — 不寫入 tree.speciesZh、不 seed 字典
+]);
+function normalizeSpeciesName(raw) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  for (const [from, to] of Object.entries(SPECIES_CHAR_NORMALIZE)) {
+    if (s.includes(from)) s = s.split(from).join(to);
+  }
+  if (SPECIES_ALIAS_MAP[s]) s = SPECIES_ALIAS_MAP[s];
+  if (SPECIES_GARBAGE.has(s)) return null;
+  return s;
 }
 
 // ===== 內部 wizard state =====
@@ -417,7 +446,8 @@ function renderStep4() {
     if (!m.use) continue;
     const aoa = XLSX.utils.sheet_to_json(W.workbook.Sheets[sheetName], { header: 1, defval: '' });
     for (let r = 1; r < aoa.length; r++) {
-      const sp = String(aoa[r]?.[W.fieldMapping.speciesZh] ?? '').trim();
+      // v2.7.5：normalize（臺→台、棱→稜、江某→鵝掌柴、缺牌→null）後再加入 set
+      const sp = normalizeSpeciesName(aoa[r]?.[W.fieldMapping.speciesZh]);
       if (sp) speciesSet.add(sp);
       if (W.fieldMapping.statusCode != null) {
         const st = String(aoa[r]?.[W.fieldMapping.statusCode] ?? '').trim();
@@ -436,9 +466,9 @@ function renderStep4() {
     el('div', { class: 'font-semibold text-sm mb-2' },
       `🌿 樹種對照（共 ${speciesSet.size} 種）`),
     el('div', { class: 'text-xs text-green-700 mb-1' },
-      `✓ 字典已收錄：${known.length} 種（比對 species-dict.js 內 ${TREES.length} 種台灣常見木本）`),
+      `✓ 字典已收錄：${known.length} 種（比對 species-dict.js 內 ${TREES.length} 種台灣常見木本，已 normalize 臺/台、棱/稜、江某→鵝掌柴、缺牌過濾）`),
     el('div', { class: 'text-xs text-amber-700' },
-      `⚠ 字典缺少：${unknown.length} 種 — 真實匯入時會自動 seed 到 lookups/species（verified=false，留待後續逐筆審核補學名/保育等級）`),
+      `⚠ 字典缺少：${unknown.length} 種 — 真實匯入時會自動 seed 到 species/（verified=false，留待後續逐筆審核補學名/保育等級）`),
     unknown.length
       ? el('div', { class: 'text-xs mt-2 text-stone-700 max-h-24 overflow-y-auto bg-white rounded border p-2' },
           unknown.join('、'))
@@ -627,7 +657,8 @@ function buildTreeDoc(row, plotCode, sourceSheet, sourceRow) {
   return {
     treeNum,
     treeCode: treeNum ? `${plotCode}-${String(treeNum).padStart(3, '0')}` : null,
-    speciesZh: String(get('speciesZh') || '').trim() || null,
+    // v2.7.5：寫入前 normalize，避免「同種兩名」（臺灣櫸 vs 台灣櫸）污染查詢
+    speciesZh: normalizeSpeciesName(get('speciesZh')),
     dbh_cm: parseFloat(get('dbh_cm')) || null,
     height_m: parseFloat(get('height_m')) || null,
     localX_m: fm.localX_m != null ? parseFloat(get('localX_m')) : null,
