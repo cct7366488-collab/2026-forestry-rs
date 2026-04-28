@@ -15,14 +15,15 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2790";
-import * as forms from "./forms.js?v=2790";
-import * as analytics from "./analytics.js?v=2790";
-import * as importWizard from "./import-wizard.js?v=2790";
-import { renderTreeDistribution } from "./distribution.js?v=2790";   // v2.6.2：立木分布散布圖
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2790";
+import { firebaseConfig } from "../firebase-config.js?v=27100";
+import * as forms from "./forms.js?v=27100";
+import * as analytics from "./analytics.js?v=27100";
+import * as importWizard from "./import-wizard.js?v=27100";
+import { renderTreeDistribution } from "./distribution.js?v=27100";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27100";   // v2.7.10：admin 樹種字典管理
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27100";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=2790";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27100";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -507,6 +508,7 @@ function parseHash() {
   if (m1) return { route: 'plot', projectId: m1[1], plotId: m1[2] };
   const m2 = h.match(/^\/p\/([^\/]+)$/);
   if (m2) return { route: 'project', projectId: m2[1] };
+  if (h === '/species') return { route: 'species' };  // v2.7.10：admin 樹種字典管理
   return { route: 'projects' };
 }
 
@@ -548,6 +550,8 @@ async function route() {
   _initialNav = false;
 
   if (myId !== _routeId) return;
+  // v2.7.10：route 切換時先清掉 species-admin 的 onSnapshot listener（避免離開頁面後仍持續監聽）
+  if (r.route !== 'species') disposeSpeciesDict();
   if (r.route === 'projects') {
     await renderProjects(main);
   } else if (r.route === 'project') {
@@ -556,6 +560,13 @@ async function route() {
   } else if (r.route === 'plot') {
     localStorage.setItem('lastProjectId', r.projectId);
     await renderPlotDetail(main, r.projectId, r.plotId);
+  } else if (r.route === 'species') {
+    // v2.7.10：admin 樹種字典管理（非 admin 進來只看到空白 — 較簡單，rules 也會擋寫入）
+    if (!isSystemAdmin()) {
+      main.innerHTML = '<div class="bg-amber-50 border border-amber-300 rounded p-4 text-amber-900 text-sm">此頁面僅限 system admin 使用。<a href="#/" class="underline">返回專案列表</a></div>';
+      return;
+    }
+    await renderSpeciesDict(main);
   }
 }
 window.addEventListener('hashchange', route);
@@ -583,10 +594,13 @@ async function renderProjects(root) {
   root.appendChild(tpl);
 
   const newBtn = $('#btn-new-project');
+  const dictBtn = $('#btn-species-dict');
   if (!isSystemAdmin()) {
     newBtn.classList.add('hidden');
+    if (dictBtn) dictBtn.classList.add('hidden');
   } else {
     newBtn.addEventListener('click', () => forms.openProjectForm());
+    if (dictBtn) dictBtn.classList.remove('hidden');  // v2.7.10：admin 才顯示樹種字典管理入口
   }
 
   const list = $('#project-list');

@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.9';  // v2.7.9：admin 後門 verified→review/active 退回按鈕（reviewer-approval-card 內，admin god view）
+const CACHE = 'forest-monitor-v2.7.10';  // v2.7.10：admin 樹種字典管理 UI（CRUD species/{docId}，補學名/保育級/promote verified=true）
 const SHELL = [
   './',
   './index.html',
@@ -16,6 +16,7 @@ const SHELL = [
   './js/project-status.js',   // v2.3：階段 2 狀態機
   './js/import-wizard.js',    // v2.5：Excel 匯入 wizard（雛形 / DRY-RUN）
   './js/distribution.js',     // v2.6.2：立木分布散布圖（Canvas）
+  './js/species-admin.js',    // v2.7.10：admin 樹種字典管理 UI
   './firebase-config.js'
 ];
 

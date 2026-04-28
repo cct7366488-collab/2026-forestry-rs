@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=2790">
+  <link rel="stylesheet" href="style.css?v=27100">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -85,9 +85,51 @@
   <div class="space-y-4">
     <div class="flex justify-between items-center">
       <h1 class="text-2xl font-bold">我的專案</h1>
-      <button id="btn-new-project" class="bg-forest-700 text-white px-4 py-2 rounded-lg">＋ 新專案</button>
+      <div class="flex gap-2">
+        <a href="#/species" id="btn-species-dict" class="bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 px-3 py-2 rounded-lg text-sm hidden">📚 樹種字典管理</a>
+        <button id="btn-new-project" class="bg-forest-700 text-white px-4 py-2 rounded-lg">＋ 新專案</button>
+      </div>
     </div>
     <div id="project-list" class="grid sm:grid-cols-2 gap-3"></div>
+  </div>
+</template>
+
+<!-- v2.7.10：admin 樹種字典管理（top-level species/{docId} CRUD） -->
+<template id="view-species-dict">
+  <div class="space-y-3">
+    <div>
+      <a href="#/" class="inline-flex items-center gap-2 text-sm font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 px-3 py-1.5 rounded-lg transition shadow-sm">
+        <span class="text-base leading-none">←</span>
+        <span>返回我的專案</span>
+      </a>
+      <h1 class="text-2xl font-bold mt-1">📚 樹種字典管理</h1>
+      <p class="text-sm text-stone-600">管理跨專案共用的 <code class="text-xs bg-stone-100 px-1 rounded">species/{docId}</code> collection — admin 補學名 / 保育等級 / 標 verified=true 後可讓所有專案 import wizard 比對。</p>
+      <p id="species-stats" class="text-xs text-stone-500 mt-1">載入中…</p>
+    </div>
+
+    <div class="flex gap-2 flex-wrap">
+      <button class="species-filter-btn bg-stone-100 text-stone-700 border border-stone-300 px-3 py-1.5 rounded text-sm font-medium" data-filter="unverified">⏳ 待補充</button>
+      <button class="species-filter-btn bg-stone-100 text-stone-700 border border-stone-300 px-3 py-1.5 rounded text-sm font-medium" data-filter="verified">✅ 已驗證</button>
+      <button class="species-filter-btn bg-stone-100 text-stone-700 border border-stone-300 px-3 py-1.5 rounded text-sm font-medium" data-filter="all">全部</button>
+    </div>
+
+    <div class="bg-white rounded-lg shadow overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-stone-100 text-xs text-stone-700">
+          <tr>
+            <th class="px-2 py-2 text-left">中名</th>
+            <th class="px-2 py-2 text-left">學名（sci）</th>
+            <th class="px-2 py-2 text-left">保育級</th>
+            <th class="px-2 py-2 text-center">已驗證</th>
+            <th class="px-2 py-2 text-left">來源</th>
+            <th class="px-2 py-2 text-left">操作</th>
+          </tr>
+        </thead>
+        <tbody id="species-table-body"></tbody>
+      </table>
+    </div>
+
+    <p class="text-xs text-stone-500">💡 改動會即時透過 <code class="bg-stone-100 px-1 rounded">onSnapshot</code> 反映；標 verified=true 後會補 <code class="bg-stone-100 px-1 rounded">verifiedAt / verifiedBy</code> 永久紀錄。</p>
   </div>
 </template>
 
@@ -360,6 +402,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=2790"></script>
+<script type="module" src="js/app.js?v=27100"></script>
 </body>
 </html>
