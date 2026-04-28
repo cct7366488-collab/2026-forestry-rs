@@ -235,6 +235,66 @@ export async function applyStatusAfterReviewerApprove(project) {
   return 'promoted-verified';
 }
 
+/**
+ * v2.7.9：admin 退回 verified（後門按鈕）
+ * 動機：reviewer 完成審查 → verified 之後是單向終態，要修正只能改 Firestore。
+ *       本函式提供 admin god view 的 UI 退回路徑，目標 = 'review' 或 'active'。
+ *
+ * 行為：
+ * - target='review'：保持 locked（reviewer 還在審查）；autoLockReason 改 'all-verified'
+ *                    （恢復 review 期間鎖定理由）；清 verifiedAt/verifiedBy
+ * - target='active'：解 lock（PI 可繼續編輯）；清 verifiedAt/verifiedBy
+ *
+ * 為何清 verifiedAt/verifiedBy：兩欄是「目前查證紀錄」(line 218 註記「永久」是指
+ * verified 期間不可被覆蓋，而非跨狀態保留)。退回意味著不再認定查證有效，清空
+ * 避免 status=active 但 verifiedAt!=null 的混淆狀態。如未來需審計「曾查證」歷史，
+ * 用 statusChangedAt/By 補。
+ */
+export async function applyStatusRevertVerified(project, target) {
+  if (!project) throw new Error('project required');
+  if (project.archived) throw new Error('已封存專案不可退回（請先解封存）');
+  const cur = project.status;
+  if (cur !== STATUS.VERIFIED) throw new Error(`狀態 ${cur} 不可退回（需處於 verified）`);
+  if (target !== STATUS.REVIEW && target !== STATUS.ACTIVE) {
+    throw new Error(`不支援退回到 ${target}（僅允許 review / active）`);
+  }
+  const adminUid = state.user?.uid;
+  if (!adminUid) throw new Error('未登入');
+
+  const projectRef = fb.doc(fb.db, 'projects', project.id);
+  const updates = {
+    status: target,
+    statusChangedAt: fb.serverTimestamp(),
+    statusChangedBy: adminUid,
+    verifiedAt: null,
+    verifiedBy: null,
+  };
+  if (target === STATUS.REVIEW) {
+    updates.autoLockReason = 'all-verified';  // 退回 review 期間的鎖定理由
+  } else {
+    updates.locked = false;
+    updates.lockedAt = null;
+    updates.lockedBy = null;
+    updates.autoLockReason = null;
+  }
+  await fb.updateDoc(projectRef, updates);
+
+  // sync client state
+  project.status = target;
+  project.statusChangedAt = new Date();
+  project.statusChangedBy = adminUid;
+  project.verifiedAt = null;
+  project.verifiedBy = null;
+  if (target === STATUS.REVIEW) {
+    project.autoLockReason = 'all-verified';
+  } else {
+    project.locked = false;
+    project.lockedAt = null;
+    project.lockedBy = null;
+    project.autoLockReason = null;
+  }
+}
+
 /** PI 手動 toggle Lock — 寫 autoLockReason='manual'，狀態不動 */
 export async function applyStatusAfterManualLock(project, locking) {
   const projectRef = fb.doc(fb.db, 'projects', project.id);

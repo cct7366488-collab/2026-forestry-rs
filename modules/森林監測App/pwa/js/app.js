@@ -15,14 +15,14 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2770";
-import * as forms from "./forms.js?v=2770";
-import * as analytics from "./analytics.js?v=2770";
-import * as importWizard from "./import-wizard.js?v=2770";
-import { renderTreeDistribution } from "./distribution.js?v=2770";   // v2.6.2：立木分布散布圖
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2770";
+import { firebaseConfig } from "../firebase-config.js?v=2790";
+import * as forms from "./forms.js?v=2790";
+import * as analytics from "./analytics.js?v=2790";
+import * as importWizard from "./import-wizard.js?v=2790";
+import { renderTreeDistribution } from "./distribution.js?v=2790";   // v2.6.2：立木分布散布圖
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2790";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, computeProgress } from "./project-status.js?v=2770";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=2790";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -250,6 +250,37 @@ function renderStatusBanner() {
   renderReviewerApprovalCard();
 }
 
+// v2.7.9：admin god view 後門按鈕工廠 — verified 狀態下退回 review / active
+function makeRevertBtn(targetStatus, label, hint) {
+  const cls = targetStatus === STATUS.REVIEW
+    ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+    : 'bg-stone-100 hover:bg-stone-200 text-stone-800 border-stone-300';
+  const b = el('button', {
+    class: `flex-1 border ${cls} px-3 py-1.5 rounded text-xs font-medium`,
+    title: hint,
+  }, label);
+  b.onclick = async () => {
+    const targetLabel = targetStatus === STATUS.REVIEW ? '審查中（review）' : '作業中（active）';
+    const lockNote = targetStatus === STATUS.REVIEW
+      ? '\n• 保留 Lock（reviewer 可繼續審查）'
+      : '\n• 自動 Unlock（PI 可重新編輯）';
+    if (!confirm(`admin 後門：退回為「${targetLabel}」？\n\n• 清除 verifiedAt / verifiedBy 完成紀錄${lockNote}\n• 此操作會記錄在 statusChangedAt / statusChangedBy\n\n確定退回？`)) return;
+    try {
+      b.disabled = true;
+      b.textContent = '⏳ 處理中…';
+      await applyStatusRevertVerified(state.project, targetStatus);
+      toast(`已退回為${targetLabel}`, 4000);
+      renderStatusBanner();
+      renderReviewerApprovalCard();
+    } catch (e) {
+      toast('退回失敗：' + e.message);
+      b.disabled = false;
+      b.textContent = label;
+    }
+  };
+  return b;
+}
+
 // v2.7：Reviewer 完成審查卡 — reviewer/admin 角色 + status=review/verified 才顯示
 function renderReviewerApprovalCard() {
   const card = $('#reviewer-approval-card');
@@ -270,6 +301,15 @@ function renderReviewerApprovalCard() {
     const at = p.verifiedAt ? fmtDate(p.verifiedAt) : (p.lockedAt ? fmtDate(p.lockedAt) : '—');
     statusEl.innerHTML = `<div class="text-green-700 font-medium">✅ 全案已查證</div>
       <div class="text-xs text-stone-600 mt-1">由 ${by} 於 ${at} 完成審查</div>`;
+    // v2.7.9：admin god view 後門 — 退回 review / active（reviewer 不顯示）
+    if (isSystemAdmin()) {
+      const revertRow = el('div', { class: 'flex gap-2 mt-2 pt-2 border-t border-stone-200' },
+        el('span', { class: 'text-xs text-stone-500 self-center' }, '⚙️ admin：'),
+        makeRevertBtn(STATUS.REVIEW,  '↩️ 退回為審查中', '保留 Lock — reviewer 可繼續審查'),
+        makeRevertBtn(STATUS.ACTIVE,  '↩️ 退回為作業中', '自動 Unlock — PI 可重新編輯')
+      );
+      statusEl.appendChild(revertRow);
+    }
     return;
   }
   if (cur === STATUS.REVIEW) {
