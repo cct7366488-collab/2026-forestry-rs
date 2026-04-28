@@ -22,7 +22,10 @@ service cloud.firestore {
     function isSurveyor(pid)      { return userRole(pid) == 'surveyor'; }
     function isReviewer(pid)      { return userRole(pid) == 'reviewer'; }
     function isMember(pid)        { return userRole(pid) != null; }
-    function canCollect(pid)      { return isPi(pid) || isSurveyor(pid); }
+    // v2.7.8：canCollect 加 isSystemAdmin（與 canRead 風格一致）
+    //   修前：plot 子集合 create（trees/regeneration/understory/...）只允許 isPi || isSurveyor
+    //   修後：admin god view 不需自己是 PI 也能透過 import wizard 寫入立木與其他子集合
+    function canCollect(pid)      { return isPi(pid) || isSurveyor(pid) || isSystemAdmin(); }
     function canRead(pid)         { return isMember(pid) || isSystemAdmin(); }
 
     function isLocked(pid)        { return projectDoc(pid).locked == true; }
@@ -74,7 +77,8 @@ service cloud.firestore {
         allow read: if isSignedIn() && canRead(projectId);
 
         // create：建立時不強制 qaStatus（client 端會自動帶 'pending'）
-        allow create: if isSignedIn() && (canCollect(projectId) || isSystemAdmin()) && willOwn() && !isLocked(projectId);
+        // v2.7.8：拿掉 || isSystemAdmin() — canCollect 已 include
+        allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId);
 
         // v1.7.1.3：systemAdmin god view，跨任何專案角色限制
         allow update: if isSignedIn() && !isLocked(projectId) && (
