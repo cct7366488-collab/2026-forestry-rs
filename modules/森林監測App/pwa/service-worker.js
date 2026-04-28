@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.2';  // v2.7.2：plot 卡片 chip 從 trees-only 擴成依 methodology.modules 動態（regen/understory/soilCons/wildlife/harvest）
+const CACHE = 'forest-monitor-v2.7.3';  // v2.7.3：deleteProjectCascade 級聯前自動 force-unlock + modal 註明（archived 專案總是 locked）
 const SHELL = [
   './',
   './index.html',

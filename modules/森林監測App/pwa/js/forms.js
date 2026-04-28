@@ -6,7 +6,7 @@ import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCo
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=2720';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=2730';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -350,6 +350,9 @@ export async function unarchiveProject(project) {
 //   (1) 必須先「封存」此專案（archived=true）才允許永久刪除 — 強制至少二步驟思考
 //   (2) 客製 modal 必須勾選「我已匯出資料備份」 — 提醒先匯出 XLSX/CSV
 //   (3) 必須輸入專案代碼確認 — 防誤刪
+// v2.7.3：archived 專案因 archiveProject 自動 lock — 級聯刪除前先 force-unlock
+//   即使現行 Firestore Rules 子集合 delete 路徑沒擋 isLocked，仍做 defense-in-depth：
+//   ① 防 Rules 之後收緊；② 避免任何牽涉 plot.update 的 cascade 路徑被擋；③ UX 一致避免使用者卡關
 // Storage Rules `allow delete`（v1.6.0 已加）；Firestore Rules `allow delete: if isSystemAdmin()`
 export async function deleteProjectCascade(project) {
   if (!project.archived) {
@@ -357,12 +360,18 @@ export async function deleteProjectCascade(project) {
     return;
   }
 
+  // v2.7.3：偵測 lock 狀態 — 用於 modal 提示與級聯前的 force-unlock
+  const wasLocked = project.locked === true;
+
   // 客製確認 modal（取代 prompt + confirm）
   const confirmed = await new Promise(resolve => {
     const f = el('form', { class: 'space-y-3' },
       el('p', { class: 'text-sm font-medium' }, `永久刪除「${project.name}」（${project.code}）`),
       el('p', { class: 'text-sm text-red-700 bg-red-50 p-2 rounded' },
         '⚠️ 將連同所有樣區、立木、自然更新、上傳照片一併刪除，**無法復原**。'),
+      // v2.7.3：lock 狀態提示（archived 專案總是 locked=true）
+      wasLocked ? el('p', { class: 'text-xs text-stone-700 bg-stone-100 border border-stone-300 p-2 rounded' },
+        '🔓 本專案目前 Lock 中（封存自動鎖定）— 確認後會先自動解鎖再執行級聯刪除，無需手動 Unlock。') : null,
       el('label', { class: 'flex items-start gap-2 text-sm' },
         el('input', { type: 'checkbox', name: 'exported', required: 'true', class: 'mt-1' }),
         el('span', {}, '我已從「匯出」分頁下載此專案的資料備份（XLSX / CSV）')
@@ -395,6 +404,15 @@ export async function deleteProjectCascade(project) {
   toast('刪除中...', 30000);
   try {
     const projectId = project.id;
+    // v2.7.3：級聯前 force-unlock（archived 專案總是 locked，先解鎖避免任何潛在 isLocked 檢查擋住）
+    //   project doc update 路徑本身不受 isLocked 限制（Rules: allow update: isPi || admin），可直接寫
+    if (wasLocked) {
+      await fb.updateDoc(fb.doc(fb.db, 'projects', projectId), {
+        locked: false,
+        lockedBy: null,
+        lockedAt: null
+      });
+    }
     // (1) 列出所有 plots
     const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', projectId, 'plots'));
     let plotCount = 0, treeCount = 0, regenCount = 0, photoCount = 0;
