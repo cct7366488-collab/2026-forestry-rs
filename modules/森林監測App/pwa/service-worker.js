@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.0';  // v2.7.0：階段 3 — Reviewer 完成審查（review→verified 狀態轉移 + UI 卡 + rules allowlist）
+const CACHE = 'forest-monitor-v2.7.1';  // v2.7.1：wizard 第 5 步加方法學原點型態 vs 資料分布一致性檢查（軟警告 banner）
 const SHELL = [
   './',
   './index.html',

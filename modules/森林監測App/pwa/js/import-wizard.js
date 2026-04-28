@@ -8,7 +8,7 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2700';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2710';
 
 // ===== 內部 wizard state =====
 let W = null;  // { step, file, workbook, sheetMeta, plotMapping, fieldMapping, speciesIssues, statusMap }
@@ -460,6 +460,78 @@ function renderStep4() {
   return box;
 }
 
+// ===== v2.7.1：方法學原點型態 vs 資料分布一致性檢查 =====
+// 動機：v2.6.2 散布圖揭露紙漿廠資料品質問題 — Excel X/Y 全 ≥ 0（corner 模式）
+//      但 methodology.plotOriginType 沿用預設 'center'（4 象限）→ 立木全堆到右上跑出邊界
+// 設計：軟警告（不擋 DRY-RUN），讓使用者有機會回去改方法學再來
+
+function analyzeXYDistribution() {
+  const fm = W.fieldMapping || {};
+  if (fm.localX_m == null && fm.localY_m == null) return null;  // 無 X/Y 欄位對應 → 無資料可分析
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  let count = 0, anyNegX = false, anyNegY = false;
+
+  for (const [sheetName, m] of Object.entries(W.plotMapping || {})) {
+    if (!m.use) continue;
+    const aoa = XLSX.utils.sheet_to_json(W.workbook.Sheets[sheetName], { header: 1, defval: '' });
+    for (let r = 1; r < aoa.length; r++) {
+      const row = aoa[r];
+      if (!row || row[fm.treeNum] === '' || row[fm.treeNum] == null) continue;
+      const xRaw = fm.localX_m != null ? row[fm.localX_m] : null;
+      const yRaw = fm.localY_m != null ? row[fm.localY_m] : null;
+      const x = (xRaw != null && xRaw !== '') ? parseFloat(xRaw) : null;
+      const y = (yRaw != null && yRaw !== '') ? parseFloat(yRaw) : null;
+      let used = false;
+      if (x != null && !isNaN(x)) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (x < 0) anyNegX = true;
+        used = true;
+      }
+      if (y != null && !isNaN(y)) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (y < 0) anyNegY = true;
+        used = true;
+      }
+      if (used) count++;
+    }
+  }
+  if (count === 0) return null;
+  return { minX, maxX, minY, maxY, count, anyNegX, anyNegY };
+}
+
+function checkOriginTypeMismatch() {
+  const meth = W.project?.methodology;
+  if (!meth) return null;
+  const orig = meth.plotOriginType || 'center';
+  const a = analyzeXYDistribution();
+  if (!a) return null;
+
+  const fmtRange = (lo, hi) => `${lo.toFixed(1)} ~ ${hi.toFixed(1)} m`;
+
+  if (orig === 'center' && !a.anyNegX && !a.anyNegY) {
+    return {
+      severity: 'warn',
+      kind: 'center-but-corner-data',
+      title: '⚠ 方法學原點型態可能設錯（看起來資料是 corner 模式，但方法學是 center）',
+      detail: `偵測到 ${a.count} 筆立木 X/Y 全部 ≥ 0（X: ${fmtRange(a.minX, a.maxX)} / Y: ${fmtRange(a.minY, a.maxY)}），但本專案方法學的 plotOriginType 是「center（中心點原點，4 象限，X/Y 可正可負）」。資料看起來是用「樣區左下角」當原點測量的（corner 模式）。`,
+      action: '建議：取消此 wizard → 進「設計」分頁編輯方法學 → plotOriginType 改成「corner（左下角原點）」→ 儲存 → 重新匯入。若硬匯入：散布圖會把所有立木堆到右上角、紅圈描邊跑出樣區邊界。'
+    };
+  }
+  if (orig === 'corner' && (a.anyNegX || a.anyNegY)) {
+    return {
+      severity: 'warn',
+      kind: 'corner-but-center-data',
+      title: '⚠ 方法學原點型態可能設錯（看起來資料是 center 模式，但方法學是 corner）',
+      detail: `偵測到 ${a.count} 筆立木中有負值座標（X: ${fmtRange(a.minX, a.maxX)} / Y: ${fmtRange(a.minY, a.maxY)}），但本專案方法學的 plotOriginType 是「corner（左下角原點，單象限，X/Y ≥ 0）」。資料看起來是用「樣區中心點」當原點測量的（center 模式）。`,
+      action: '建議：取消此 wizard → 進「設計」分頁編輯方法學 → plotOriginType 改成「center（中心點原點）」→ 儲存 → 重新匯入。'
+    };
+  }
+  return null;  // 方法學與資料一致或無法判斷
+}
+
 // ===== STEP 5：DRY-RUN 預覽 / 真實匯入進度 / 真實匯入結果 =====
 function renderStep5() {
   // v2.6：真實匯入結果（最高優先）
@@ -473,6 +545,16 @@ function renderStep5() {
   box.appendChild(el('h3', { class: 'font-semibold text-base' }, '步驟 5：預覽 (DRY-RUN)'));
   box.appendChild(el('div', { class: 'bg-amber-50 border border-amber-300 rounded px-3 py-2 text-sm text-amber-900' },
     '⚠ 雛形階段：此步驟「不會」真正寫入資料庫，僅輸出將被建立的資料結構供檢視。'));
+
+  // v2.7.1：方法學原點型態與資料分布一致性檢查（軟警告，不擋 DRY-RUN）
+  const mismatch = checkOriginTypeMismatch();
+  if (mismatch) {
+    box.appendChild(el('div', { class: 'border-l-4 border-amber-500 bg-amber-50 rounded p-3 text-sm' },
+      el('div', { class: 'font-semibold text-amber-900 mb-1' }, mismatch.title),
+      el('div', { class: 'text-amber-800 mb-2' }, mismatch.detail),
+      el('div', { class: 'text-xs text-amber-700' }, mismatch.action)
+    ));
+  }
 
   // 計算將要寫入的 plot / tree 數
   let plotCount = 0, treeCount = 0;
