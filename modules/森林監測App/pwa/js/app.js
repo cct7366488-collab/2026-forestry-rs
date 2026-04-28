@@ -8,21 +8,21 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, writeBatch,
   query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2730";
-import * as forms from "./forms.js?v=2730";
-import * as analytics from "./analytics.js?v=2730";
-import * as importWizard from "./import-wizard.js?v=2730";
-import { renderTreeDistribution } from "./distribution.js?v=2730";   // v2.6.2：立木分布散布圖
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2730";
+import { firebaseConfig } from "../firebase-config.js?v=2740";
+import * as forms from "./forms.js?v=2740";
+import * as analytics from "./analytics.js?v=2740";
+import * as importWizard from "./import-wizard.js?v=2740";
+import { renderTreeDistribution } from "./distribution.js?v=2740";   // v2.6.2：立木分布散布圖
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2740";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, computeProgress } from "./project-status.js?v=2730";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, computeProgress } from "./project-status.js?v=2740";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -110,7 +110,7 @@ export const DEFAULT_METHODOLOGY = {
 // ===== 工具 =====
 export const fb = {
   app, db, auth, storage,
-  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, writeBatch,
   query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup,
   storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 };

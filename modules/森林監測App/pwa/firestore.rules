@@ -113,10 +113,20 @@ service cloud.firestore {
       }
     }
 
-    // ===== Lookups =====
+    // ===== Lookups =====（保留，目前未使用 — 原 path /lookups/{collection}/{docId} 是 3-segment subcollection 寫法不會 match 任何 doc）
     match /lookups/{collection}/{docId} {
       allow read:  if isSignedIn();
       allow write: if false;
+    }
+
+    // ===== Species 字典 =====
+    // v2.7.4：top-level `species/{docId}` — 平台共享樹種字典
+    //   首批用途：import wizard 把未知樹種 seed 進來為 verified=false，PI/admin 後續逐筆審核補學名/保育等級
+    //   read：所有登入使用者可查（任一專案匯入時都要比對）
+    //   write：僅 systemAdmin（共享字典守門員）
+    match /species/{docId} {
+      allow read:  if isSignedIn();
+      allow write: if isSystemAdmin();
     }
   }
 }

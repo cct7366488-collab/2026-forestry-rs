@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.3';  // v2.7.3：deleteProjectCascade 級聯前自動 force-unlock + modal 註明（archived 專案總是 locked）
+const CACHE = 'forest-monitor-v2.7.4';  // v2.7.4：import wizard Phase 2 — 樹種字典自動 seed unverified + 錯誤行明細表格/CSV + writeBatch 平行寫入加速
 const SHELL = [
   './',
   './index.html',
