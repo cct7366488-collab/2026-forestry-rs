@@ -8,9 +8,9 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=27110';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=27120';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=27110';
+import { TREES } from './species-dict.js?v=27120';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
@@ -39,6 +39,39 @@ const SPECIES_ALIAS_MAP = {
 const SPECIES_GARBAGE = new Set([
   '缺牌',  // Excel 樹種欄位填了樣木狀態而非樹種 — 不寫入 tree.speciesZh、不 seed 字典
 ]);
+
+// ===== v2.7.12 🆔b2：動態 alias map（從 species/{docId}.aliasOf 讀）=====
+// 補上 v2.7.11 admin 字典管理 UI 設的 alias 與 import wizard 的閉環缺口。
+// 設計：開 wizard 時 prefetch 一次（fire 後 await），整個 wizard session 共用；
+//      與 v2.7.5 hard-coded SPECIES_ALIAS_MAP 共存 — 先 hard-coded（保險、prefetch
+//      失敗也有最低保證）→ 再動態（admin 在字典管理 UI 設的）。
+let _dynamicAliases = {};         // { '別名zh': '主名zh' }
+let _dynamicAliasCount = 0;       // 給 step 4 UI 顯示用
+
+async function prefetchSpeciesAliases() {
+  _dynamicAliases = {};
+  _dynamicAliasCount = 0;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'species'));
+    const byId = new Map();
+    snap.docs.forEach(d => byId.set(d.id, { id: d.id, ...d.data() }));
+    snap.docs.forEach(d => {
+      const data = d.data();
+      if (!data.aliasOf) return;
+      const main = byId.get(data.aliasOf);
+      if (!main) return;             // 孤兒 alias（主名 doc 不存在）
+      // docId 與 zh 都對應上（v2.7.4 設計兩者通常相同，但保險都做）
+      _dynamicAliases[d.id] = main.zh;
+      if (data.zh && data.zh !== d.id) _dynamicAliases[data.zh] = main.zh;
+    });
+    _dynamicAliasCount = Object.keys(_dynamicAliases).length;
+    console.log(`[import-wizard prefetch] ${_dynamicAliasCount} dynamic aliases loaded`);
+  } catch (e) {
+    console.warn('[import-wizard prefetch] aliases failed (rules deny / network)', e);
+    // 不致命 — normalizeSpeciesName 仍會走 hard-coded SPECIES_ALIAS_MAP
+  }
+}
+
 function normalizeSpeciesName(raw) {
   if (raw == null) return null;
   let s = String(raw).trim();
@@ -46,7 +79,10 @@ function normalizeSpeciesName(raw) {
   for (const [from, to] of Object.entries(SPECIES_CHAR_NORMALIZE)) {
     if (s.includes(from)) s = s.split(from).join(to);
   }
+  // 1. hard-coded（保險、即使 prefetch 失敗也有最低保證）
   if (SPECIES_ALIAS_MAP[s]) s = SPECIES_ALIAS_MAP[s];
+  // 2. v2.7.12：動態 alias（admin 在 v2.7.10/v2.7.11 字典管理 UI 設的 species.aliasOf）
+  if (_dynamicAliases[s]) s = _dynamicAliases[s];
   if (SPECIES_GARBAGE.has(s)) return null;
   return s;
 }
@@ -101,9 +137,11 @@ function restoreModal() {
 }
 
 // ===== 入口 =====
-export function openImportWizard(project) {
+export async function openImportWizard(project) {
   if (!project) return toast('請先進入專案');
   if (typeof XLSX === 'undefined') return toast('SheetJS 未載入');
+  // v2.7.12：prefetch 動態 alias map（admin 在字典管理 UI 設的 aliasOf）
+  await prefetchSpeciesAliases();
   W = {
     step: 1,
     project,
@@ -466,7 +504,7 @@ function renderStep4() {
     el('div', { class: 'font-semibold text-sm mb-2' },
       `🌿 樹種對照（共 ${speciesSet.size} 種）`),
     el('div', { class: 'text-xs text-green-700 mb-1' },
-      `✓ 字典已收錄：${known.length} 種（比對 species-dict.js 內 ${TREES.length} 種台灣常見木本，已 normalize 臺/台、棱/稜、江某→鵝掌柴、缺牌過濾）`),
+      `✓ 字典已收錄：${known.length} 種（比對 species-dict.js 內 ${TREES.length} 種台灣常見木本，已 normalize 臺/台、棱/稜、江某→鵝掌柴、缺牌過濾，動態 alias ${_dynamicAliasCount} 條）`),
     el('div', { class: 'text-xs text-amber-700' },
       `⚠ 字典缺少：${unknown.length} 種 — 真實匯入時會自動 seed 到 species/（verified=false，留待後續逐筆審核補學名/保育等級）`),
     unknown.length

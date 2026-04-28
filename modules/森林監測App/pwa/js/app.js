@@ -15,15 +15,15 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=27110";
-import * as forms from "./forms.js?v=27110";
-import * as analytics from "./analytics.js?v=27110";
-import * as importWizard from "./import-wizard.js?v=27110";
-import { renderTreeDistribution } from "./distribution.js?v=27110";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27110";   // v2.7.10：admin 樹種字典管理
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27110";
+import { firebaseConfig } from "../firebase-config.js?v=27120";
+import * as forms from "./forms.js?v=27120";
+import * as analytics from "./analytics.js?v=27120";
+import * as importWizard from "./import-wizard.js?v=27120";
+import { renderTreeDistribution } from "./distribution.js?v=27120";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27120";   // v2.7.10：admin 樹種字典管理
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27120";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27110";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27120";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
