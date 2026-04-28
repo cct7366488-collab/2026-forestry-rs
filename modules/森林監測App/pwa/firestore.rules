@@ -52,7 +52,20 @@ service cloud.firestore {
         request.resource.data.members[request.resource.data.pi] == 'pi';
 
       // v1.7.1.2：PI 或 system admin 可改（admin god view，不需自己是 PI 也能管理 members）
-      allow update: if isSignedIn() && (isPi(projectId) || isSystemAdmin());
+      // v2.7：reviewer 限定一條路 — review→verified 完成審查
+      //   條件：cur status='review'、new status='verified'、僅改狀態機相關欄位（不可動 methodology/members 等）
+      allow update: if isSignedIn() && (
+        isPi(projectId) || isSystemAdmin() ||
+        (isReviewer(projectId)
+          && resource.data.get('status', 'active') == 'review'
+          && request.resource.data.status == 'verified'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'statusChangedAt', 'statusChangedBy',
+              'locked', 'lockedAt', 'lockedBy', 'autoLockReason',
+              'verifiedAt', 'verifiedBy'
+            ])
+        )
+      );
 
       // admin 可刪空殼專案（v1.5 簡化：不檢查 plotCount）
       allow delete: if isSignedIn() && isSystemAdmin();

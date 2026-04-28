@@ -8,7 +8,7 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2620';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2700';
 
 // ===== 內部 wizard state =====
 let W = null;  // { step, file, workbook, sheetMeta, plotMapping, fieldMapping, speciesIssues, statusMap }

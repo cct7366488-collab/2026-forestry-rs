@@ -1,4 +1,4 @@
-// ===== project-status.js — v2.3 階段 2：狀態機 + 自動偵測送審 =====
+// ===== project-status.js — v2.7 階段 3：Reviewer 完成審查 =====
 // 6 狀態：created → planning → active → review → verified → archived
 // 觸發點：
 //   methodology 第一次儲存 → created → planning
@@ -6,8 +6,8 @@
 //   markQA verified 後全 verified  → active → review + auto-Lock
 //   markQA verified→非 verified    → review → active + auto-unlock
 //   surveyor 改自己被 flag 的資料  → review → active + auto-unlock（保險）
-//   reviewer 通過（階段 3 才實作）  → review → verified
-//   admin 結案（階段 3 才實作）     → verified → archived
+//   reviewer 完成審查（v2.7）       → review → verified（保留 Lock，autoLockReason='reviewer-approved'）
+//   admin 結案                       → verified → archived（封存按鈕，已實作於 forms.archiveProject）
 
 import { fb, state } from './app.js';
 
@@ -34,9 +34,10 @@ export const STATUS_META = {
 };
 
 export const AUTO_LOCK_REASON_LABEL = {
-  'all-verified': '系統偵測全資料 verified，自動進入審查階段',
-  'manual':       'PI 手動鎖定',
-  'legacy':       'v2.2 既有手動鎖定（v2.3 升級時保留）'
+  'all-verified':     '系統偵測全資料 verified，自動進入審查階段',
+  'manual':           'PI 手動鎖定',
+  'legacy':           'v2.2 既有手動鎖定（v2.3 升級時保留）',
+  'reviewer-approved':'Reviewer 完成審查並查證全案，資料永久鎖定'
 };
 
 /** UI helper：status badge HTML（卡片右上 / banner 用） */
@@ -189,6 +190,49 @@ export async function applyStatusAfterMethodologySaved(project) {
   if (cur !== STATUS.CREATED) return null;
   await writeStatus(project, STATUS.PLANNING);
   return 'promoted-planning';
+}
+
+/**
+ * v2.7 階段 3：Reviewer 完成審查 → review → verified
+ * 保留 Lock（autoLockReason 改 'reviewer-approved'，lockedBy 改 reviewer uid）
+ * 同時寫 verifiedAt / verifiedBy 兩個獨立欄位作為查證歷史紀錄（不可被覆蓋）
+ */
+export async function applyStatusAfterReviewerApprove(project) {
+  if (!project) throw new Error('project required');
+  if (project.archived) throw new Error('已封存專案不可再審查');
+  const cur = project.status || STATUS.ACTIVE;
+  if (cur !== STATUS.REVIEW) throw new Error(`狀態 ${cur} 不可完成審查（需處於 review）`);
+  const reviewerUid = state.user?.uid;
+  if (!reviewerUid) throw new Error('未登入');
+
+  const projectRef = fb.doc(fb.db, 'projects', project.id);
+  const updates = {
+    status: STATUS.VERIFIED,
+    statusChangedAt: fb.serverTimestamp(),
+    statusChangedBy: reviewerUid,
+    // Lock 改由 reviewer 持有 + 標 reviewer-approved（區別於 system 自動鎖）
+    locked: true,
+    lockedAt: fb.serverTimestamp(),
+    lockedBy: reviewerUid,
+    autoLockReason: 'reviewer-approved',
+    // 永久查證紀錄欄位（後續即使狀態再變動也保留）
+    verifiedAt: fb.serverTimestamp(),
+    verifiedBy: reviewerUid
+  };
+  await fb.updateDoc(projectRef, updates);
+
+  // sync client state
+  project.status = STATUS.VERIFIED;
+  project.statusChangedAt = new Date();
+  project.statusChangedBy = reviewerUid;
+  project.locked = true;
+  project.lockedAt = new Date();
+  project.lockedBy = reviewerUid;
+  project.autoLockReason = 'reviewer-approved';
+  project.verifiedAt = new Date();
+  project.verifiedBy = reviewerUid;
+
+  return 'promoted-verified';
 }
 
 /** PI 手動 toggle Lock — 寫 autoLockReason='manual'，狀態不動 */

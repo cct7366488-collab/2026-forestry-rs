@@ -15,14 +15,14 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2620";
-import * as forms from "./forms.js?v=2620";
-import * as analytics from "./analytics.js?v=2620";
-import * as importWizard from "./import-wizard.js?v=2620";
-import { renderTreeDistribution } from "./distribution.js?v=2620";   // v2.6.2：立木分布散布圖
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2620";
-// v2.3：階段 2 — 狀態機 + 自動偵測送審
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, computeProgress } from "./project-status.js?v=2620";
+import { firebaseConfig } from "../firebase-config.js?v=2700";
+import * as forms from "./forms.js?v=2700";
+import * as analytics from "./analytics.js?v=2700";
+import * as importWizard from "./import-wizard.js?v=2700";
+import { renderTreeDistribution } from "./distribution.js?v=2700";   // v2.6.2：立木分布散布圖
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2700";
+// v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, computeProgress } from "./project-status.js?v=2700";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -221,6 +221,7 @@ function renderStatusBanner() {
   // 不顯示 banner 的狀況：未鎖定 且 active/planning/created（讓主畫面乾淨）
   if (!isLockedNow && (status === STATUS.ACTIVE || status === STATUS.PLANNING || status === STATUS.CREATED)) {
     banner.classList.add('hidden');
+    renderReviewerApprovalCard();  // v2.7：reviewer 卡也跟著隱藏（demote 後同步）
     return;
   }
   banner.classList.remove('hidden');
@@ -236,12 +237,65 @@ function renderStatusBanner() {
     parts.push(`<div class="text-xs mt-1 opacity-80">${reasonText}${at ? ` · ${at}` : ''}${by && by !== '系統' && reason !== 'all-verified' ? ` · 由 ${by}` : ''}</div>`);
   }
   if (status === STATUS.VERIFIED) {
-    parts.push(`<div class="text-xs mt-1 opacity-80">已通過 reviewer 審查（階段 3 才實作 reviewer 流程）</div>`);
+    // v2.7：reviewer-approved 的細節已由上方 reasonText 顯示（含 by + 日期）
+    // 這裡補一條提示：資料永久查證，不可再 markQA
+    parts.push(`<div class="text-xs mt-1 opacity-80">✅ 全案已查證 — 資料永久鎖定，無法再 markQA。如需修正請洽 admin 退回。</div>`);
   }
   if (status === STATUS.ARCHIVED) {
     parts.push(`<div class="text-xs mt-1 opacity-80">本專案已歸檔（資料保留唯讀）</div>`);
   }
   banner.innerHTML = parts.join('');
+
+  // v2.7：reviewer 完成審查卡（同樣是 plots tab 共用區，跟 lock-banner 一起隨 status 切換）
+  renderReviewerApprovalCard();
+}
+
+// v2.7：Reviewer 完成審查卡 — reviewer/admin 角色 + status=review/verified 才顯示
+function renderReviewerApprovalCard() {
+  const card = $('#reviewer-approval-card');
+  const btn = $('#btn-reviewer-approve');
+  const statusEl = $('#reviewer-approval-status');
+  if (!card || !btn || !statusEl) return;
+  const p = state.project;
+  if (!p) { card.classList.add('hidden'); return; }
+  const cur = p.status || STATUS.ACTIVE;
+  const canApprove = (isReviewer() || isSystemAdmin());
+
+  if (!canApprove) { card.classList.add('hidden'); return; }
+
+  if (cur === STATUS.VERIFIED) {
+    card.classList.remove('hidden');
+    btn.classList.add('hidden');
+    const by = userLabel(p.verifiedBy || p.lockedBy, '系統');
+    const at = p.verifiedAt ? fmtDate(p.verifiedAt) : (p.lockedAt ? fmtDate(p.lockedAt) : '—');
+    statusEl.innerHTML = `<div class="text-green-700 font-medium">✅ 全案已查證</div>
+      <div class="text-xs text-stone-600 mt-1">由 ${by} 於 ${at} 完成審查</div>`;
+    return;
+  }
+  if (cur === STATUS.REVIEW) {
+    card.classList.remove('hidden');
+    btn.classList.remove('hidden');
+    statusEl.innerHTML = `<div class="text-amber-700">🔍 全資料 verified，等待 reviewer 完成審查</div>
+      <div class="text-xs text-stone-500 mt-1">完成後資料永久查證、不可再 markQA。如需退回，請對任一筆 markQA flag/reject。</div>`;
+    btn.disabled = false;
+    btn.textContent = '✅ 完成審查並查證全案';
+    btn.onclick = async () => {
+      if (!confirm('完成審查後：\n• 專案狀態 → ✅ 已查證\n• 全部資料永久鎖定，不可再修改或 markQA\n• 無法再退回 review（除非 admin 介入）\n\n確定通過全案？')) return;
+      try {
+        btn.disabled = true;
+        btn.textContent = '⏳ 處理中…';
+        await applyStatusAfterReviewerApprove(state.project);
+        toast('✅ 已完成審查，全案查證', 4000);
+        renderStatusBanner();
+      } catch (e) {
+        toast('完成審查失敗：' + e.message);
+        btn.disabled = false;
+        btn.textContent = '✅ 完成審查並查證全案';
+      }
+    };
+    return;
+  }
+  card.classList.add('hidden');
 }
 
 // 套用 data-role-show 屬性，僅顯示符合當前角色的元素
@@ -607,9 +661,11 @@ async function renderProjectHome(root, projectId) {
   if (!psnap.exists()) { toast('找不到專案'); location.hash = ''; return; }
   state.project = { id: projectId, ...psnap.data() };
   // v1.5.2 Bug #5：預取所有成員 + lockedBy 的 displayName，避免 UI 顯示 uid 片段
+  // v2.7：補 verifiedBy（reviewer-approved 後 verified banner 要顯示 reviewer 名）
   prefetchUserLabels([
     ...Object.keys(state.project.members || {}),
-    state.project.lockedBy
+    state.project.lockedBy,
+    state.project.verifiedBy
   ].filter(Boolean));
 
   // 🩹 v1.7.0：dataManager 角色自動 migration → pi（靜默，PI 開啟時觸發）
@@ -1186,9 +1242,11 @@ async function renderPlotDetail(root, projectId, plotId) {
   if (!psnap.exists()) { toast('找不到樣區'); location.hash = `#/p/${projectId}`; return; }
   state.plot = { id: plotId, ...psnap.data() };
   // v1.5.2 Bug #5：直接從 plot detail 入口（深連結）也要預取
+  // v2.7：補 verifiedBy
   await prefetchUserLabels([
     ...Object.keys(state.project.members || {}),
     state.project.lockedBy,
+    state.project.verifiedBy,
     state.plot.createdBy
   ].filter(Boolean));
   if (myId !== _routeId) return;

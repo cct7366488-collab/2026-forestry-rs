@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=2620">
+  <link rel="stylesheet" href="style.css?v=2700">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -120,6 +120,13 @@
       </div>
       <div id="lock-banner" class="hidden bg-stone-100 border border-stone-300 text-stone-700 text-sm px-3 py-2 rounded mb-3">
         🔒 本專案資料已鎖定（PI 已 Lock）— 所有寫入操作停用
+      </div>
+      <!-- v2.7：Reviewer 完成審查卡（顯示時機：reviewer/admin 角色 + status=review/verified）-->
+      <div id="reviewer-approval-card" class="hidden bg-white rounded-lg shadow p-4 mb-3 border-l-4 border-amber-500">
+        <h3 class="font-semibold mb-2">🔍 完成審查（Reviewer）</h3>
+        <p class="text-xs text-stone-500 mb-2">當全資料 verified、專案進入「審查中」狀態，由 reviewer 角色檢視全案後點此完成查證。完成後資料永久鎖定。</p>
+        <div id="reviewer-approval-status" class="text-sm mb-2"></div>
+        <button id="btn-reviewer-approve" class="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded text-sm font-medium">✅ 完成審查並查證全案</button>
       </div>
       <div id="plot-list" class="grid sm:grid-cols-2 gap-3"></div>
     </section>
@@ -353,6 +360,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=2620"></script>
+<script type="module" src="js/app.js?v=2700"></script>
 </body>
 </html>

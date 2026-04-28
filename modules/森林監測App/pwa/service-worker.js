@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.6.2';  // v2.6.2：立木分布散布圖（樣區詳情新 sub-tab + Canvas 視覺化 X/Y）
+const CACHE = 'forest-monitor-v2.7.0';  // v2.7.0：階段 3 — Reviewer 完成審查（review→verified 狀態轉移 + UI 卡 + rules allowlist）
 const SHELL = [
   './',
   './index.html',
