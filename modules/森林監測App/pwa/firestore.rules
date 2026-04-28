@@ -22,7 +22,6 @@ service cloud.firestore {
     function isSurveyor(pid)      { return userRole(pid) == 'surveyor'; }
     function isReviewer(pid)      { return userRole(pid) == 'reviewer'; }
     function isMember(pid)        { return userRole(pid) != null; }
-    function canQA(pid)           { return isPi(pid); }
     function canCollect(pid)      { return isPi(pid) || isSurveyor(pid); }
     function canRead(pid)         { return isMember(pid) || isSystemAdmin(); }
 
