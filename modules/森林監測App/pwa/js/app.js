@@ -15,14 +15,14 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=2710";
-import * as forms from "./forms.js?v=2710";
-import * as analytics from "./analytics.js?v=2710";
-import * as importWizard from "./import-wizard.js?v=2710";
-import { renderTreeDistribution } from "./distribution.js?v=2710";   // v2.6.2：立木分布散布圖
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2710";
+import { firebaseConfig } from "../firebase-config.js?v=2720";
+import * as forms from "./forms.js?v=2720";
+import * as analytics from "./analytics.js?v=2720";
+import * as importWizard from "./import-wizard.js?v=2720";
+import { renderTreeDistribution } from "./distribution.js?v=2720";   // v2.6.2：立木分布散布圖
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=2720";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, computeProgress } from "./project-status.js?v=2710";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, computeProgress } from "./project-status.js?v=2720";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -804,25 +804,36 @@ async function renderProjectHome(root, projectId) {
     const list = $('#plot-list');
     list.innerHTML = '';
     const allDocs = snap.docs;
-    // v2.6.1（修）：對每個 plot 各 query trees collection 統計 verified ratio
+    // v2.6.1（修）：對每個 plot 各 query subcollection 統計 verified ratio
     //   原本用 collectionGroup 抓全部，但 Firestore Rules 對 collectionGroup query 拿不到 projectId 父路徑變數
     //   會 permission-denied → 改用 Promise.all 對每個 plot 並行跑單獨 collection query
-    const treeQaByPlot = new Map();  // plotId → { total, verified }
+    // v2.7.2：從 trees-only 擴成依 methodology.modules 動態 — 每個 plot × 啟用模組各跑一次 getDocs
+    //   不啟用的模組完全跳過，避免無謂 read；total=0 的也不存 map（卡片不顯示空 chip）
+    const mods = state.project.methodology?.modules || {};
+    const enabledColls = SUBCOLL_CHIP_META.filter(m => mods[m.modKey]).map(m => m.coll);
+    // qaByPlot: plotId → Map<coll, { total, verified }>
+    const qaByPlot = new Map();
     try {
       const statsList = await Promise.all(
-        allDocs.map(async d => {
-          const treesRef = fb.collection(fb.db, 'projects', projectId, 'plots', d.id, 'trees');
-          const tsnap = await fb.getDocs(treesRef);
-          let total = 0, verified = 0;
-          tsnap.forEach(td => {
-            total++;
-            if (td.data().qaStatus === 'verified') verified++;
-          });
-          return { plotId: d.id, total, verified };
-        })
+        allDocs.flatMap(d =>
+          enabledColls.map(async coll => {
+            const ref = fb.collection(fb.db, 'projects', projectId, 'plots', d.id, coll);
+            const csnap = await fb.getDocs(ref);
+            let total = 0, verified = 0;
+            csnap.forEach(td => {
+              total++;
+              if (td.data().qaStatus === 'verified') verified++;
+            });
+            return { plotId: d.id, coll, total, verified };
+          })
+        )
       );
-      statsList.forEach(s => { if (s.total > 0) treeQaByPlot.set(s.plotId, { total: s.total, verified: s.verified }); });
-    } catch (e) { console.warn('[v2.6.1 treeQa stats]', e); }
+      statsList.forEach(s => {
+        if (s.total === 0) return;
+        if (!qaByPlot.has(s.plotId)) qaByPlot.set(s.plotId, new Map());
+        qaByPlot.get(s.plotId).set(s.coll, { total: s.total, verified: s.verified });
+      });
+    } catch (e) { console.warn('[v2.7.2 subcoll qa stats]', e); }
     const target = state.project.methodology?.targetPlotCount;
     // v1.7.0：surveyor 視角過濾 — 只看被指派 + 自己 createdBy 的
     // v1.7.1.3：admin 不被過濾（god view 永遠看全部）
@@ -883,11 +894,18 @@ async function renderProjectHome(root, projectId) {
       const headerRight = el('div', { class: 'flex items-center gap-1 flex-wrap' });
       if (isShell) headerRight.appendChild(el('span', { class: 'text-xs bg-stone-200 text-stone-700 px-2 py-0.5 rounded' }, '🔘 待調查'));
       else headerRight.appendChild(el('div', { html: qaBadge(dd.qaStatus) }));
-      // v2.6.1：立木子計數 chip（避免 plot.qaStatus 誤導：plot ✓ 但 trees 未審）
-      // v2.6.1b：chip 加 data-trees-chip 屬性，event listener 才能定位增量更新
-      const treeStats = treeQaByPlot.get(d.id);
-      if (treeStats && treeStats.total > 0) {
-        headerRight.appendChild(buildTreesChipEl(d.id, treeStats.verified, treeStats.total));
+      // v2.6.1：sub-collection 子計數 chip（避免 plot.qaStatus 誤導：plot ✓ 但子集合未審）
+      // v2.6.1b：chip 加 data-* 屬性，event listener 才能定位增量更新
+      // v2.7.2：從 trees-only 擴成依 methodology.modules 動態，每個有資料的模組各一個 chip
+      const plotQa = qaByPlot.get(d.id);
+      if (plotQa) {
+        // 依 SUBCOLL_CHIP_META 的固定順序渲染（避免 Map 迭代順序差異），保持卡片穩定
+        SUBCOLL_CHIP_META.forEach(meta => {
+          const stats = plotQa.get(meta.coll);
+          if (stats && stats.total > 0) {
+            headerRight.appendChild(buildSubcollChipEl(d.id, meta.coll, stats.verified, stats.total));
+          }
+        });
       }
       // v1.7.1：未指派 shell 補「📌 待指派」紅字（PI 視角）
       if (isShell && !dd.assignedTo && canQA()) {
@@ -1475,8 +1493,23 @@ async function renderPlotDetail(root, projectId, plotId) {
 
 // v1.5.2：subDoc 列上的 QA 按鈕組（直接 append 三顆按鈕到 td，不包 span）
 // stopPropagation 避免觸發 row 的 onclick（編輯）
-// v2.6.1b：樹計數 chip element 工廠（給 renderPlots 與 mrv:qa-changed listener 共用）
-function buildTreesChipEl(plotId, verified, total) {
+
+// v2.7.2：plot 卡片 sub-collection QA chip 系統（從 v2.6.1 trees-only 擴成依 methodology.modules 動態）
+// 設計：methodology.modules 的 key 與 Firestore subcollection 名稱有對應差異（tree → trees），統一用此表查
+const SUBCOLL_CHIP_META = [
+  { coll: 'trees',        modKey: 'tree',         icon: '🌳', label: '立木' },
+  { coll: 'regeneration', modKey: 'regeneration', icon: '🌱', label: '更新' },
+  { coll: 'understory',   modKey: 'understory',   icon: '🌿', label: '地被' },
+  { coll: 'soilCons',     modKey: 'soilCons',     icon: '⛰️', label: '水保' },
+  { coll: 'wildlife',     modKey: 'wildlife',     icon: '🦌', label: '野生動物' },
+  { coll: 'harvest',      modKey: 'harvest',      icon: '🌰', label: '收穫' },
+];
+const SUBCOLL_CHIP_BY_COLL = Object.fromEntries(SUBCOLL_CHIP_META.map(m => [m.coll, m]));
+
+// v2.7.2：sub-collection chip element 工廠（給 renderPlots 與 mrv:qa-changed listener 共用）
+function buildSubcollChipEl(plotId, coll, verified, total) {
+  const meta = SUBCOLL_CHIP_BY_COLL[coll];
+  if (!meta) return el('span');  // 未知 coll 不顯示
   const allVerified = verified === total;
   const noneVerified = verified === 0;
   const chipCls = allVerified
@@ -1484,33 +1517,35 @@ function buildTreesChipEl(plotId, verified, total) {
     : noneVerified
       ? 'bg-stone-100 text-stone-600'
       : 'bg-amber-100 text-amber-800';
-  const icon = allVerified ? '✓' : '⏳';
+  const statusIcon = allVerified ? '✓' : '⏳';
   return el('span', {
     class: `text-xs px-2 py-0.5 rounded ${chipCls}`,
-    'data-trees-chip-plot': plotId,
-    'data-trees-chip-total': String(total),
-    'data-trees-chip-verified': String(verified),
-    title: '立木審核進度（標 verified / 總株數）'
-  }, `🌳 ${verified}/${total} ${icon}`);
+    'data-qa-chip-plot': plotId,
+    'data-qa-chip-coll': coll,
+    'data-qa-chip-total': String(total),
+    'data-qa-chip-verified': String(verified),
+    title: `${meta.label}審核進度（verified / 總筆數）`
+  }, `${meta.icon} ${verified}/${total} ${statusIcon}`);
 }
 
-// v2.6.1b：監聽 markQA 廣播 — sub-doc verified 改變時，找對應 plot 的 chip 增量更新
+// v2.7.2：監聽 markQA 廣播 — sub-doc verified 改變時，找對應 plot + coll 的 chip 增量更新
+//   v2.6.1b 原本只支援 trees，今天擴成所有 sub-collection（regen/understory/soilCons/wildlife/harvest）
 //   只 mount 一次，後續 navigate 也持續生效（state.unsubscribers 不收這個 — 整個 app lifetime）
 if (typeof window !== 'undefined' && !window.__mrvQaListenerMounted) {
   window.__mrvQaListenerMounted = true;
   window.addEventListener('mrv:qa-changed', (ev) => {
     const { plotId, subColl, oldStatus, newStatus } = ev.detail || {};
-    if (subColl !== 'trees') return;  // v2.6.1 chip 目前只支援 trees（其他模組之後可擴）
-    const chip = document.querySelector(`[data-trees-chip-plot="${plotId}"]`);
-    if (!chip) return;  // 樣區清單頁不在當前 view，無需更新
-    const total = parseInt(chip.dataset.treesChipTotal, 10);
-    let verified = parseInt(chip.dataset.treesChipVerified, 10);
-    // 增量計算
+    if (!SUBCOLL_CHIP_BY_COLL[subColl]) return;  // 未知 coll
+    const chip = document.querySelector(
+      `[data-qa-chip-plot="${plotId}"][data-qa-chip-coll="${subColl}"]`
+    );
+    if (!chip) return;  // 樣區清單頁不在當前 view、或該 plot/coll 沒 chip（total=0），無需更新
+    const total = parseInt(chip.dataset.qaChipTotal, 10);
+    let verified = parseInt(chip.dataset.qaChipVerified, 10);
     if (oldStatus !== 'verified' && newStatus === 'verified') verified++;
     else if (oldStatus === 'verified' && newStatus !== 'verified') verified--;
     else return;  // 沒實質改變（例如 flagged → rejected）— 不影響 verified 計數
-    // 用工廠重建 chip element 取代原 chip（樣式 + 屬性 + 文字一次到位）
-    chip.replaceWith(buildTreesChipEl(plotId, verified, total));
+    chip.replaceWith(buildSubcollChipEl(plotId, subColl, verified, total));
   });
 }
 
