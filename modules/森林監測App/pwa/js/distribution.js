@@ -197,15 +197,28 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   `;
   legend.appendChild(dbhItem);
 
-  // 12. controls（匯出 PNG 按鈕）
+  // 12. controls（匯出按鈕：PNG raster / SVG vector）
   if (controls) {
     controls.innerHTML = '';
-    const dlBtn = document.createElement('button');
-    dlBtn.className = 'border px-2.5 py-1 rounded text-xs hover:bg-stone-100';
-    dlBtn.textContent = '⬇ PNG';
-    dlBtn.title = '下載目前散布圖為 PNG';
-    dlBtn.onclick = () => downloadCanvasPng(canvas, plot.code);
-    controls.appendChild(dlBtn);
+    const pngBtn = document.createElement('button');
+    pngBtn.className = 'border px-2.5 py-1 rounded text-xs hover:bg-stone-100';
+    pngBtn.textContent = '⬇ PNG';
+    pngBtn.title = '下載目前散布圖為 PNG（raster，網頁/簡報用）';
+    pngBtn.onclick = () => downloadCanvasPng(canvas, plot.code);
+    controls.appendChild(pngBtn);
+    // v2.7.13：SVG vector 匯出（學術論文 / Adobe Illustrator 後製）
+    const svgBtn = document.createElement('button');
+    svgBtn.className = 'border px-2.5 py-1 rounded text-xs hover:bg-stone-100';
+    svgBtn.textContent = '⬇ SVG';
+    svgBtn.title = '下載目前散布圖為 SVG（vector，論文 / 後製用，可放大不失真）';
+    svgBtn.onclick = () => {
+      const svg = buildPlotSVG({
+        size: cssSize, points, xMin, xMax, yMin, yMax,
+        shape, originType, side, radius, mxToPx, myToPy, plot,
+      });
+      downloadSvg(svg, plot.code);
+    };
+    controls.appendChild(svgBtn);
   }
 
   // 13. hover / click
@@ -379,4 +392,114 @@ function downloadCanvasPng(canvas, plotCode) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+// ===== v2.7.13：匯出 SVG（vector，學術論文 / Adobe Illustrator 後製用） =====
+// 與 PNG 範圍一致：背景 + grid + 軸 + 邊界 + 點。不含外部 info / legend / count（DOM 層）。
+// SVG 內元素全部 inline style，不依賴外部 CSS（脫離 app 也能正確顯示）。
+function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType, side, radius, mxToPx, myToPy, plot }) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('xmlns', NS);
+  svg.setAttribute('width', size);
+  svg.setAttribute('height', size);
+  svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+  svg.setAttribute('font-family', 'system-ui, sans-serif');
+
+  // 背景
+  appendNS(svg, 'rect', { x: 0, y: 0, width: size, height: size, fill: '#fafaf9', rx: 6 });
+
+  // grid + 軸刻度
+  const span = xMax - xMin;
+  const niceSteps = [0.5, 1, 2, 5, 10, 20, 25, 50, 100];
+  let step = niceSteps[0];
+  for (const s of niceSteps) { if (span / s <= 8) { step = s; break; } }
+  // 垂直 grid + x 刻度
+  for (let v = Math.ceil(xMin / step) * step; v <= xMax; v += step) {
+    if (Math.abs(v) < 1e-9) continue;
+    const px = mxToPx(v);
+    appendNS(svg, 'line', { x1: px, y1: PAD, x2: px, y2: size - PAD, stroke: '#f5f5f4', 'stroke-width': 1 });
+    appendNS(svg, 'text', { x: px - 6, y: size - PAD + 14, fill: '#a8a29e', 'font-size': 11 }, v.toFixed(0));
+  }
+  // 水平 grid + y 刻度
+  for (let v = Math.ceil(yMin / step) * step; v <= yMax; v += step) {
+    if (Math.abs(v) < 1e-9) continue;
+    const py = myToPy(v);
+    appendNS(svg, 'line', { x1: PAD, y1: py, x2: size - PAD, y2: py, stroke: '#f5f5f4', 'stroke-width': 1 });
+    appendNS(svg, 'text', { x: 4, y: py + 4, fill: '#a8a29e', 'font-size': 11 }, v.toFixed(0));
+  }
+
+  // 0 軸（粗）+ 象限標
+  if (originType === 'center') {
+    const x0 = mxToPx(0), y0 = myToPy(0);
+    appendNS(svg, 'line', { x1: x0, y1: PAD, x2: x0, y2: size - PAD, stroke: '#a8a29e', 'stroke-width': 1.5 });
+    appendNS(svg, 'line', { x1: PAD, y1: y0, x2: size - PAD, y2: y0, stroke: '#a8a29e', 'stroke-width': 1.5 });
+    appendNS(svg, 'text', { x: size - PAD - 36, y: y0 - 4, fill: '#78716c', 'font-size': 12, 'font-weight': 'bold' }, '+X 東');
+    appendNS(svg, 'text', { x: x0 + 4, y: PAD + 12, fill: '#78716c', 'font-size': 12, 'font-weight': 'bold' }, '+Y 北');
+    appendNS(svg, 'text', { x: PAD + 4, y: y0 - 4, fill: '#78716c', 'font-size': 12, 'font-weight': 'bold' }, '−X 西');
+    appendNS(svg, 'text', { x: x0 + 4, y: size - PAD - 4, fill: '#78716c', 'font-size': 12, 'font-weight': 'bold' }, '−Y 南');
+  } else {
+    appendNS(svg, 'line', { x1: PAD, y1: size - PAD, x2: size - PAD, y2: size - PAD, stroke: '#a8a29e', 'stroke-width': 1.5 });
+    appendNS(svg, 'line', { x1: PAD, y1: size - PAD, x2: PAD, y2: PAD, stroke: '#a8a29e', 'stroke-width': 1.5 });
+    appendNS(svg, 'text', { x: size - PAD - 56, y: size - PAD - 6, fill: '#78716c', 'font-size': 12, 'font-weight': 'bold' }, '+X 東 →');
+    appendNS(svg, 'text', { x: PAD + 6, y: PAD + 12, fill: '#78716c', 'font-size': 12, 'font-weight': 'bold' }, '+Y 北 ↑');
+  }
+  appendNS(svg, 'text', { x: size - PAD - 40, y: PAD - 8, fill: '#57534e', 'font-size': 11 }, '單位：m');
+
+  // 樣區邊界（虛線）
+  if (shape === 'circle') {
+    const cx = originType === 'center' ? 0 : radius;
+    const cy = originType === 'center' ? 0 : radius;
+    const px = mxToPx(cx), py = myToPy(cy);
+    const pr = Math.abs(mxToPx(radius) - mxToPx(0));
+    appendNS(svg, 'circle', { cx: px, cy: py, r: pr, fill: 'none', stroke: '#10b981', 'stroke-width': 1.5, 'stroke-dasharray': '5,4' });
+  } else {
+    let x0, y0, x1, y1;
+    if (originType === 'center') { const half = side / 2; x0 = -half; y0 = -half; x1 = half; y1 = half; }
+    else { x0 = 0; y0 = 0; x1 = side; y1 = side; }
+    const rectX = mxToPx(x0), rectY = myToPy(y1);
+    const rectW = mxToPx(x1) - mxToPx(x0), rectH = myToPy(y0) - myToPy(y1);
+    appendNS(svg, 'rect', { x: rectX, y: rectY, width: rectW, height: rectH, fill: 'none', stroke: '#10b981', 'stroke-width': 1.5, 'stroke-dasharray': '5,4' });
+  }
+
+  // 點（先小後大、先死/弱後健 — sort 已在 caller 完成）
+  points.forEach(p => {
+    appendNS(svg, 'circle', {
+      cx: p.px, cy: p.py, r: p.r,
+      fill: VITALITY_COLOR[p.vitality] || '#78716c',
+      'fill-opacity': 0.78,
+      stroke: p.inside ? '#fff' : '#dc2626',
+      'stroke-width': p.inside ? 1 : 2,
+    });
+  });
+
+  // metadata 註解（plot code + 時間戳）— SVG 元素內當註解
+  const titleNode = document.createElementNS(NS, 'title');
+  titleNode.textContent = `tree-distribution / plot ${plot?.code || '?'} / ${new Date().toISOString()}`;
+  svg.insertBefore(titleNode, svg.firstChild);
+
+  return svg;
+}
+
+function appendNS(parent, tag, attrs, text) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  if (text != null) el.textContent = text;
+  parent.appendChild(el);
+  return el;
+}
+
+function downloadSvg(svgEl, plotCode) {
+  // 帶 xmlns + 標頭，獨立檔案開得起
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(svgEl);
+  const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tree-distribution-${plotCode || 'plot'}-${Date.now()}.svg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.12';  // v2.7.12：import wizard prefetch species.aliasOf — admin 設的動態 alias 接通到 wizard normalize
+const CACHE = 'forest-monitor-v2.7.13';  // v2.7.13：散布圖匯出 SVG（vector 學術後製用）— PNG 平行存在
 const SHELL = [
   './',
   './index.html',
