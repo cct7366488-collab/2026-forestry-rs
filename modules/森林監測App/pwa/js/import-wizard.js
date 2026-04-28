@@ -8,9 +8,9 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2750';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=2760';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=2750';
+import { TREES } from './species-dict.js?v=2760';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
@@ -575,6 +575,67 @@ function checkOriginTypeMismatch() {
   return null;  // 方法學與資料一致或無法判斷
 }
 
+// ===== v2.7.6：per-plot 立木座標跨度的「明顯異常」上限檢查 =====
+// 動機：v2.6.2 散布圖揭露立木跑出邊界。原本想用「方形 22.36 m × 1.2」當上限，
+//      但實務上 0.05 ha 樣區常採 20×25 m 矩形劃設，加上現場坡度修正
+//      （沿坡距 = 水平距 / cos θ；50° 坡下 25 m 沿坡達 38.9 m），
+//      用 22.36 × 1.2 = 26.83 m 會把正常資料全誤報。
+// 設計：放寬到 40 m 硬上限，只抓「明顯異常」這幾類：
+//      ① Excel X/Y 欄位填的是 cm（×100 倍 → 數百~千 m）
+//      ② 絕對 TWD97 座標誤填到 local X/Y（百萬級）
+//      ③ 同一 sheet 混了多個樣區的立木（樣區間距通常遠大於 40 m）
+//      正常方形 / 20×25 矩形 + 任何坡度都不會誤報。
+//      未來若 methodology 加 plotShape/plotDimensions/slopeDegrees，再做精準檢查。
+const PLOT_MAX_SPAN_M = 40;
+
+function analyzePerPlotXYRanges() {
+  const fm = W.fieldMapping || {};
+  if (fm.localX_m == null && fm.localY_m == null) return [];
+  const ranges = [];
+  for (const [sheetName, m] of Object.entries(W.plotMapping || {})) {
+    if (!m.use) continue;
+    const aoa = XLSX.utils.sheet_to_json(W.workbook.Sheets[sheetName], { header: 1, defval: '' });
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, count = 0;
+    for (let r = 1; r < aoa.length; r++) {
+      const row = aoa[r];
+      if (!row || row[fm.treeNum] === '' || row[fm.treeNum] == null) continue;
+      const xRaw = fm.localX_m != null ? row[fm.localX_m] : null;
+      const yRaw = fm.localY_m != null ? row[fm.localY_m] : null;
+      const x = (xRaw != null && xRaw !== '') ? parseFloat(xRaw) : null;
+      const y = (yRaw != null && yRaw !== '') ? parseFloat(yRaw) : null;
+      let used = false;
+      if (x != null && !isNaN(x)) { if (x < minX) minX = x; if (x > maxX) maxX = x; used = true; }
+      if (y != null && !isNaN(y)) { if (y < minY) minY = y; if (y > maxY) maxY = y; used = true; }
+      if (used) count++;
+    }
+    if (count > 0) {
+      ranges.push({
+        plotCode: m.plotCode, count,
+        spanX: (maxX > -Infinity && minX < Infinity) ? (maxX - minX) : 0,
+        spanY: (maxY > -Infinity && minY < Infinity) ? (maxY - minY) : 0,
+      });
+    }
+  }
+  return ranges;
+}
+
+function checkXYRangeMismatch() {
+  const ranges = analyzePerPlotXYRanges();
+  if (ranges.length === 0) return null;
+  const offending = ranges.filter(r => r.spanX > PLOT_MAX_SPAN_M || r.spanY > PLOT_MAX_SPAN_M);
+  if (offending.length === 0) return null;
+  const sample = offending.slice(0, 5)
+    .map(r => `${r.plotCode}(X=${r.spanX.toFixed(1)}/Y=${r.spanY.toFixed(1)}m)`).join('、');
+  const more = offending.length > 5 ? ` 等 ${offending.length} 個樣區` : '';
+  return {
+    severity: 'warn',
+    kind: 'xy-span-exceeds-plot-side',
+    title: `⚠ ${offending.length} 個樣區的立木座標跨度明顯異常（>${PLOT_MAX_SPAN_M} m）`,
+    detail: `0.05 ha 樣區實務上採 20×25 m 矩形劃設，加上坡度修正（沿坡距 = 水平距 / cos θ）— 即便 50° 坡度也僅約 39 m。本檢查只抓「明顯異常」：>${PLOT_MAX_SPAN_M} m 的 X 或 Y 跨度。命中：${sample}${more}。`,
+    action: '高機率原因：① 同一個 Excel sheet 混了多個樣區的立木（最常見，跨樣區距離通常 > 40 m） ② Excel X/Y 欄位單位是 cm（需 ÷100） ③ 絕對 TWD97 座標誤填到 local X/Y 欄位（百萬級）。建議：取消 wizard → 回 Excel 確認原始資料。'
+  };
+}
+
 // ===== STEP 5：DRY-RUN 預覽 / 真實匯入進度 / 真實匯入結果 =====
 function renderStep5() {
   // v2.6：真實匯入結果（最高優先）
@@ -590,12 +651,13 @@ function renderStep5() {
     '⚠ 雛形階段：此步驟「不會」真正寫入資料庫，僅輸出將被建立的資料結構供檢視。'));
 
   // v2.7.1：方法學原點型態與資料分布一致性檢查（軟警告，不擋 DRY-RUN）
-  const mismatch = checkOriginTypeMismatch();
-  if (mismatch) {
+  // v2.7.6：立木座標跨度明顯異常檢查（軟警告，>40 m 才觸發，避免 20×25 矩形 + 坡度誤報）
+  for (const w of [checkOriginTypeMismatch(), checkXYRangeMismatch()]) {
+    if (!w) continue;
     box.appendChild(el('div', { class: 'border-l-4 border-amber-500 bg-amber-50 rounded p-3 text-sm' },
-      el('div', { class: 'font-semibold text-amber-900 mb-1' }, mismatch.title),
-      el('div', { class: 'text-amber-800 mb-2' }, mismatch.detail),
-      el('div', { class: 'text-xs text-amber-700' }, mismatch.action)
+      el('div', { class: 'font-semibold text-amber-900 mb-1' }, w.title),
+      el('div', { class: 'text-amber-800 mb-2' }, w.detail),
+      el('div', { class: 'text-xs text-amber-700' }, w.action)
     ));
   }
 
