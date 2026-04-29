@@ -2,9 +2,9 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=27170';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=27180';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
-import { getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=27170';
+import { getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=27180';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -566,6 +566,232 @@ export async function exportXlsx(project) {
   const stamp = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `${project.code}_森林監測_${stamp}.xlsx`);
   toast('匯出完成');
+}
+
+// ===== v2.7.18：QAQC 查證說明書匯出（.doc，Word 相容 HTML） =====
+//   給主管機關 / 第三方查證提交用。內容隨當前狀態自適應：
+//   - 未抽樣：只有專案資訊 + IPCC LULUCF 公式
+//   - 已抽樣未重測：加抽樣紀錄
+//   - 重測中 / 完成：加誤差表 + 處置紀錄
+//   - 已簽發：加簽發紀錄與 qaqcSummary
+export async function exportQaqcDocReport(project) {
+  toast('產生說明書中...');
+  try {
+    const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
+    const meth = project.methodology || {};
+    const dimType = meth.dimensionType || 'slope_distance';
+    const dimTypeLabel = dimType === 'slope_distance' ? '沿坡距（野外實測）' : '水平投影（已校正）';
+
+    // 抓所有 plot
+    const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
+    const plots = [];
+    plotsSnap.forEach(d => plots.push({ id: d.id, ...d.data() }));
+    const realPlots = plots.filter(p => p.qaStatus !== 'shell');
+    const sampledPlots = realPlots.filter(p => p.qaqc?.inSample === true);
+    const stats = computeErrorStats(realPlots);
+
+    const piLabel = userLabel(project.pi, '—');
+    const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const targetSize = Math.max(Math.ceil(realPlots.length * cfg.samplingFraction), cfg.minSampleSize);
+
+    // 各 plot 重測列
+    const remeasureRows = sampledPlots.map(p => {
+      const q = p.qaqc || {};
+      const status = getPlotQaqcStatus(p);
+      const sl = QAQC_STATUS_META[status]?.label || status;
+      return `
+        <tr>
+          <td>${p.code}</td>
+          <td>${({ circle: '圓', square: '方', rectangle: '矩' })[p.shape] || p.shape}</td>
+          <td style="text-align:right">${Number.isFinite(p.slopeDegrees) ? p.slopeDegrees.toFixed(1) + '°' : '-'}</td>
+          <td style="text-align:right">${Number.isFinite(q.slopeVerified) ? q.slopeVerified.toFixed(1) + '°' : '-'}</td>
+          <td style="text-align:right">${Number.isFinite(q.slopeError_deg) ? '±' + q.slopeError_deg.toFixed(2) + '°' : '-'}</td>
+          <td style="text-align:right">${Number.isFinite(p.areaHorizontal_m2) ? p.areaHorizontal_m2.toFixed(1) + ' m²' : '-'}</td>
+          <td style="text-align:right">${Number.isFinite(q.areaVerifiedHorizontal) ? q.areaVerifiedHorizontal.toFixed(1) + ' m²' : '-'}</td>
+          <td style="text-align:right">${Number.isFinite(q.areaError_pct) ? '±' + q.areaError_pct.toFixed(2) + '%' : '-'}</td>
+          <td>${sl}</td>
+        </tr>`;
+    }).join('');
+
+    // 處置紀錄（超閾且有 resolution）
+    const resolutionRows = sampledPlots
+      .filter(p => p.qaqc?.resolution)
+      .map(p => {
+        const q = p.qaqc;
+        return `
+          <tr>
+            <td>${p.code}</td>
+            <td>${RESOLUTION_LABEL[q.resolution] || q.resolution}</td>
+            <td>${q.resolutionNote || ''}</td>
+            <td>${q.resolvedAt ? fmtDate(q.resolvedAt) : '-'}</td>
+            <td>${q.resolvedBy ? userLabel(q.resolvedBy, '—') : '-'}</td>
+          </tr>`;
+      }).join('');
+
+    // 簽發紀錄
+    const qs = project.qaqcSummary;
+    const verifiedSection = (project.status === 'verified' && qs) ? `
+      <h2>柒、簽發紀錄（QAQC 完整版）</h2>
+      <table>
+        <tr><th>項目</th><th>值</th></tr>
+        <tr><td>簽發類型</td><td>✅ 含 QAQC 抽樣查證（v2.7.17 完整工作流）</td></tr>
+        <tr><td>簽發時間</td><td>${qs.verifiedAt ? fmtDate(qs.verifiedAt) : '-'}</td></tr>
+        <tr><td>簽發者</td><td>${qs.verifiedBy ? userLabel(qs.verifiedBy, '—') : '-'}</td></tr>
+        <tr><td>抽樣 / 總樣區</td><td>${qs.sampledCount} / ${qs.totalPlots}</td></tr>
+        <tr><td>通過閾值</td><td>${qs.passedCount}</td></tr>
+        <tr><td>已處置（超閾）</td><td>${qs.failedResolvedCount}</td></tr>
+        <tr><td>採用閾值</td><td>坡度 ±${qs.slopeThreshold_deg}° / 面積 ±${qs.areaThreshold_pct}%</td></tr>
+      </table>
+    ` : '';
+
+    const html = `
+<!DOCTYPE html>
+<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta charset="utf-8">
+<title>${project.code} 樣區查證說明書</title>
+<style>
+  body { font-family: 'Microsoft JhengHei', '微軟正黑體', sans-serif; font-size: 11pt; line-height: 1.6; }
+  h1 { font-size: 18pt; text-align: center; margin-top: 8pt; }
+  h2 { font-size: 14pt; color: #1f4e79; border-bottom: 1px solid #1f4e79; padding-bottom: 2pt; margin-top: 14pt; }
+  h3 { font-size: 12pt; color: #2e75b6; margin-top: 10pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0; font-size: 10pt; }
+  th { background-color: #d9e1f2; border: 1px solid #888; padding: 4pt 6pt; text-align: left; }
+  td { border: 1px solid #888; padding: 4pt 6pt; }
+  .formula { background-color: #f5f5f0; padding: 6pt 10pt; border-left: 3px solid #1f4e79; font-family: Consolas, monospace; }
+  .meta { color: #666; font-size: 10pt; }
+  ol, ul { margin: 4pt 0 4pt 20pt; }
+  .small { font-size: 9pt; color: #888; }
+</style>
+</head>
+<body>
+
+<h1>樣區查證說明書（QAQC Verification Report）</h1>
+<p class="meta" style="text-align:center">
+專案：${project.code}　${project.name || ''}<br>
+製作時間：${stamp}　產製版本：app v2.7.18 / schema v2.6.1
+</p>
+
+<h2>壹、專案資訊</h2>
+<table>
+  <tr><th>項目</th><th>值</th></tr>
+  <tr><td>專案代碼</td><td>${project.code}</td></tr>
+  <tr><td>專案名稱</td><td>${project.name || ''}</td></tr>
+  <tr><td>計畫主持人</td><td>${piLabel}</td></tr>
+  <tr><td>樣區數（不含 shell）</td><td>${realPlots.length}</td></tr>
+  <tr><td>方法學量測單位</td><td>${dimTypeLabel}</td></tr>
+  <tr><td>原點型態</td><td>${meth.plotOriginType === 'corner' ? '左下角原點（corner）' : '中心點原點（center）'}</td></tr>
+  <tr><td>當前狀態</td><td>${project.status || '-'}</td></tr>
+</table>
+
+<h2>貳、樣區幾何 schema 與面積換算</h2>
+<p>本系統樣區幾何依 schema v2.6（app v2.7.15 落地）：plotShape 支援 circle / square / rectangle 三種；plotDimensions 結構依形狀（circle = {radius}、square = {side, width, length}、rectangle = {width, length}）。每個樣區可設坡度（slopeDegrees）與量測單位（dimensionType）。</p>
+
+<h3>水平投影面積公式（碳計算 / 密度推算分母）</h3>
+<div class="formula">
+areaHorizontal_m2 = area_m2 × cos(slopeDegrees × π / 180)　　當 dimensionType = 'slope_distance'<br>
+areaHorizontal_m2 = area_m2　　　　　　　　　　　　　　　　　當 dimensionType = 'horizontal'
+</div>
+
+<h3>立木座標換算（沿坡距 ↔ 水平投影）</h3>
+<div class="formula">
+horizontalY_m = localY_m × cos(slopeDegrees × π / 180)　　X 沿等高線不變<br>
+立木分布圖切換鈕（v2.7.16）即據此換算 — 圓形樣區 + 坡度 + 水平視圖 → 視覺呈現橢圓
+</div>
+
+<h3>MRV 對齊</h3>
+<ul>
+  <li>IPCC 2006 Guidelines for National Greenhouse Gas Inventories Vol.4 Ch.4 Forest Land — 面積、生質、碳計算單位皆指水平投影</li>
+  <li>森林經營計畫書範本對應「貳、(一) 林地概況 — 自然環境」面積資料</li>
+  <li>TMS（自願減量方法學）AR-TMS0001 / 0002 / 0003 / 0004 — 監測計畫面積定義</li>
+</ul>
+
+<h2>參、QAQC 工作流（v2.7.17）</h2>
+<p>對標 ISO 14064-3、IPCC GPG（reasonable assurance ±5°/±3%）、TMS 方法學監測計畫、VVB / DOE 第三方查證程序。</p>
+
+<ol>
+  <li><b>抽樣</b>：reviewer 隨機抽 N = max(samplingFraction × 樣區數, minSampleSize) 個 plots（mulberry32 PRNG，種子可重現）。</li>
+  <li><b>現場核對</b>：reviewer 對抽樣 plots 重測坡度（slopeVerified）與 dimensions（dimensionsVerified）。</li>
+  <li><b>誤差計算</b>：系統算 slopeError_deg = |slopeVerified − slopeDegrees|；areaError_pct = |areaVerifiedHorizontal − areaHorizontal_m2| / areaHorizontal_m2 × 100。</li>
+  <li><b>通過閾值 / 處置</b>：兩誤差皆在閾值內 → ✅ qaqcPassed；任一超閾 → reviewer 必填處置（accepted / remeasured / rejected）+ 說明（IPCC TACCC「透明」要求）。</li>
+  <li><b>合格簽發</b>：所有抽樣 plots 都 passed 或 resolved → 啟用簽發 → status: review → verified（資料永久鎖定）+ 寫 qaqcSummary。</li>
+</ol>
+
+<h2>肆、QAQC 設定</h2>
+<table>
+  <tr><th>項目</th><th>值</th><th>說明</th></tr>
+  <tr><td>抽樣比例</td><td>${(cfg.samplingFraction * 100).toFixed(0)}%</td><td>每 100 個 plot 抽 ${(cfg.samplingFraction * 100).toFixed(0)} 個</td></tr>
+  <tr><td>最低樣本數</td><td>${cfg.minSampleSize}</td><td>小專案防呆下限</td></tr>
+  <tr><td>坡度閾值</td><td>±${cfg.slopeThreshold_deg}°</td><td>IPCC GPG 合理保證等級</td></tr>
+  <tr><td>面積閾值</td><td>±${cfg.areaThreshold_pct}%</td><td>ISO 14064-3 reasonable assurance</td></tr>
+  <tr><td>本案抽樣目標</td><td>${targetSize} plots</td><td>= max(${(cfg.samplingFraction * 100).toFixed(0)}% × ${realPlots.length}, ${cfg.minSampleSize})</td></tr>
+</table>
+
+<h2>伍、抽樣紀錄</h2>
+${cfg.lastSamplingSeed != null ? `
+  <table>
+    <tr><th>項目</th><th>值</th></tr>
+    <tr><td>抽樣種子（mulberry32 PRNG）</td><td><code>${cfg.lastSamplingSeed}</code></td></tr>
+    <tr><td>抽樣時間</td><td>${cfg.lastSamplingAt ? fmtDate(cfg.lastSamplingAt) : '-'}</td></tr>
+    <tr><td>抽樣者</td><td>${cfg.lastSamplingBy ? userLabel(cfg.lastSamplingBy, '—') : '-'}</td></tr>
+    <tr><td>抽樣大小</td><td>${cfg.lastSamplingSize || sampledPlots.length} / 目標 ${cfg.lastSamplingTarget || targetSize}</td></tr>
+  </table>
+  <p class="small">※ 用同種子可在 v2.7.18 系統重現本次抽樣集合（可重複性審查 reference）。</p>
+` : `<p class="small">尚未進行抽樣。</p>`}
+
+${sampledPlots.length > 0 ? `
+<h2>陸、各抽樣樣區重測紀錄與誤差</h2>
+<table>
+  <tr><th>樣區</th><th>形狀</th><th>原坡度</th><th>重測坡度</th><th>坡度誤差</th><th>原水平面積</th><th>重測水平面積</th><th>面積誤差</th><th>狀態</th></tr>
+  ${remeasureRows}
+</table>
+
+<h3>誤差統計</h3>
+<table>
+  <tr><th>項目</th><th>n</th><th>平均</th><th>最大</th><th>標準差</th></tr>
+  <tr><td>坡度誤差</td><td>${stats.slope.n}</td><td>${stats.slope.n > 0 ? stats.slope.mean.toFixed(2) + '°' : '-'}</td><td>${stats.slope.n > 0 ? stats.slope.max.toFixed(2) + '°' : '-'}</td><td>${stats.slope.n > 0 ? stats.slope.std.toFixed(2) + '°' : '-'}</td></tr>
+  <tr><td>面積誤差</td><td>${stats.area.n}</td><td>${stats.area.n > 0 ? stats.area.mean.toFixed(2) + '%' : '-'}</td><td>${stats.area.n > 0 ? stats.area.max.toFixed(2) + '%' : '-'}</td><td>${stats.area.n > 0 ? stats.area.std.toFixed(2) + '%' : '-'}</td></tr>
+</table>
+` : ''}
+
+${resolutionRows ? `
+<h3>處置紀錄（超閾值 plots）</h3>
+<table>
+  <tr><th>樣區</th><th>處置</th><th>說明</th><th>處置時間</th><th>處置者</th></tr>
+  ${resolutionRows}
+</table>
+<p class="small">※ 依 IPCC TACCC 之「透明」原則，所有超閾值 plots 之處置與判斷依據皆列。</p>
+` : ''}
+
+${verifiedSection}
+
+<h2>${verifiedSection ? '捌' : (sampledPlots.length > 0 ? '柒' : '陸')}、聲明</h2>
+<p>本說明書由 ForestMRV 系統（app v2.7.18 / schema v2.6.1）自動產製，內容反映匯出時刻之資料庫狀態。對應原始資料儲存於 Firebase Firestore（asia-east1）；歷史變動透過 createdAt / updatedAt / verifiedAt 等 timestamp 欄位追溯。</p>
+<p>查證方法依 ISO 14064-3 reasonable assurance 等級，閾值與抽樣比例可由本案 reviewer 於 status=review 時調整（記錄於 project.qaqcConfig）。</p>
+
+<p class="small" style="text-align:center;margin-top:18pt;border-top:1px solid #ccc;padding-top:8pt">
+— ForestMRV v2.7.18 / 製作時間 ${stamp} —
+</p>
+
+</body>
+</html>`;
+
+    // Word 相容 .doc 匯出（HTML 包 application/msword MIME，Word/LibreOffice/Google Docs 均可開）
+    const blob = new Blob(['﻿', html], { type: 'application/msword' });  // BOM 確保 UTF-8 中文不亂碼
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `${project.code}_QAQC查證說明書_${dateStamp}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('查證說明書已下載');
+  } catch (e) {
+    toast('匯出失敗：' + e.message);
+    console.error('[exportQaqcDocReport]', e);
+  }
 }
 
 export async function exportCsv(project, kind) {

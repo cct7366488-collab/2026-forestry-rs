@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.17';  // v2.7.17：Reviewer QAQC 工作流（抽樣 → 重測 → 誤差計算 → 合格簽發）+ 報告匯出（QAQC sheet + 面積換算說明）
+const CACHE = 'forest-monitor-v2.7.18';  // v2.7.18：QAQC 4 衍生小機會（progress pill / 種子 banner + 重現抽樣 / .doc 查證說明書 / 5 步教學導覽精靈）
 const SHELL = [
   './',
   './index.html',

@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=27170">
+  <link rel="stylesheet" href="style.css?v=27180">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -245,9 +245,12 @@
 
     <!-- v2.7.17：審查（QAQC）分頁 — reviewer / admin 才見到 -->
     <section data-tab-content="qaqc" class="hidden space-y-4">
-      <div>
-        <h2 class="text-lg font-semibold mb-1">🔍 審查（QAQC）— 抽樣 → 現場核對 → 誤差計算 → 合格簽發</h2>
-        <p class="text-sm text-stone-600">對標 ISO 14064-3、IPCC GPG（合理保證）、TMS 方法學監測計畫。本分頁僅 reviewer / admin 可見。</p>
+      <div class="flex justify-between items-start gap-3 flex-wrap">
+        <div>
+          <h2 class="text-lg font-semibold mb-1">🔍 審查（QAQC）— 抽樣 → 現場核對 → 誤差計算 → 合格簽發</h2>
+          <p class="text-sm text-stone-600">對標 ISO 14064-3、IPCC GPG（合理保證）、TMS 方法學監測計畫。本分頁僅 reviewer / admin 可見。</p>
+        </div>
+        <button id="btn-qaqc-tour" class="border bg-blue-50 hover:bg-blue-100 text-blue-900 px-3 py-1.5 rounded text-sm shrink-0" title="開啟查證流程教學（5 步導覽）">🎓 教學</button>
       </div>
 
       <!-- 設定區（折疊；reviewer 在 status=review 時可改）-->
@@ -282,7 +285,11 @@
       <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-600">
         <h3 class="font-semibold mb-2">✅ 合格簽發（取代 v2.7 簡易簽發）</h3>
         <div id="qaqc-approve-gate" class="text-sm mb-2"></div>
-        <button id="btn-qaqc-approve" class="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>✅ 完成查證並簽發（含 QAQC 報告）</button>
+        <div class="flex flex-wrap gap-2">
+          <button id="btn-qaqc-approve" class="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>✅ 完成查證並簽發（含 QAQC 報告）</button>
+          <!-- v2.7.18：查證說明書（.doc）匯出 — 隨時可下載，依當前狀態組內容 -->
+          <button id="btn-qaqc-doc-export" class="border bg-blue-50 hover:bg-blue-100 text-blue-900 px-3 py-2 rounded text-sm" title="下載 Word 格式查證說明書（含面積換算公式 / IPCC LULUCF 引用 / 抽樣紀錄 / 誤差表 / 處置 / 簽發紀錄）— 可直接提交主管機關">📄 下載查證說明書 (.doc)</button>
+        </div>
       </div>
     </section>
 
@@ -515,6 +522,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=27170"></script>
+<script type="module" src="js/app.js?v=27180"></script>
 </body>
 </html>

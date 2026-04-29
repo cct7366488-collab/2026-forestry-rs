@@ -3,14 +3,14 @@
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=27170';
+import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=27180';
 // v2.7.17：reviewer QAQC 工作流
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, computeQaqcErrors, RESOLUTION_LABEL } from './plot-qaqc.js?v=27170';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, computeQaqcErrors, RESOLUTION_LABEL } from './plot-qaqc.js?v=27180';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=27170';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=27180';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;

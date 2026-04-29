@@ -15,17 +15,17 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=27170";
-import * as forms from "./forms.js?v=27170";
-import * as analytics from "./analytics.js?v=27170";
-import * as importWizard from "./import-wizard.js?v=27170";
-import { renderTreeDistribution } from "./distribution.js?v=27170";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27170";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=27180";
+import * as forms from "./forms.js?v=27180";
+import * as analytics from "./analytics.js?v=27180";
+import * as importWizard from "./import-wizard.js?v=27180";
+import { renderTreeDistribution } from "./distribution.js?v=27180";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27180";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, pickRandomSample, getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, computeErrorStats, defaultQaqc } from "./plot-qaqc.js?v=27170";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27170";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, pickRandomSample, getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, computeErrorStats, defaultQaqc } from "./plot-qaqc.js?v=27180";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27180";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27170";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27180";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -302,7 +302,7 @@ async function renderGeoMigrationBanner(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=27170');
+    const m = await import('./migration-v2715.js?v=27180');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1133,6 +1133,34 @@ async function refreshBadgeCounts(projectId) {
       $('#myflagged-count').textContent = ps.size > 0 ? ps.size : '';
     } catch {}
   }
+  // v2.7.18：QAQC progress pill（reviewer / admin 才算）
+  if (projectRole() === 'reviewer' || isSystemAdmin()) {
+    try {
+      const ps = await getDocs(collection(db, 'projects', projectId, 'plots'));
+      let sampled = 0, doneOk = 0;
+      ps.forEach(d => {
+        const p = d.data();
+        if (p.qaStatus === 'shell') return;
+        if (p.qaqc?.inSample !== true) return;
+        sampled++;
+        const st = getPlotQaqcStatus({ qaqc: p.qaqc });
+        if (st === 'passed' || st === 'failed_resolved') doneOk++;
+      });
+      const pill = $('#qaqc-progress-pill');
+      if (pill) {
+        if (sampled === 0) {
+          pill.textContent = '';
+          pill.className = 'ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full';
+        } else if (doneOk === sampled) {
+          pill.textContent = `✅ ${doneOk}/${sampled}`;
+          pill.className = 'ml-1 text-xs bg-green-100 text-green-800 px-1.5 rounded-full';
+        } else {
+          pill.textContent = `${doneOk}/${sampled}`;
+          pill.className = 'ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full';
+        }
+      }
+    } catch (e) { console.warn('[qaqc pill]', e); }
+  }
 }
 
 function renderDesign() {
@@ -1215,6 +1243,9 @@ async function renderQaqc(project) {
     $('#qaqc-sample-summary').innerHTML = '<div class="text-stone-500">本分頁限 reviewer / admin 角色使用。</div>';
     return;
   }
+  // v2.7.18：教學按鈕 + 首次自動開教學
+  $('#btn-qaqc-tour')?.addEventListener('click', () => openQaqcTour());
+  maybeAutoShowQaqcTour();
   const projectId = project.id;
   const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
 
@@ -1230,12 +1261,37 @@ async function renderQaqc(project) {
   // ----- 抽樣管理 -----
   const target = computeTargetSampleSize(realPlots.length, cfg);
   const sampledPlots = realPlots.filter(p => p.qaqc?.inSample === true);
+  // v2.7.18：顯示上次抽樣 metadata（種子 / 時間 / by）— 供 reviewer 提交可重現抽樣紀錄
+  const lastSeed = cfg.lastSamplingSeed;
+  const lastAt = cfg.lastSamplingAt;
+  const lastBy = cfg.lastSamplingBy;
+  let seedLine = '';
+  if (lastSeed != null) {
+    const atStr = lastAt?.toDate ? fmtDate(lastAt) : (lastAt ? new Date(lastAt).toISOString().slice(0, 19).replace('T', ' ') : '-');
+    const byStr = lastBy ? userLabel(lastBy, '—') : '-';
+    seedLine = `
+      <div class="mt-2 bg-stone-50 rounded p-2 text-xs flex items-center gap-2 flex-wrap">
+        <span><b>📋 上次抽樣</b>：種子 <code class="bg-white border px-1 rounded">${lastSeed}</code></span>
+        <span class="text-stone-500">/ ${atStr} / 由 ${byStr}</span>
+        <button id="btn-copy-seed" class="ml-auto border px-2 py-0.5 rounded text-xs hover:bg-white" title="複製種子到剪貼簿">📋 複製</button>
+        <button id="btn-reproduce-sample" class="border px-2 py-0.5 rounded text-xs bg-blue-50 hover:bg-blue-100" title="用同種子重現抽樣（驗證可重複性 / 第三方審查 reference）">🔁 重現抽樣</button>
+      </div>
+    `;
+  }
   $('#qaqc-sample-summary').innerHTML = `
     <div class="flex items-center gap-3 flex-wrap">
       <span>已抽樣 <b>${sampledPlots.length}</b> / 目標 <b>${target}</b>（${(cfg.samplingFraction * 100).toFixed(0)}% × ${realPlots.length} plots，最低 ${cfg.minSampleSize}）</span>
       <span class="text-xs text-stone-500">（不含 ${plots.length - realPlots.length} 個 shell 樣區）</span>
     </div>
+    ${seedLine}
   `;
+  // 種子相關按鈕 wire up
+  if (lastSeed != null) {
+    $('#btn-copy-seed')?.addEventListener('click', () => {
+      navigator.clipboard?.writeText(String(lastSeed)).then(() => toast('種子已複製')).catch(() => toast(`種子: ${lastSeed}`));
+    });
+    $('#btn-reproduce-sample')?.addEventListener('click', () => qaqcRandomSample(project, realPlots, target, cfg, { reproduceSeed: lastSeed }));
+  }
 
   $('#btn-qaqc-random-sample').onclick = () => qaqcRandomSample(project, realPlots, target, cfg);
   $('#btn-qaqc-clear-sample').onclick = () => qaqcClearSample(project, sampledPlots);
@@ -1248,6 +1304,9 @@ async function renderQaqc(project) {
 
   // ----- 合格簽發 -----
   renderQaqcApproveGate(project, realPlots, cfg);
+
+  // v2.7.18：更新 tab 上的進度 pill
+  refreshBadgeCounts(projectId);
 }
 
 function renderQaqcConfigForm(project, cfg, isReviewerNow, isAdminNow) {
@@ -1294,10 +1353,13 @@ async function saveQaqcConfig(project) {
   } catch (e) { toast('儲存失敗：' + e.message); }
 }
 
-async function qaqcRandomSample(project, realPlots, target, cfg) {
-  const seed = Date.now();
+async function qaqcRandomSample(project, realPlots, target, cfg, opts = {}) {
+  // v2.7.18：reproduceSeed 用既有種子重現抽樣；否則新種子（Date.now）
+  const seed = opts.reproduceSeed != null ? Number(opts.reproduceSeed) : Date.now();
+  const isReproduce = opts.reproduceSeed != null;
   const sample = pickRandomSample(realPlots, target, seed);
-  if (!confirm(`將隨機抽樣 ${sample.length} 個 plot（種子 ${seed}，可重現）：\n\n${sample.slice(0, 8).map(p => p.code).join('、')}${sample.length > 8 ? ` 等 ${sample.length} 個` : ''}\n\n注意：本動作會把這些 plot 標 inSample=true（既有抽樣保留）。`)) return;
+  const action = isReproduce ? '🔁 重現抽樣' : '🎲 隨機抽樣';
+  if (!confirm(`${action} ${sample.length} 個 plot（種子 ${seed}${isReproduce ? '，重現用' : '，可重現'}）：\n\n${sample.slice(0, 8).map(p => p.code).join('、')}${sample.length > 8 ? ` 等 ${sample.length} 個` : ''}\n\n${isReproduce ? '本動作用同種子重現抽樣 — 用來驗證「同種子 → 同抽樣集合」（第三方審查 reference）。' : '本動作會把這些 plot 標 inSample=true。'}`)) return;
   toast('寫入中...');
   let count = 0, errors = 0;
   for (const p of sample) {
@@ -1311,7 +1373,20 @@ async function qaqcRandomSample(project, realPlots, target, cfg) {
       count++;
     } catch (e) { errors++; console.warn('[qaqc sample]', p.code, e); }
   }
-  toast(`抽樣完成：${count} 成功${errors ? ` / ${errors} 失敗` : ''}`);
+  // v2.7.18：把抽樣 metadata 寫到 qaqcConfig（reviewer 路徑允許 hasOnly(['qaqcConfig'])）
+  try {
+    const newCfg = {
+      ...cfg,
+      lastSamplingSeed: seed,
+      lastSamplingAt: new Date(),
+      lastSamplingBy: state.user.uid,
+      lastSamplingTarget: target,
+      lastSamplingSize: count,
+    };
+    await updateDoc(doc(db, 'projects', project.id), { qaqcConfig: newCfg });
+    state.project.qaqcConfig = newCfg;
+  } catch (e) { console.warn('[qaqc seed metadata]', e); }
+  toast(`抽樣完成：${count} 成功${errors ? ` / ${errors} 失敗` : ''}（種子 ${seed}）`);
   renderQaqc(state.project);
 }
 
@@ -1404,6 +1479,7 @@ function renderQaqcErrorStats(realPlots) {
 function renderQaqcApproveGate(project, realPlots, cfg) {
   const gateBox = $('#qaqc-approve-gate');
   const btn = $('#btn-qaqc-approve');
+  const docBtn = $('#btn-qaqc-doc-export');
   if (!gateBox || !btn) return;
   const result = checkApprovalGate(realPlots, cfg);
   const s = result.summary;
@@ -1417,6 +1493,208 @@ function renderQaqcApproveGate(project, realPlots, cfg) {
   gateBox.innerHTML = lines.join('<br>');
   btn.disabled = !result.canApprove;
   btn.onclick = () => qaqcApprove(project, realPlots, cfg, result);
+  // v2.7.18：查證說明書 .doc 匯出（隨時可用）
+  if (docBtn) docBtn.onclick = () => analytics.exportQaqcDocReport(project);
+}
+
+// ===== v2.7.18：QAQC 查證流程導覽精靈（onboarding tour）=====
+//   5 步教學 modal：歡迎 → 設定 → 抽樣 → 重測 → 簽發
+//   首次進 QAQC tab 自動開（localStorage 標記後不再）；隨時可從「🎓 教學」按鈕重開
+const QAQC_TOUR_STORAGE_KEY = () => `qaqc-tour-shown-${state.user?.uid || 'anon'}`;
+
+function maybeAutoShowQaqcTour() {
+  try {
+    if (localStorage.getItem(QAQC_TOUR_STORAGE_KEY()) === '1') return;
+    setTimeout(() => openQaqcTour(1), 600);  // 等 tab 渲染完
+  } catch {}
+}
+
+function openQaqcTour(step = 1) {
+  const total = 5;
+  const body = el('div', { class: 'space-y-3' });
+  body.appendChild(buildQaqcTourStep(step, total));
+  // 進度條
+  const progress = el('div', { class: 'flex gap-1 mt-3' });
+  for (let i = 1; i <= total; i++) {
+    progress.appendChild(el('div', {
+      class: `flex-1 h-1.5 rounded-full ${i <= step ? 'bg-blue-600' : 'bg-stone-200'}`
+    }));
+  }
+  body.appendChild(progress);
+  // 導航
+  const nav = el('div', { class: 'flex justify-between items-center mt-3 pt-3 border-t' });
+  if (step > 1) {
+    nav.appendChild(el('button', {
+      class: 'border px-3 py-1.5 rounded text-sm hover:bg-stone-50',
+      onclick: () => openQaqcTour(step - 1)
+    }, '← 上一步'));
+  } else {
+    nav.appendChild(el('span', {}));  // 佔位
+  }
+  nav.appendChild(el('span', { class: 'text-xs text-stone-500' }, `第 ${step} / ${total} 步`));
+  if (step < total) {
+    nav.appendChild(el('button', {
+      class: 'bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm',
+      onclick: () => openQaqcTour(step + 1)
+    }, '下一步 →'));
+  } else {
+    nav.appendChild(el('button', {
+      class: 'bg-green-700 hover:bg-green-800 text-white px-3 py-1.5 rounded text-sm',
+      onclick: () => closeQaqcTour()
+    }, '🚀 開始查證'));
+  }
+  body.appendChild(nav);
+  // 「不再顯示」
+  body.appendChild(el('div', { class: 'text-center mt-2' },
+    el('button', {
+      class: 'text-xs text-stone-500 hover:underline',
+      onclick: () => closeQaqcTour()
+    }, '關閉並不再自動顯示')
+  ));
+  openModal('🎓 QAQC 查證流程教學', body);
+}
+
+function closeQaqcTour() {
+  try { localStorage.setItem(QAQC_TOUR_STORAGE_KEY(), '1'); } catch {}
+  closeModal();
+}
+
+function buildQaqcTourStep(n, total) {
+  const steps = [
+    {
+      title: '步驟 1：歡迎使用 QAQC 查證流程',
+      svg: tourSvg([
+        { x: 70, y: 50, w: 140, h: 60, fill: '#dbeafe', text: '🔍 reviewer\n查證 5 步驟' },
+      ], [], '對標 ISO 14064-3、IPCC GPG、TMS、VVB / DOE'),
+      body: `
+        <p class="text-sm text-stone-700">本工作流把「審查通過」按鈕從雛形升級為完整第三方查證程序：</p>
+        <ul class="text-sm list-disc list-inside text-stone-700">
+          <li><b>對標</b>：ISO 14064-3 reasonable assurance</li>
+          <li><b>方法</b>：抽樣 → 現場核對 → 誤差計算 → 合格簽發</li>
+          <li><b>原則</b>：IPCC TACCC（透明、可比、完整、一致）</li>
+          <li><b>適用</b>：森林經營計畫書 / 碳匯專案 (AR-TMS0001~0004) / NIR LULUCF</li>
+        </ul>
+      `,
+    },
+    {
+      title: '步驟 2：設定 QAQC 閾值',
+      svg: tourSvg([
+        { x: 30, y: 30, w: 110, h: 50, fill: '#fef3c7', text: '抽樣比例\n30%' },
+        { x: 165, y: 30, w: 110, h: 50, fill: '#fef3c7', text: '坡度閾值\n±5°' },
+        { x: 30, y: 100, w: 110, h: 50, fill: '#fef3c7', text: '最低樣本數\n3 個' },
+        { x: 165, y: 100, w: 110, h: 50, fill: '#fef3c7', text: '面積閾值\n±3%' },
+      ], [], '在「⚙️ QAQC 設定」折疊區可改'),
+      body: `
+        <p class="text-sm text-stone-700">系統預設值已對齊 IPCC GPG 合理保證等級。如需調整：</p>
+        <ul class="text-sm list-disc list-inside text-stone-700">
+          <li>展開「⚙️ QAQC 設定」折疊區</li>
+          <li>修改 <code>samplingFraction</code>（如改 0.5 = 50%）、<code>slopeThreshold_deg</code>、<code>areaThreshold_pct</code></li>
+          <li>點「💾 儲存設定」</li>
+          <li>※ reviewer 限 status=review 時可改；admin 永遠可改</li>
+        </ul>
+      `,
+    },
+    {
+      title: '步驟 3：隨機抽樣（mulberry32 PRNG，可重現）',
+      svg: tourSvg([
+        { x: 20, y: 70, w: 70, h: 30, fill: '#e0e7ff', text: '19 plots' },
+        { x: 130, y: 70, w: 60, h: 30, fill: '#fef3c7', text: '🎲 抽樣' },
+        { x: 220, y: 70, w: 70, h: 30, fill: '#dcfce7', text: '6 sampled' },
+      ], [
+        { x1: 90, y1: 85, x2: 130, y2: 85 },
+        { x1: 190, y1: 85, x2: 220, y2: 85 },
+      ], '種子記在 qaqcConfig.lastSamplingSeed → 可重現'),
+      body: `
+        <p class="text-sm text-stone-700">點「🎲 隨機抽樣」自動抽 N = max(30%, 3) 個 plots。</p>
+        <ul class="text-sm list-disc list-inside text-stone-700">
+          <li>使用 <b>mulberry32 PRNG</b>（固定種子 → 固定抽樣集合）</li>
+          <li>種子寫入 <code>project.qaqcConfig.lastSamplingSeed</code>，提供可重現性 audit</li>
+          <li>可隨時點「🔁 重現抽樣」用同種子驗證（第三方審查 reference）</li>
+          <li>如要手動指定（代替隨機），直接點 plot 在「樣區」分頁標 inSample</li>
+        </ul>
+      `,
+    },
+    {
+      title: '步驟 4：現場核對 + 誤差計算',
+      svg: tourSvg([
+        { x: 30, y: 30, w: 100, h: 50, fill: '#dbeafe', text: 'surveyor\nslope=22°' },
+        { x: 165, y: 30, w: 100, h: 50, fill: '#fce7f3', text: 'reviewer\nslope=24°' },
+        { x: 95, y: 110, w: 100, h: 40, fill: '#fef3c7', text: '誤差 ±2°\n✅ 通過' },
+      ], [
+        { x1: 80, y1: 80, x2: 130, y2: 110 },
+        { x1: 215, y1: 80, x2: 165, y2: 110 },
+      ], '系統自動算 slope_deg / area_pct'),
+      body: `
+        <p class="text-sm text-stone-700">點「📊 抽樣 plot 表格」中的樣區編號 → 開重測 modal：</p>
+        <ul class="text-sm list-disc list-inside text-stone-700">
+          <li>填重測坡度（slopeVerified）+ 重測 dimensions（依 plot.shape 自動切換 input）</li>
+          <li>系統即時算誤差：<code>slopeError_deg</code>、<code>areaError_pct</code></li>
+          <li>誤差通過閾值 → ✅ 自動標 passed</li>
+          <li>誤差超閾值 → 🟥 必填處置（accepted / remeasured / rejected）+ 說明</li>
+        </ul>
+      `,
+    },
+    {
+      title: '步驟 5：合格簽發 + 下載查證說明書',
+      svg: tourSvg([
+        { x: 20, y: 30, w: 80, h: 40, fill: '#fef3c7', text: 'review' },
+        { x: 130, y: 30, w: 80, h: 40, fill: '#dcfce7', text: 'verified' },
+        { x: 60, y: 110, w: 200, h: 40, fill: '#dbeafe', text: '📄 查證說明書 (.doc)' },
+      ], [
+        { x1: 100, y1: 50, x2: 130, y2: 50 },
+      ], '同筆 updateDoc 寫 status + qaqcSummary'),
+      body: `
+        <p class="text-sm text-stone-700">所有抽樣 plots 都 passed/resolved 後：</p>
+        <ul class="text-sm list-disc list-inside text-stone-700">
+          <li>「✅ 完成查證並簽發」按鈕啟用</li>
+          <li>點下去 → status: review → verified（資料永久鎖定）</li>
+          <li>同筆 updateDoc 寫 <code>qaqcSummary</code>（抽樣數 / 通過數 / 誤差統計 / 簽發 metadata）</li>
+          <li>「📄 下載查證說明書 (.doc)」隨時可用，給主管機關 / 第三方提交</li>
+          <li>說明書包含：面積換算公式、IPCC LULUCF 引用、抽樣紀錄、誤差表、處置紀錄、簽發 metadata</li>
+        </ul>
+        <p class="text-xs text-stone-500 mt-2">點「🚀 開始查證」關閉本教學，下次不再自動顯示（可從「🎓 教學」按鈕重開）。</p>
+      `,
+    },
+  ];
+  const s = steps[n - 1];
+  return el('div', { class: 'space-y-3' },
+    el('h3', { class: 'font-semibold text-base' }, s.title),
+    el('div', {
+      class: 'bg-stone-50 rounded p-2 flex justify-center',
+      html: s.svg
+    }),
+    el('div', { class: 'space-y-2', html: s.body })
+  );
+}
+
+// SVG 流程圖工廠（給 tour 各步驟用）
+function tourSvg(boxes, arrows, caption) {
+  const W = 320, H = 180;
+  const boxParts = boxes.map(b => {
+    const lines = b.text.split('\n');
+    const cx = b.x + b.w / 2;
+    const tspans = lines.map((line, i) =>
+      `<tspan x="${cx}" dy="${i === 0 ? -6 + (lines.length === 1 ? 6 : 0) : 14}">${escapeXml(line)}</tspan>`
+    ).join('');
+    return `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6" fill="${b.fill}" stroke="#94a3b8" stroke-width="1"/>` +
+      `<text x="${cx}" y="${b.y + b.h / 2}" text-anchor="middle" font-size="12" fill="#1e293b" font-family="system-ui, sans-serif">${tspans}</text>`;
+  }).join('');
+  const arrowParts = arrows.map(a =>
+    `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="#64748b" stroke-width="2" marker-end="url(#arrowhead)"/>`
+  ).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#64748b"/>
+      </marker>
+    </defs>
+    ${boxParts}${arrowParts}
+    <text x="${W / 2}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#64748b" font-family="system-ui, sans-serif">${escapeXml(caption || '')}</text>
+  </svg>`;
+}
+
+function escapeXml(s) {
+  return String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
 }
 
 async function qaqcApprove(project, realPlots, cfg, gateResult) {
