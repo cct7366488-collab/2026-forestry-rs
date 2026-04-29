@@ -2,11 +2,13 @@
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
+// v2.7.16：樣區幾何 + 坡度修正 utility
+import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=27160';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=27150';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=27160';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -638,11 +640,36 @@ export function openMethodologyForm(project) {
   const m = project.methodology || { ...DEFAULT_METHODOLOGY };
   const f = el('form', { class: 'space-y-2' },
     field({ label: '目標樣區數', name: 'targetPlotCount', type: 'number', step: '1', min: '1', required: true, value: m.targetPlotCount }),
-    field({ label: '樣區形狀', name: 'plotShape', required: true,
-      options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }],
+    field({ label: '樣區形狀（預設）', name: 'plotShape', required: true,
+      options: [
+        { value: 'circle', label: '圓形' },
+        { value: 'square', label: '方形' },
+        { value: 'rectangle', label: '矩形（v2.7.16）' }
+      ],
       value: m.plotShape }),
     field({ label: '允許的樣區面積（m²，逗號分隔）', name: 'plotAreaOptions', required: true,
       value: (m.plotAreaOptions || []).join(','), placeholder: '400, 500, 1000' }),
+    // v2.7.16：dimensionType — 量測單位（沿坡距 vs 水平投影）
+    el('div', { class: 'field', style: 'background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px' },
+      el('label', { style: 'font-weight:600;font-size:14px;display:block;margin-bottom:6px' },
+        '量測單位（v2.7.16）'),
+      ...[
+        { v: 'slope_distance', label: '沿坡距（野外皮尺，預設）', desc: 'X/Y 是野外皮尺實測距離；寫入時自動算 cos(坡度) 校正得水平投影面積（碳計算用）' },
+        { v: 'horizontal', label: '水平投影', desc: '已在野外換算 / 用 DEM 推導 / 補登時校正過；不再做 cos 修正' }
+      ].map(({ v, label, desc }) => el('label', {
+        style: 'display:block;font-size:13px;line-height:1.5;cursor:pointer;padding:4px 0'
+      },
+        el('input', {
+          type: 'radio', name: 'dimensionType', value: v,
+          style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+          ...((m.dimensionType || 'slope_distance') === v ? { checked: 'true' } : {})
+        }),
+        el('b', {}, label),
+        el('div', { style: 'font-size:11px;color:#57534e;margin-left:20px' }, desc)
+      )),
+      el('p', { style: 'font-size:11px;color:#92400e;margin-top:6px' },
+        '💡 樣區坡度與 dimensions 在「樣區編輯」表單填；本欄決定全專案如何解釋這些數值。')
+    ),
     // v2.5：plotOriginType — 立木 X/Y 座標系統的原點位置
     el('div', { class: 'field', style: 'background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;padding:10px' },
       el('label', { style: 'font-weight:600;font-size:14px;display:block;margin-bottom:6px' },
@@ -832,6 +859,7 @@ export function openMethodologyForm(project) {
       targetPlotCount: parseInt(fd.get('targetPlotCount'), 10),
       plotShape: fd.get('plotShape'),
       plotAreaOptions: fd.get('plotAreaOptions').split(',').map(s => parseInt(s.trim(), 10)).filter(n => n > 0),
+      dimensionType: fd.get('dimensionType') || 'slope_distance',  // v2.7.16
       plotOriginType: fd.get('plotOriginType') || 'center',  // v2.5
       required: {
         photos: fd.get('req_photos') === 'on',
@@ -912,7 +940,11 @@ export async function openBatchPlotsForm(project) {
         value: meth.plotAreaOptions?.[0] || 500, required: true })
     ),
     field({ label: '預設形狀', name: 'shape',
-      options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }],
+      options: [
+        { value: 'circle', label: '圓形' },
+        { value: 'square', label: '方形' },
+        { value: 'rectangle', label: '矩形（v2.7.16，寬/長由 surveyor 填）' }
+      ],
       value: meth.plotShape || 'circle', required: true }),
     previewBox,
     el('div', { class: 'flex gap-2 pt-2' },
@@ -952,6 +984,12 @@ export async function openBatchPlotsForm(project) {
     submitBtn.textContent = '建立中...';
     try {
       const colRef = fb.collection(fb.db, 'projects', project.id, 'plots');
+      // v2.7.16：批次空殼也帶 v2.6 schema 欄位（surveyor 後續編輯時補真實坡度與 dimensions）
+      const dimType = meth.dimensionType || 'slope_distance';
+      let shellPlotDimensions;
+      if (shape === 'circle') shellPlotDimensions = { radius: Math.sqrt(area / Math.PI) };
+      else if (shape === 'square') { const side = Math.sqrt(area); shellPlotDimensions = { side, width: side, length: side }; }
+      else shellPlotDimensions = null;  // rectangle：留空殼，surveyor 填寬/長
       let success = 0;
       for (let i = 0; i < count; i++) {
         const n = start + i;
@@ -961,6 +999,14 @@ export async function openBatchPlotsForm(project) {
           forestUnit: fu,
           shape,
           area_m2: area,
+          // v2.7.16：新 schema 欄位
+          plotDimensions: shellPlotDimensions,
+          slopeDegrees: 0,                 // 空殼預設平地，surveyor 編輯時改
+          slopeAspect: null,
+          slopeSource: null,
+          dimensionType: dimType,
+          areaHorizontal_m2: area,         // slope=0 → cos(0)=1 → = area
+          migrationPending: shape === 'rectangle',  // rectangle 空殼缺 dimensions → 待補登
           location: null,
           locationTWD97: null,
           locationAccuracy_m: null,
@@ -1087,6 +1133,128 @@ export async function openPlotForm(project, existing = null) {
   const photoLabel = el('label', {}, '樣區照片', photoReq ? el('span', { class: 'req' }, ' *') : null,
     el('span', { class: 'text-xs text-stone-500 ml-1' }, '（≤5MB / 張，可多選）'));
 
+  // v2.7.16：樣區幾何區塊（shape + dimensions + slope + 即時預覽）
+  const dimType = meth.dimensionType || 'slope_distance';
+  const dimTypeLabel = dimType === 'slope_distance' ? '沿坡距' : '水平投影';
+  const shapeOptions = [
+    { value: 'circle', label: '圓形' },
+    { value: 'square', label: '方形' },
+    { value: 'rectangle', label: '矩形' }
+  ];
+  const initShape = existing?.shape || meth.plotShape || 'circle';
+
+  const shapeSel = el('select', { id: 'f-shape', name: 'shape', required: 'true' },
+    ...shapeOptions.map(o => {
+      const opt = el('option', { value: o.value }, o.label);
+      if (o.value === initShape) opt.setAttribute('selected', 'true');
+      return opt;
+    })
+  );
+  const areaSel = el('select', { id: 'f-area_m2', name: 'area_m2' },
+    ...(meth.plotAreaOptions || [400, 500, 1000]).map(a => {
+      const opt = el('option', { value: a }, `${a} m²`);
+      if (Number(a) === Number(existing?.area_m2 || (meth.plotAreaOptions?.[0] || 500))) opt.setAttribute('selected', 'true');
+      return opt;
+    })
+  );
+  const widthInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'widthM', placeholder: '20',
+    value: existing?.plotDimensions?.width ?? '' });
+  const lengthInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'lengthM', placeholder: '25',
+    value: existing?.plotDimensions?.length ?? '' });
+  const slopeInput = el('input', { type: 'number', step: '0.1', min: '0', max: '90', name: 'slopeDegrees',
+    placeholder: '0', value: existing?.slopeDegrees ?? '' });
+  const aspectInput = el('input', { type: 'number', step: '1', min: '0', max: '360', name: 'slopeAspect',
+    placeholder: '可空（°，0=北）', value: existing?.slopeAspect ?? '' });
+  const previewBox = el('div', { class: 'bg-stone-50 rounded p-2 text-xs text-stone-700 my-1' });
+
+  const areaSelField = el('div', { class: 'field' },
+    el('label', { for: 'f-area_m2' }, `面積 (m², ${dimTypeLabel})`, el('span', { class: 'req' }, ' *')),
+    areaSel
+  );
+  const rectFields = el('div', { class: 'field-row', style: 'display:none' },
+    el('div', { class: 'field' },
+      el('label', { for: 'f-widthM' }, `寬 (m, ${dimTypeLabel})`, el('span', { class: 'req' }, ' *')),
+      widthInput
+    ),
+    el('div', { class: 'field' },
+      el('label', { for: 'f-lengthM' }, `長 (m, ${dimTypeLabel})`, el('span', { class: 'req' }, ' *')),
+      lengthInput
+    )
+  );
+
+  const slopeSourceInit = existing?.slopeSource || (existing?.slopeDegrees != null ? 'field' : '');
+  const slopeSourceWrap = el('div', { class: 'flex flex-wrap gap-3 text-xs' },
+    ...[
+      { v: '', label: '未設定' },
+      { v: 'field', label: '野外斜度計' },
+      { v: 'dem', label: 'DEM 推導' },
+      { v: 'dem_field_avg', label: '兩者平均' }
+    ].map(({ v, label }) => el('label', { style: 'cursor:pointer' },
+      el('input', {
+        type: 'radio', name: 'slopeSource', value: v,
+        style: 'vertical-align:middle;margin-right:4px',
+        ...(slopeSourceInit === v ? { checked: 'true' } : {})
+      }),
+      label
+    ))
+  );
+
+  function recompute() {
+    const shape = shapeSel.value;
+    rectFields.style.display = shape === 'rectangle' ? '' : 'none';
+    areaSelField.style.display = shape === 'rectangle' ? 'none' : '';
+    let area = NaN;
+    if (shape === 'rectangle') {
+      const w = parseFloat(widthInput.value);
+      const l = parseFloat(lengthInput.value);
+      if (Number.isFinite(w) && Number.isFinite(l) && w > 0 && l > 0) area = w * l;
+    } else {
+      area = parseInt(areaSel.value, 10);
+    }
+    const slope = parseFloat(slopeInput.value) || 0;
+    const areaH = computeAreaHorizontal(area, slope, dimType);
+    if (Number.isFinite(area) && area > 0) {
+      const slopeNote = (slope > 0 && dimType === 'slope_distance')
+        ? `　│　水平投影面積（碳計算用）：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(× cos ${slope.toFixed(1)}° = ${Math.cos(slope * Math.PI / 180).toFixed(3)})</span>`
+        : '';
+      previewBox.innerHTML = `名目面積（${dimTypeLabel}）：<b>${area.toFixed(1)} m²</b>` + slopeNote;
+    } else {
+      previewBox.innerHTML = '<span class="text-stone-400">填完幾何 / 坡度後，下方會即時顯示水平投影面積</span>';
+    }
+  }
+  [shapeSel, areaSel, widthInput, lengthInput, slopeInput].forEach(i => {
+    i.addEventListener('input', recompute);
+    i.addEventListener('change', recompute);
+  });
+
+  const geomBlock = el('div', { class: 'field', style: 'background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:10px' },
+    el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:6px' },
+      `🗺️ 樣區幾何 + 坡度（v2.7.16）　`,
+      el('span', { style: 'font-size:11px;color:#166534;font-weight:400' }, `量測單位 = ${dimTypeLabel}（方法學設定）`)
+    ),
+    el('div', { class: 'field' },
+      el('label', { for: 'f-shape' }, '形狀', el('span', { class: 'req' }, ' *')),
+      shapeSel
+    ),
+    areaSelField,
+    rectFields,
+    el('div', { class: 'field-row' },
+      el('div', { class: 'field' },
+        el('label', { for: 'f-slopeDegrees' }, '坡度 (°)', el('span', { style: 'font-size:11px;color:#57534e' }, '　0–90，平地填 0')),
+        slopeInput
+      ),
+      el('div', { class: 'field' },
+        el('label', { for: 'f-slopeAspect' }, '坡向 (°)'),
+        aspectInput
+      )
+    ),
+    el('div', { class: 'field' },
+      el('label', {}, '坡度來源'),
+      slopeSourceWrap
+    ),
+    previewBox
+  );
+
   const f = el('form', { class: 'space-y-2' },
     field({ label: '樣區編號', name: 'code', required: true, value: existing?.code || '', placeholder: `${project.code}-001` }),
     field({ label: '林班-小班', name: 'forestUnit', value: existing?.forestUnit || '', placeholder: '123-2' }),
@@ -1095,14 +1263,7 @@ export async function openPlotForm(project, existing = null) {
       el('div', { class: 'flex items-center flex-wrap gap-2' }, gpsBtn, gpsStatus),
       lngInput, latInput, accInput
     ),
-    el('div', { class: 'field-row' },
-      field({ label: '形狀', name: 'shape',
-        options: [{ value: 'circle', label: '圓形' }, { value: 'square', label: '方形' }],
-        value: existing?.shape || meth.plotShape || 'circle', required: true }),
-      field({ label: '面積 (m²)', name: 'area_m2',
-        options: (meth.plotAreaOptions || [400, 500, 1000]).map(a => ({ value: a, label: `${a} m²` })),
-        value: existing?.area_m2 || (meth.plotAreaOptions?.[0] || 500), required: true })
-    ),
+    geomBlock,
     field({ label: '設置日期', name: 'establishedAt', type: 'date', required: true, value: existing?.establishedAt ? (existing.establishedAt.toDate ? existing.establishedAt.toDate() : new Date(existing.establishedAt)).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10) }),
     el('div', { class: 'field' }, photoLabel, photoUp.element),
     field({ label: '備註', name: 'notes', type: 'textarea', value: existing?.notes || '' }),
@@ -1112,6 +1273,7 @@ export async function openPlotForm(project, existing = null) {
       el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
     )
   );
+  recompute();  // 初始預覽
 
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1122,14 +1284,46 @@ export async function openPlotForm(project, existing = null) {
     // v1.6：照片 required 驗證
     if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張樣區照片'); return; }
     const t97 = wgs84ToTwd97(lng, lat);
+    // v2.7.16：幾何 + 坡度 — 算 area + plotDimensions + areaHorizontal_m2
+    const shape = fd.get('shape');
+    let area_m2, plotDimensions;
+    if (shape === 'rectangle') {
+      const w = parseFloat(fd.get('widthM'));
+      const l = parseFloat(fd.get('lengthM'));
+      if (!Number.isFinite(w) || w <= 0 || !Number.isFinite(l) || l <= 0) {
+        toast('矩形樣區需填寬與長（> 0）'); return;
+      }
+      area_m2 = w * l;
+      plotDimensions = { width: w, length: l };
+    } else if (shape === 'circle') {
+      area_m2 = parseInt(fd.get('area_m2'), 10);
+      plotDimensions = { radius: Math.sqrt(area_m2 / Math.PI) };
+    } else {  // square
+      area_m2 = parseInt(fd.get('area_m2'), 10);
+      const side = Math.sqrt(area_m2);
+      plotDimensions = { side, width: side, length: side };
+    }
+    const slopeDegrees = parseFloat(fd.get('slopeDegrees'));
+    const slopeAspectRaw = parseFloat(fd.get('slopeAspect'));
+    const slopeSourceRaw = fd.get('slopeSource');
+    const slopeFinal = Number.isFinite(slopeDegrees) ? slopeDegrees : 0;
+    const areaHorizontal_m2 = computeAreaHorizontal(area_m2, slopeFinal, dimType);
     const data = {
       code: fd.get('code').trim(),
       forestUnit: fd.get('forestUnit').trim() || null,
       location: new fb.GeoPoint(lat, lng),
       locationTWD97: { x: t97.x, y: t97.y },
       locationAccuracy_m: parseFloat(fd.get('accuracy')) || null,
-      shape: fd.get('shape'),
-      area_m2: parseInt(fd.get('area_m2'), 10),
+      shape,
+      area_m2,
+      // v2.7.16：新欄位
+      plotDimensions,
+      slopeDegrees: slopeFinal,
+      slopeAspect: Number.isFinite(slopeAspectRaw) ? slopeAspectRaw : null,
+      slopeSource: slopeSourceRaw || null,
+      areaHorizontal_m2,
+      dimensionType: dimType,
+      migrationPending: false,  // 走過 v2.7.16 表單 → 不再 pending
       establishedAt: new Date(fd.get('establishedAt')),
       notes: fd.get('notes').trim() || null,
       updatedAt: fb.serverTimestamp(),
@@ -2468,8 +2662,13 @@ export async function seedDemoData(project) {
       { code: `${project.code}-002`, lat: 23.9192, lng: 120.8856, forestUnit: '示範-2', shape: 'square', area_m2: 400, notes: '天然闊葉林' },
       { code: `${project.code}-003`, lat: 23.9158, lng: 120.8821, forestUnit: '示範-1', shape: 'circle', area_m2: 500, notes: '混合林' }
     ];
+    // v2.7.16：seed plots 帶 v2.6 schema 欄位（slope=0 平地、dimensionType 從 methodology）
+    const dimType = project?.methodology?.dimensionType || 'slope_distance';
     for (const p of demoPlots) {
       const t97 = wgs84ToTwd97(p.lng, p.lat);
+      const dims = p.shape === 'circle'
+        ? { radius: Math.sqrt(p.area_m2 / Math.PI) }
+        : { side: Math.sqrt(p.area_m2), width: Math.sqrt(p.area_m2), length: Math.sqrt(p.area_m2) };
       const plotRef = await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), {
         code: p.code,
         forestUnit: p.forestUnit,
@@ -2477,6 +2676,14 @@ export async function seedDemoData(project) {
         locationTWD97: { x: t97.x, y: t97.y },
         shape: p.shape,
         area_m2: p.area_m2,
+        // v2.7.16
+        plotDimensions: dims,
+        slopeDegrees: 0,
+        slopeAspect: null,
+        slopeSource: null,
+        dimensionType: dimType,
+        areaHorizontal_m2: p.area_m2,
+        migrationPending: false,
         establishedAt: new Date(),
         notes: p.notes,
         insideBoundary: true,

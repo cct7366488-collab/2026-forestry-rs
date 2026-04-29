@@ -1,6 +1,6 @@
 # 資料 Schema（Firestore）
 
-> v2.6（2026-04-29，app v2.7.15）：樣區幾何 schema 升級 — plotShape 加 'rectangle'、新增 dimensionType（沿坡距 / 水平投影）、slopeDegrees / slopeAspect / slopeSource、areaHorizontal_m2（cos 校正）、migrationPending（既有資料待補登 flag）
+> v2.6（2026-04-29，app v2.7.15 schema / v2.7.16 UI）：樣區幾何 schema 升級 — plotShape 加 'rectangle'、新增 dimensionType（沿坡距 / 水平投影）、slopeDegrees / slopeAspect / slopeSource、areaHorizontal_m2（cos 校正）、migrationPending（既有資料待補登 flag）。v2.7.16 落地：plot form 幾何/坡度欄位 + 即時水平投影預覽、methodology dimensionType radio、立木分布圖「沿坡距 ↔ 水平投影」切換鈕、migration banner（admin DRY-RUN → 批次標記）、import-wizard 防呆改 per-plot 動態上限。
 > v2.5（2026-04-27）：立木個體座標（localX/Y + absolute TWD97/WGS84）+ methodology.plotOriginType
 > v1.5（2026-04-25）：5 角色 + 方法學 + Lock + QA 機制
 > 歷史：v1.0 簡易 schema（無 methodology / qa / lock）

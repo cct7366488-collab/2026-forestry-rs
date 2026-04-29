@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.15';  // v2.7.15：樣區幾何 schema 升級（plotShape 加 rectangle / dimensionType / slopeDegrees / areaHorizontal_m2）
+const CACHE = 'forest-monitor-v2.7.16';  // v2.7.16：UI 落地（plot form 幾何 + 坡度欄位 / methodology dimensionType / 散布圖切換鈕 / migration banner / dynamic 防呆）
 const SHELL = [
   './',
   './index.html',

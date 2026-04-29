@@ -15,15 +15,15 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=27150";
-import * as forms from "./forms.js?v=27150";
-import * as analytics from "./analytics.js?v=27150";
-import * as importWizard from "./import-wizard.js?v=27150";
-import { renderTreeDistribution } from "./distribution.js?v=27150";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27150";   // v2.7.10：admin 樹種字典管理
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27150";
+import { firebaseConfig } from "../firebase-config.js?v=27160";
+import * as forms from "./forms.js?v=27160";
+import * as analytics from "./analytics.js?v=27160";
+import * as importWizard from "./import-wizard.js?v=27160";
+import { renderTreeDistribution } from "./distribution.js?v=27160";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27160";   // v2.7.10：admin 樹種字典管理
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27160";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27150";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27160";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -255,6 +255,66 @@ function renderStatusBanner() {
 
   // v2.7：reviewer 完成審查卡（同樣是 plots tab 共用區，跟 lock-banner 一起隨 status 切換）
   renderReviewerApprovalCard();
+}
+
+// v2.7.16：樣區幾何 schema 升級 banner（admin / PI 看見；掃描全 plots，缺新欄位 → 顯示批次標記入口）
+async function renderGeoMigrationBanner(projectId) {
+  const banner = $('#geo-migration-banner');
+  if (!banner) return;
+  banner.classList.add('hidden');
+  banner.innerHTML = '';
+  try {
+    const snap = await getDocs(collection(db, 'projects', projectId, 'plots'));
+    let pending = 0, total = 0;
+    snap.forEach(d => {
+      total++;
+      const p = d.data();
+      const needs = (
+        p.migrationPending === true ||
+        (p.slopeDegrees == null && p.dimensionType == null && p.areaHorizontal_m2 == null)
+      );
+      // shell 樣區也會缺欄位但本身就是規劃用，不算 migration target
+      if (p.qaStatus === 'shell') return;
+      if (needs) pending++;
+    });
+    if (pending === 0) return;
+    banner.classList.remove('hidden');
+    const isAdminUser = isSystemAdmin();
+    const actionLabel = isAdminUser ? '▶ DRY-RUN 預覽 / 批次標記' : '（admin 才能批次標記）';
+    banner.innerHTML = `
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <b>🏷️ v2.6 樣區幾何 schema 升級提醒</b>
+          <span class="text-xs ml-2">本專案 ${pending} / ${total} 個樣區待補登（slope / dimensions / areaHorizontal_m2）— 點開樣區編輯填表即可。</span>
+        </div>
+        ${isAdminUser ? '<button id="btn-geo-migration" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1.5 rounded text-xs font-medium">' + actionLabel + '</button>' : ''}
+      </div>
+    `;
+    if (isAdminUser) {
+      $('#btn-geo-migration').addEventListener('click', () => triggerGeoMigration(projectId));
+    }
+  } catch (e) {
+    console.warn('[geo-migration banner] count failed', e);
+  }
+}
+
+async function triggerGeoMigration(projectId) {
+  try {
+    const m = await import('./migration-v2715.js?v=27160');
+    toast('掃描中...');
+    const candidates = await m.dryRun(projectId);
+    if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
+    const sample = candidates.slice(0, 5).map(c => c.code).join('、');
+    const more = candidates.length > 5 ? ` 等 ${candidates.length} 個` : '';
+    if (!confirm(`將為 ${candidates.length} 個樣區批次標記 migrationPending=true 並補預設值（slope=0、dimensionType='horizontal'、areaHorizontal_m2=area_m2）：\n\n${sample}${more}\n\n標記後樣區會出現「🏷️ 待補登幾何」黃 badge，提示 PI / surveyor 進編輯表單填真實坡度與 dimensions。\n\n確定執行？`)) return;
+    toast('批次寫入中...');
+    const result = await m.markPending(projectId, { execute: true });
+    toast(`✓ 完成：${result.count} 個樣區已標記`, 4000);
+    setTimeout(() => location.reload(), 1500);
+  } catch (e) {
+    toast('migration 失敗：' + e.message);
+    console.error('[geo-migration] failed', e);
+  }
 }
 
 // v2.7.9：admin god view 後門按鈕工廠 — verified 狀態下退回 review / active
@@ -830,6 +890,11 @@ async function renderProjectHome(root, projectId) {
   // v2.3：lock-banner 升級為狀態列（同時顯示 status 與 lock 原因）
   renderStatusBanner();
 
+  // v2.7.16：樣區幾何 schema 升級 — admin / PI 看到「N 個樣區待補登」banner（一次性掃描，不放 onSnapshot）
+  if (canQA() || isSystemAdmin()) {
+    queueMicrotask(() => renderGeoMigrationBanner(projectId));
+  }
+
   // tab 切換
   $$('.tab-link').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
@@ -971,6 +1036,15 @@ async function renderProjectHome(root, projectId) {
       if (isShell && !dd.assignedTo && canQA()) {
         headerRight.appendChild(el('span', { class: 'text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded' }, '📌 待指派'));
       }
+      // v2.7.16：migrationPending=true 補「🏷️ 待補登幾何」（admin / PI 視角；提示 v2.6 schema 欄位未填）
+      const needsGeoMigration = (
+        dd.migrationPending === true ||
+        // 缺欄位推導：舊資料（v2.5 之前）沒走過 v2.7.16 表單
+        (dd.slopeDegrees == null && dd.dimensionType == null && dd.areaHorizontal_m2 == null)
+      );
+      if (needsGeoMigration && canQA() && !isShell) {
+        headerRight.appendChild(el('span', { class: 'text-xs bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded', title: 'v2.6 schema 升級：樣區坡度 / 幾何尺寸 / 水平投影面積待補登；點開樣區編輯填表即可' }, '🏷️ 待補登幾何'));
+      }
       // 卡片
       const card = el('a', {
         href: `#/p/${projectId}/plot/${d.id}`,
@@ -981,7 +1055,8 @@ async function renderProjectHome(root, projectId) {
           headerRight
         ),
         el('p', { class: 'text-sm text-stone-500' },
-          `${dd.forestUnit || ''} · ${dd.shape === 'circle' ? '圓' : '方'} ${dd.area_m2 || '?'}m²`),
+          `${dd.forestUnit || ''} · ${({ circle: '圓', square: '方', rectangle: '矩' })[dd.shape] || '方'} ${dd.area_m2 || '?'}m²` +
+          (Number.isFinite(dd.slopeDegrees) && dd.slopeDegrees > 0 ? ` · 坡 ${dd.slopeDegrees.toFixed(0)}°` : '')),
         el('p', { class: 'text-xs text-stone-400 mt-1' },
           isShell
             ? '尚未開始調查'

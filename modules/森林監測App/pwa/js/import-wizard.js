@@ -8,9 +8,9 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=27150';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=27160';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=27150';
+import { TREES } from './species-dict.js?v=27160';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
@@ -613,18 +613,33 @@ function checkOriginTypeMismatch() {
   return null;  // 方法學與資料一致或無法判斷
 }
 
-// ===== v2.7.6：per-plot 立木座標跨度的「明顯異常」上限檢查 =====
+// ===== v2.7.6 / v2.7.16：per-plot 立木座標跨度的「明顯異常」上限檢查 =====
 // 動機：v2.6.2 散布圖揭露立木跑出邊界。原本想用「方形 22.36 m × 1.2」當上限，
 //      但實務上 0.05 ha 樣區常採 20×25 m 矩形劃設，加上現場坡度修正
-//      （沿坡距 = 水平距 / cos θ；50° 坡下 25 m 沿坡達 38.9 m），
-//      用 22.36 × 1.2 = 26.83 m 會把正常資料全誤報。
-// 設計：放寬到 40 m 硬上限，只抓「明顯異常」這幾類：
+//      （沿坡距 = 水平距 / cos θ；50° 坡下 25 m 沿坡達 38.9 m）。
+// v2.7.6：放寬到 40 m 硬上限抓「明顯異常」這幾類：
 //      ① Excel X/Y 欄位填的是 cm（×100 倍 → 數百~千 m）
 //      ② 絕對 TWD97 座標誤填到 local X/Y（百萬級）
 //      ③ 同一 sheet 混了多個樣區的立木（樣區間距通常遠大於 40 m）
-//      正常方形 / 20×25 矩形 + 任何坡度都不會誤報。
-//      未來若 methodology 加 plotShape/plotDimensions/slopeDegrees，再做精準檢查。
+// v2.7.16：schema 升級後改 per-plot 動態 — 若 W.existingPlotsByCode 已載入且該 plot 有
+//         plotDimensions / area_m2，依其推算 max（× 1.5 留 cos 校正空間，最壞 ≈ 50° 坡）。
+//         其餘情況回退到 40 m floor。
 const PLOT_MAX_SPAN_M = 40;
+
+// v2.7.16：per-plot 動態上限
+function getPerPlotMaxSpan(plotCode) {
+  const ex = W.existingPlotsByCode?.get?.(plotCode);
+  if (ex) {
+    const dims = ex.plotDimensions || {};
+    if (Number.isFinite(dims.width) && Number.isFinite(dims.length)) {
+      return Math.max(Math.max(dims.width, dims.length) * 1.5, PLOT_MAX_SPAN_M);
+    }
+    if (Number.isFinite(dims.radius)) return Math.max(dims.radius * 2 * 1.2, PLOT_MAX_SPAN_M);
+    if (Number.isFinite(dims.side))   return Math.max(dims.side * 1.5, PLOT_MAX_SPAN_M);
+    if (Number.isFinite(ex.area_m2))  return Math.max(Math.sqrt(ex.area_m2) * 1.5, PLOT_MAX_SPAN_M);
+  }
+  return PLOT_MAX_SPAN_M;
+}
 
 function analyzePerPlotXYRanges() {
   const fm = W.fieldMapping || {};
@@ -660,17 +675,25 @@ function analyzePerPlotXYRanges() {
 function checkXYRangeMismatch() {
   const ranges = analyzePerPlotXYRanges();
   if (ranges.length === 0) return null;
-  const offending = ranges.filter(r => r.spanX > PLOT_MAX_SPAN_M || r.spanY > PLOT_MAX_SPAN_M);
+  // v2.7.16：per-plot 動態上限（依既有樣區的 plotDimensions / area 推算；缺資料時回退 40m）
+  const offending = ranges.filter(r => {
+    const max = getPerPlotMaxSpan(r.plotCode);
+    return r.spanX > max || r.spanY > max;
+  });
   if (offending.length === 0) return null;
   const sample = offending.slice(0, 5)
-    .map(r => `${r.plotCode}(X=${r.spanX.toFixed(1)}/Y=${r.spanY.toFixed(1)}m)`).join('、');
+    .map(r => {
+      const max = getPerPlotMaxSpan(r.plotCode);
+      return `${r.plotCode}(X=${r.spanX.toFixed(1)}/Y=${r.spanY.toFixed(1)}m, 上限 ${max.toFixed(0)}m)`;
+    }).join('、');
   const more = offending.length > 5 ? ` 等 ${offending.length} 個樣區` : '';
+  const dynamicNote = W.existingPlotsByCode ? '（依各樣區 plotDimensions 動態推算）' : `（floor ${PLOT_MAX_SPAN_M} m，未載入既有樣區幾何）`;
   return {
     severity: 'warn',
     kind: 'xy-span-exceeds-plot-side',
-    title: `⚠ ${offending.length} 個樣區的立木座標跨度明顯異常（>${PLOT_MAX_SPAN_M} m）`,
-    detail: `0.05 ha 樣區實務上採 20×25 m 矩形劃設，加上坡度修正（沿坡距 = 水平距 / cos θ）— 即便 50° 坡度也僅約 39 m。本檢查只抓「明顯異常」：>${PLOT_MAX_SPAN_M} m 的 X 或 Y 跨度。命中：${sample}${more}。`,
-    action: '高機率原因：① 同一個 Excel sheet 混了多個樣區的立木（最常見，跨樣區距離通常 > 40 m） ② Excel X/Y 欄位單位是 cm（需 ÷100） ③ 絕對 TWD97 座標誤填到 local X/Y 欄位（百萬級）。建議：取消 wizard → 回 Excel 確認原始資料。'
+    title: `⚠ ${offending.length} 個樣區的立木座標跨度超過上限 ${dynamicNote}`,
+    detail: `0.05 ha 樣區實務採 20×25 m 矩形 + 坡度修正（沿坡距 = 水平距 / cos θ）— 50° 坡度約 39 m。v2.7.16 改 per-plot 上限：plotDimensions × 1.5（留 cos 空間）；缺幾何資料時回退 ${PLOT_MAX_SPAN_M} m floor。命中：${sample}${more}。`,
+    action: '高機率原因：① 同一個 Excel sheet 混了多個樣區的立木（最常見，跨樣區距離通常遠大於上限） ② Excel X/Y 欄位單位是 cm（需 ÷100） ③ 絕對 TWD97 座標誤填到 local X/Y 欄位（百萬級）。建議：取消 wizard → 回 Excel 確認原始資料；或先進「樣區編輯」補齊 plotDimensions / 坡度後再來。'
   };
 }
 
@@ -682,6 +705,25 @@ function renderStep5() {
   if (W.importing) return renderImportProgress();
   // 已執行 DRY-RUN — 顯示結果區
   if (W.dryRunResult) return renderDryRunResult();
+
+  // v2.7.16：lazy 載入既有樣區的 plotDimensions（給 checkXYRangeMismatch 動態上限用）
+  if (W.existingPlotsByCode === undefined && !W.fetchingExistingPlots) {
+    W.fetchingExistingPlots = true;
+    (async () => {
+      try {
+        const snap = await fb.getDocs(fb.collection(fb.db, 'projects', W.project.id, 'plots'));
+        const map = new Map();
+        snap.forEach(d => map.set(d.data().code, { id: d.id, ...d.data() }));
+        W.existingPlotsByCode = map;
+      } catch (e) {
+        console.warn('[wizard] load existing plots for span check failed', e);
+        W.existingPlotsByCode = new Map();
+      } finally {
+        W.fetchingExistingPlots = false;
+        render();  // 拿到資料後 re-render（per-plot 上限會生效）
+      }
+    })();
+  }
 
   const box = el('div', { class: 'space-y-3' });
   box.appendChild(el('h3', { class: 'font-semibold text-base' }, '步驟 5：預覽 (DRY-RUN)'));

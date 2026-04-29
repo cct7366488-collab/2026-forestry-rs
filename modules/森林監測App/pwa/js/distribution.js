@@ -3,7 +3,7 @@
 // 把樣區內每株立木的 localX_m / localY_m 畫成 Canvas 散布圖。
 //
 // 設計：
-//   - 樣區邊界依 plot.shape 畫虛線方框（square）或圓（circle）
+//   - 樣區邊界依 plot.shape 畫虛線方框（square / rectangle）或圓 / 橢圓（circle）
 //   - 原點依 methodology.plotOriginType（'center' 4 象限 / 'corner' 1 象限）
 //   - 立木點半徑依 DBH 線性縮放（4–16 px）
 //   - 顏色依 vitality（healthy=綠 / weak=橘 / standing-dead=灰 / fallen=紅）
@@ -11,6 +11,9 @@
 //   - click：透過 callback 開編輯 modal（避開循環 import）
 //   - 無 X/Y 的立木：列在「未設位置」清單，不畫進圖
 //   - 樣區外的點：紅色描邊提示「資料異常」
+//   - v2.7.16：rectangle shape 支援（plotDimensions.width × length）+ 沿坡距 ↔ 水平投影切換鈕
+//             沿坡距 → 水平投影：Y 軸 × cos(slope)（X 不變、僅沿坡方向受 cos 校正）
+//             圓形 + 坡度 + 水平視圖 = 橢圓（視覺直觀提示坡度造成的扁化）
 //
 // 使用：
 //   import { renderTreeDistribution } from './distribution.js';
@@ -60,28 +63,60 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   const noXY = trees.length - withXY.length;
   const noXYPct = trees.length > 0 ? ((noXY / trees.length) * 100).toFixed(0) : 0;
 
-  // 2. 樣區幾何（依 shape + area_m2 計算邊長/半徑）
+  // 2. 樣區幾何 + 坡度修正（v2.7.16 schema-aware）
   const shape = plot.shape || 'square';
   const area  = Number.isFinite(plot.area_m2) ? plot.area_m2 : 500;
-  const side  = Math.sqrt(area);                  // square 邊長 (m)
-  const radius = Math.sqrt(area / Math.PI);       // circle 半徑 (m)
+  const dims  = plot.plotDimensions || {};
+  const slope = Number.isFinite(plot.slopeDegrees) ? plot.slopeDegrees : 0;
+  const dimType = plot.dimensionType || 'horizontal';  // 舊資料缺欄位 → 視為已水平投影
   const originType = methodology?.plotOriginType || 'center';
+
+  // 「stored」幾何（在 dimensionType 空間下；half-extent 形式）
+  let xExtentStored, yExtentStored;
+  if (shape === 'circle') {
+    const r = Number.isFinite(dims.radius) ? dims.radius : Math.sqrt(area / Math.PI);
+    xExtentStored = r; yExtentStored = r;
+  } else if (shape === 'rectangle') {
+    const w = Number.isFinite(dims.width)  ? dims.width  : Math.sqrt(area);
+    const l = Number.isFinite(dims.length) ? dims.length : Math.sqrt(area);
+    xExtentStored = w / 2; yExtentStored = l / 2;
+  } else {  // square
+    const s = Number.isFinite(dims.side) ? dims.side : Math.sqrt(area);
+    xExtentStored = s / 2; yExtentStored = s / 2;
+  }
+
+  // viewMode：'slope_distance' | 'horizontal'。預設 = dimType（資料原生視圖）
+  // 切換條件：slope > 0 AND dimType='slope_distance'（否則無內容可切）
+  const canToggle = slope > 0 && dimType === 'slope_distance';
+  const viewMode = opts.viewMode || (canToggle ? 'slope_distance' : dimType);
+  const cos = Math.cos(slope * Math.PI / 180);
+  const yMult = (() => {
+    if (slope === 0 || viewMode === dimType) return 1;
+    if (viewMode === 'horizontal' && dimType === 'slope_distance') return cos;
+    if (viewMode === 'slope_distance' && dimType === 'horizontal') return cos > 1e-6 ? 1 / cos : 1;
+    return 1;
+  })();
+
+  // 顯示空間的半 extent（已乘 yMult）
+  const xExtent = xExtentStored;
+  const yExtent = yExtentStored * yMult;
 
   // 3. 座標範圍（用樣區幾何 + 立木 X/Y 兩者取 union 加 5% 緩衝，立木超出邊界仍可見）
   let xMin, xMax, yMin, yMax;
   if (originType === 'center') {
-    const half = shape === 'circle' ? radius : side / 2;
-    xMin = -half; xMax = half; yMin = -half; yMax = half;
+    xMin = -xExtent; xMax = xExtent;
+    yMin = -yExtent; yMax = yExtent;
   } else {
-    xMin = 0; xMax = (shape === 'circle' ? radius * 2 : side);
-    yMin = 0; yMax = (shape === 'circle' ? radius * 2 : side);
+    xMin = 0; xMax = 2 * xExtent;
+    yMin = 0; yMax = 2 * yExtent;
   }
-  // 把樣區外的立木納入範圍
+  // 把樣區外的立木納入範圍（立木 Y 也套 yMult，與邊界一致）
   withXY.forEach(t => {
+    const tyDisplay = t.localY_m * yMult;
     if (t.localX_m < xMin) xMin = t.localX_m;
     if (t.localX_m > xMax) xMax = t.localX_m;
-    if (t.localY_m < yMin) yMin = t.localY_m;
-    if (t.localY_m > yMax) yMax = t.localY_m;
+    if (tyDisplay < yMin)  yMin = tyDisplay;
+    if (tyDisplay > yMax)  yMax = tyDisplay;
   });
   // 5% buffer
   const xRange = xMax - xMin, yRange = yMax - yMin;
@@ -130,15 +165,18 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
 
   // 7. 畫底圖
   drawAxes(ctx, cssSize, originType, xMin, xMax, yMin, yMax, mxToPx, myToPy);
-  drawPlotBoundary(ctx, shape, originType, side, radius, mxToPx, myToPy);
+  drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myToPy);
 
   // 8. 點集（先把資料整理好，方便 hover lookup）
+  //    v2.7.16：localY 套 yMult 切換 沿坡距 ↔ 水平投影；inside 用顯示空間判斷
   const points = withXY.map(t => {
-    const px = mxToPx(t.localX_m);
-    const py = myToPy(t.localY_m);
+    const xd = t.localX_m;
+    const yd = t.localY_m * yMult;
+    const px = mxToPx(xd);
+    const py = myToPy(yd);
     const r  = POINT_R_MIN + ((t.dbh_cm || 0) / maxDbh) * (POINT_R_MAX - POINT_R_MIN);
-    const inside = isInsideBoundary(t.localX_m, t.localY_m, shape, originType, side, radius);
-    return { ...t, px, py, r, inside };
+    const inside = isInsideBoundary(xd, yd, shape, originType, xExtent, yExtent);
+    return { ...t, px, py, r, inside, _displayY: yd };
   });
 
   // 9. 畫點（先畫小的、後畫大的，避免大點蓋小點 → 一律先畫死/弱、後畫健）
@@ -164,9 +202,16 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   // 10. info 行
   const outOfBounds = points.filter(p => !p.inside).length;
   const lines = [];
-  lines.push(`<b>樣區規格</b>：${shape === 'circle' ? '圓形' : '方形'} / ${area} m²` +
+  const shapeLabel = { circle: '圓形', square: '方形', rectangle: '矩形' }[shape] || shape;
+  let dimDesc;
+  if (shape === 'circle') dimDesc = `半徑 ≈ ${xExtentStored.toFixed(1)} m`;
+  else if (shape === 'rectangle') dimDesc = `寬×長 ≈ ${(xExtentStored * 2).toFixed(1)}×${(yExtentStored * 2).toFixed(1)} m`;
+  else dimDesc = `邊長 ≈ ${(xExtentStored * 2).toFixed(1)} m`;
+  const viewLabel = viewMode === 'slope_distance' ? '沿坡距' : '水平投影';
+  const slopeNote = slope > 0 ? `　│　坡度 ${slope.toFixed(1)}°　│　視圖 <b>${viewLabel}</b>` : '';
+  lines.push(`<b>樣區規格</b>：${shapeLabel} / ${area} m²` +
              ` / 原點=<b>${originType === 'center' ? '中心點' : '左下角'}</b>` +
-             ` / 邊長 ≈ ${shape === 'circle' ? (radius * 2).toFixed(1) : side.toFixed(1)} m`);
+             ` / ${dimDesc}${slopeNote}`);
   lines.push(`<b>已定位</b>：${withXY.length} 株 / ${trees.length} 株（${((withXY.length / trees.length) * 100).toFixed(0)}%）`);
   if (noXY > 0) {
     lines.push(`<span class="text-amber-700"><b>⚠ 未設位置</b>：${noXY} 株（${noXYPct}%） — 立木表單填 X/Y 後即會出現在散布圖</span>`);
@@ -197,9 +242,21 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   `;
   legend.appendChild(dbhItem);
 
-  // 12. controls（匯出按鈕：PNG raster / SVG vector）
+  // 12. controls（v2.7.16：視圖切換 + 匯出按鈕：PNG raster / SVG vector）
   if (controls) {
     controls.innerHTML = '';
+    // v2.7.16：沿坡距 ↔ 水平投影 切換鈕（slope > 0 且 dimType='slope_distance' 才顯示）
+    if (canToggle) {
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'border px-2.5 py-1 rounded text-xs hover:bg-stone-100 bg-amber-50';
+      toggleBtn.textContent = viewMode === 'slope_distance' ? '📐 沿坡距 ▸ 切水平' : '🗺️ 水平投影 ▸ 切沿坡';
+      toggleBtn.title = `當前視圖：${viewMode === 'slope_distance' ? '沿坡距（野外實測）' : '水平投影（cos 校正後）'}\n點按切換另一視圖（坡度 ${slope.toFixed(1)}°）`;
+      toggleBtn.onclick = () => {
+        const next = viewMode === 'slope_distance' ? 'horizontal' : 'slope_distance';
+        renderTreeDistribution(snap, plot, methodology, { ...opts, viewMode: next });
+      };
+      controls.appendChild(toggleBtn);
+    }
     const pngBtn = document.createElement('button');
     pngBtn.className = 'border px-2.5 py-1 rounded text-xs hover:bg-stone-100';
     pngBtn.textContent = '⬇ PNG';
@@ -214,7 +271,7 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
     svgBtn.onclick = () => {
       const svg = buildPlotSVG({
         size: cssSize, points, xMin, xMax, yMin, yMax,
-        shape, originType, side, radius, mxToPx, myToPy, plot,
+        shape, originType, xExtent, yExtent, mxToPx, myToPy, plot, viewMode, slope,
       });
       downloadSvg(svg, plot.code);
     };
@@ -238,9 +295,14 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
     const p = findPointAt(mx, my);
     if (p) {
       tooltip.classList.remove('hidden');
+      // v2.7.16：tooltip 顯示原始 X/Y（野外實測），yMult ≠ 1 時加註當前視圖換算後的 Y
+      const yViewNote = (yMult !== 1)
+        ? `<br><span style="color:#fcd34d">▸ ${viewMode === 'horizontal' ? '水平投影' : '沿坡距'} Y'=${p._displayY.toFixed(2)} m (× ${yMult.toFixed(3)})</span>`
+        : '';
       tooltip.innerHTML = `<b>${p.treeCode || '#' + (p.treeNum || '?')}</b>　${p.speciesZh || '?'}` +
         `<br>DBH ${(p.dbh_cm || 0).toFixed(1)} cm　H ${(p.height_m || 0).toFixed(1)} m` +
-        `<br>X=${p.localX_m.toFixed(2)} Y=${p.localY_m.toFixed(2)} m` +
+        `<br>X=${p.localX_m.toFixed(2)} Y=${p.localY_m.toFixed(2)} m （資料原值）` +
+        yViewNote +
         `　<span style="color:${VITALITY_COLOR[p.vitality]}">${VITALITY_LABEL[p.vitality] || p.vitality || '?'}</span>` +
         (p.inside ? '' : '<br><span style="color:#fca5a5">⚠ 超出樣區邊界</span>');
       tooltip.style.left = (p.px + 12) + 'px';
@@ -338,30 +400,32 @@ function drawAxes(ctx, size, originType, xMin, xMax, yMin, yMax, mxToPx, myToPy)
 }
 
 // ===== 樣區邊界（虛線）=====
-function drawPlotBoundary(ctx, shape, originType, side, radius, mxToPx, myToPy) {
+// v2.7.16：簽名改 (xExtent, yExtent) half-extents — circle 在水平視圖時 xExtent !== yExtent → 橢圓
+//          rectangle 直接支援；square 仍是 xExtent === yExtent
+function drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myToPy) {
   ctx.strokeStyle = '#10b981';   // emerald-500
   ctx.lineWidth = 1.5;
   ctx.setLineDash([5, 4]);
 
   if (shape === 'circle') {
-    // center: 圓心 (0,0)；corner: 圓心 (radius, radius)
-    const cx = originType === 'center' ? 0 : radius;
-    const cy = originType === 'center' ? 0 : radius;
+    // center: 圓心 (0,0)；corner: 圓心 (xExtent, yExtent)
+    const cx = originType === 'center' ? 0 : xExtent;
+    const cy = originType === 'center' ? 0 : yExtent;
     const px = mxToPx(cx);
     const py = myToPy(cy);
-    // 半徑用 X 方向的縮放（square aspect 已強制過 → x/y 縮放一致）
-    const pr = Math.abs(mxToPx(radius) - mxToPx(0));
+    // 兩軸 px 半徑可能不同 → 用 ellipse 而非 arc
+    const prx = Math.abs(mxToPx(xExtent) - mxToPx(0));
+    const pry = Math.abs(myToPy(yExtent) - myToPy(0));
     ctx.beginPath();
-    ctx.arc(px, py, pr, 0, Math.PI * 2);
+    ctx.ellipse(px, py, prx, pry, 0, 0, Math.PI * 2);
     ctx.stroke();
   } else {
-    // square
+    // square / rectangle
     let x0, y0, x1, y1;
     if (originType === 'center') {
-      const half = side / 2;
-      x0 = -half; y0 = -half; x1 = half; y1 = half;
+      x0 = -xExtent; y0 = -yExtent; x1 = xExtent; y1 = yExtent;
     } else {
-      x0 = 0; y0 = 0; x1 = side; y1 = side;
+      x0 = 0; y0 = 0; x1 = 2 * xExtent; y1 = 2 * yExtent;
     }
     ctx.strokeRect(mxToPx(x0), myToPy(y1), mxToPx(x1) - mxToPx(x0), myToPy(y0) - myToPy(y1));
   }
@@ -369,18 +433,20 @@ function drawPlotBoundary(ctx, shape, originType, side, radius, mxToPx, myToPy) 
 }
 
 // ===== 邊界判斷（決定點是否畫紅圈描邊）=====
-function isInsideBoundary(x, y, shape, originType, side, radius) {
+function isInsideBoundary(x, y, shape, originType, xExtent, yExtent) {
   if (shape === 'circle') {
-    const cx = originType === 'center' ? 0 : radius;
-    const cy = originType === 'center' ? 0 : radius;
-    return Math.hypot(x - cx, y - cy) <= radius + 0.001;
+    const cx = originType === 'center' ? 0 : xExtent;
+    const cy = originType === 'center' ? 0 : yExtent;
+    // 橢圓判斷：((x-cx)/rx)² + ((y-cy)/ry)² ≤ 1（含 small ε 容差）
+    const dx = (x - cx) / Math.max(xExtent, 1e-6);
+    const dy = (y - cy) / Math.max(yExtent, 1e-6);
+    return dx * dx + dy * dy <= 1.001;
   }
-  // square
+  // square / rectangle
   if (originType === 'center') {
-    const half = side / 2;
-    return Math.abs(x) <= half + 0.001 && Math.abs(y) <= half + 0.001;
+    return Math.abs(x) <= xExtent + 0.001 && Math.abs(y) <= yExtent + 0.001;
   }
-  return x >= -0.001 && x <= side + 0.001 && y >= -0.001 && y <= side + 0.001;
+  return x >= -0.001 && x <= 2 * xExtent + 0.001 && y >= -0.001 && y <= 2 * yExtent + 0.001;
 }
 
 // ===== 匯出 PNG =====
@@ -397,7 +463,7 @@ function downloadCanvasPng(canvas, plotCode) {
 // ===== v2.7.13：匯出 SVG（vector，學術論文 / Adobe Illustrator 後製用） =====
 // 與 PNG 範圍一致：背景 + grid + 軸 + 邊界 + 點。不含外部 info / legend / count（DOM 層）。
 // SVG 內元素全部 inline style，不依賴外部 CSS（脫離 app 也能正確顯示）。
-function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType, side, radius, mxToPx, myToPy, plot }) {
+function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType, xExtent, yExtent, mxToPx, myToPy, plot, viewMode, slope }) {
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('xmlns', NS);
@@ -446,17 +512,19 @@ function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType,
   }
   appendNS(svg, 'text', { x: size - PAD - 40, y: PAD - 8, fill: '#57534e', 'font-size': 11 }, '單位：m');
 
-  // 樣區邊界（虛線）
+  // 樣區邊界（虛線）— v2.7.16：circle 用 ellipse（兩軸不同半徑時表現坡度導致的扁化）；rectangle 直接支援
   if (shape === 'circle') {
-    const cx = originType === 'center' ? 0 : radius;
-    const cy = originType === 'center' ? 0 : radius;
+    const cx = originType === 'center' ? 0 : xExtent;
+    const cy = originType === 'center' ? 0 : yExtent;
     const px = mxToPx(cx), py = myToPy(cy);
-    const pr = Math.abs(mxToPx(radius) - mxToPx(0));
-    appendNS(svg, 'circle', { cx: px, cy: py, r: pr, fill: 'none', stroke: '#10b981', 'stroke-width': 1.5, 'stroke-dasharray': '5,4' });
+    const prx = Math.abs(mxToPx(xExtent) - mxToPx(0));
+    const pry = Math.abs(myToPy(yExtent) - myToPy(0));
+    appendNS(svg, 'ellipse', { cx: px, cy: py, rx: prx, ry: pry, fill: 'none', stroke: '#10b981', 'stroke-width': 1.5, 'stroke-dasharray': '5,4' });
   } else {
+    // square / rectangle
     let x0, y0, x1, y1;
-    if (originType === 'center') { const half = side / 2; x0 = -half; y0 = -half; x1 = half; y1 = half; }
-    else { x0 = 0; y0 = 0; x1 = side; y1 = side; }
+    if (originType === 'center') { x0 = -xExtent; y0 = -yExtent; x1 = xExtent; y1 = yExtent; }
+    else { x0 = 0; y0 = 0; x1 = 2 * xExtent; y1 = 2 * yExtent; }
     const rectX = mxToPx(x0), rectY = myToPy(y1);
     const rectW = mxToPx(x1) - mxToPx(x0), rectH = myToPy(y0) - myToPy(y1);
     appendNS(svg, 'rect', { x: rectX, y: rectY, width: rectW, height: rectH, fill: 'none', stroke: '#10b981', 'stroke-width': 1.5, 'stroke-dasharray': '5,4' });
@@ -473,9 +541,11 @@ function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType,
     });
   });
 
-  // metadata 註解（plot code + 時間戳）— SVG 元素內當註解
+  // metadata 註解（plot code + 時間戳 + 視圖）— v2.7.16：標明當前 viewMode 與坡度
   const titleNode = document.createElementNS(NS, 'title');
-  titleNode.textContent = `tree-distribution / plot ${plot?.code || '?'} / ${new Date().toISOString()}`;
+  const viewLabel = viewMode === 'slope_distance' ? 'slope_distance' : 'horizontal';
+  const slopeNote = (slope ?? 0) > 0 ? ` / slope=${(slope ?? 0).toFixed(1)}° / view=${viewLabel}` : '';
+  titleNode.textContent = `tree-distribution / plot ${plot?.code || '?'}${slopeNote} / ${new Date().toISOString()}`;
   svg.insertBefore(titleNode, svg.firstChild);
 
   return svg;

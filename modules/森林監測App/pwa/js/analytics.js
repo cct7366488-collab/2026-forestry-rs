@@ -2,7 +2,7 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=27150';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=27160';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -265,7 +265,7 @@ export async function renderMap(project) {
       weight: 2
     }).bindPopup(`
       <strong>${p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${p.qaStatus || 'pending'}</span><br>
-      ${p.forestUnit || ''} · ${p.shape === 'circle' ? '圓' : '方'} ${p.area_m2}m²<br>
+      ${p.forestUnit || ''} · ${({ circle: '圓', square: '方', rectangle: '矩' })[p.shape] || '方'} ${p.area_m2}m²${Number.isFinite(p.slopeDegrees) && p.slopeDegrees > 0 ? ` · 坡 ${p.slopeDegrees.toFixed(0)}°` : ''}<br>
       立木 ${tCount} 株<br>
       調查者：${surveyorLabel}<br>
       <a href="#/p/${project.id}/plot/${p.id}">→ 開啟樣區</a>
@@ -287,6 +287,15 @@ export async function exportXlsx(project) {
     林班小班: p.forestUnit || '',
     形狀: p.shape,
     面積_m2: p.area_m2,
+    // v2.7.16：樣區幾何 + 坡度修正欄位（IPCC TACCC 對齊：透明、可比、完整、一致）
+    寬_m: p.plotDimensions?.width ?? '',
+    長_m: p.plotDimensions?.length ?? '',
+    半徑_m: p.plotDimensions?.radius ?? '',
+    坡度_度: Number.isFinite(p.slopeDegrees) ? p.slopeDegrees : '',
+    坡向_度: p.slopeAspect ?? '',
+    坡度來源: p.slopeSource || '',
+    量測單位: p.dimensionType || '',
+    水平投影面積_m2: p.areaHorizontal_m2 ?? '',
     經度_WGS84: p.location?.longitude || p.location?._long,
     緯度_WGS84: p.location?.latitude || p.location?._lat,
     TWD97_X: p.locationTWD97?.x,
