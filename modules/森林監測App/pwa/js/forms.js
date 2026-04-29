@@ -3,14 +3,16 @@
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=27180';
+import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=28000';
 // v2.7.17：reviewer QAQC 工作流
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, computeQaqcErrors, RESOLUTION_LABEL } from './plot-qaqc.js?v=27180';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, computeQaqcErrors, RESOLUTION_LABEL } from './plot-qaqc.js?v=28000';
+// v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28000';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=27180';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28000';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -648,7 +650,8 @@ export function openMethodologyForm(project) {
       options: [
         { value: 'circle', label: '圓形' },
         { value: 'square', label: '方形' },
-        { value: 'rectangle', label: '矩形（v2.7.16）' }
+        { value: 'rectangle', label: '矩形（v2.7.16）' },
+        { value: 'irregular', label: '不規則多邊形（v2.8）' }
       ],
       value: m.plotShape }),
     field({ label: '允許的樣區面積（m²，逗號分隔）', name: 'plotAreaOptions', required: true,
@@ -1125,9 +1128,27 @@ export async function openQaqcRemeasureForm(project, plot) {
     placeholder: '°', value: q.slopeVerified ?? '', class: 'border rounded px-2 py-1 text-sm' });
 
   // dimensionsVerified：mirror 既有 plotDimensions 結構
+  // v2.8.0：irregular 採 area-only 模式（reviewer 不重畫多邊形，直接填重測水平面積）
   let dimsVerifiedInputs = el('div', {});
   let getDimensionsVerified = () => null;
-  if (shape === 'circle') {
+  let getAreaVerifiedHorizontalDirect = null;  // v2.8.0：irregular 用，繞過 dimensionsToArea + computeAreaHorizontal
+  if (shape === 'irregular') {
+    const areaVerH = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'areaVerH',
+      placeholder: '重測水平面積 (m²)', value: q.areaVerifiedHorizontal ?? q.dimensionsVerified?.areaH_user ?? '',
+      class: 'border rounded px-2 py-1 text-sm w-40' });
+    dimsVerifiedInputs = el('div', { class: 'flex items-center gap-2 text-sm flex-wrap' },
+      el('span', { class: 'w-32' }, '重測水平面積 (m²)：'), areaVerH,
+      el('div', { class: 'text-xs text-stone-500 w-full' }, '※ irregular 採 area-only 模式 — 直接填重測得的水平投影面積；reviewer 不需重畫多邊形（GIS 估算 / 取樣量測即可）。')
+    );
+    getDimensionsVerified = () => {
+      const a = parseFloat(areaVerH.value);
+      return Number.isFinite(a) && a > 0 ? { areaH_user: a } : null;
+    };
+    getAreaVerifiedHorizontalDirect = () => {
+      const a = parseFloat(areaVerH.value);
+      return Number.isFinite(a) && a > 0 ? a : null;
+    };
+  } else if (shape === 'circle') {
     const radiusVer = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'radiusVer',
       placeholder: '半徑 m', value: q.dimensionsVerified?.radius ?? '', class: 'border rounded px-2 py-1 text-sm w-32' });
     dimsVerifiedInputs = el('div', { class: 'flex items-center gap-2 text-sm' },
@@ -1183,7 +1204,10 @@ export async function openQaqcRemeasureForm(project, plot) {
     const slopeVer = parseFloat(slopeInput.value);
     const dimsVer = getDimensionsVerified();
     let areaVerH = null;
-    if (dimsVer) {
+    if (getAreaVerifiedHorizontalDirect) {
+      // v2.8.0：irregular 直接用 reviewer 填的水平面積（不需 cos 校正）
+      areaVerH = getAreaVerifiedHorizontalDirect();
+    } else if (dimsVer) {
       const areaSlope = dimensionsToArea(shape, dimsVer);
       areaVerH = computeAreaHorizontal(areaSlope, Number.isFinite(slopeVer) ? slopeVer : 0, dimType);
     }
@@ -1206,13 +1230,11 @@ export async function openQaqcRemeasureForm(project, plot) {
     resolutionBlock.classList.toggle('hidden', !failed);
   }
   [slopeInput].forEach(i => { i.addEventListener('input', recompute); i.addEventListener('change', recompute); });
-  if (shape === 'circle') {
-    dimsVerifiedInputs.querySelector('input').addEventListener('input', recompute);
-  } else if (shape === 'rectangle') {
-    dimsVerifiedInputs.querySelectorAll('input').forEach(i => i.addEventListener('input', recompute));
-  } else {
-    dimsVerifiedInputs.querySelector('input').addEventListener('input', recompute);
-  }
+  // 重測 dimensions 各 input 一律 wire（無論 shape）
+  dimsVerifiedInputs.querySelectorAll('input').forEach(i => {
+    i.addEventListener('input', recompute);
+    i.addEventListener('change', recompute);
+  });
 
   const f = el('form', { class: 'space-y-3' },
     el('div', { class: 'bg-blue-50 border border-blue-200 rounded p-3 text-sm' },
@@ -1244,8 +1266,14 @@ export async function openQaqcRemeasureForm(project, plot) {
     const dimsVer = getDimensionsVerified();
     if (!Number.isFinite(slopeVer)) { toast('請填重測坡度'); return; }
     if (!dimsVer) { toast('請填重測 dimensions'); return; }
-    const areaSlope = dimensionsToArea(shape, dimsVer);
-    const areaVerH = computeAreaHorizontal(areaSlope, slopeVer, dimType);
+    let areaVerH;
+    if (getAreaVerifiedHorizontalDirect) {
+      // v2.8.0：irregular 直接用 reviewer 填的水平面積
+      areaVerH = getAreaVerifiedHorizontalDirect();
+    } else {
+      const areaSlope = dimensionsToArea(shape, dimsVer);
+      areaVerH = computeAreaHorizontal(areaSlope, slopeVer, dimType);
+    }
     const errs = computeQaqcErrors(plot, { slopeVerified: slopeVer, areaVerifiedHorizontal: areaVerH }, cfg);
     // 超閾值 → 必填 resolution + note
     if (errs.withinThreshold === false) {
@@ -1340,14 +1368,22 @@ export async function openPlotForm(project, existing = null) {
     el('span', { class: 'text-xs text-stone-500 ml-1' }, '（≤5MB / 張，可多選）'));
 
   // v2.7.16：樣區幾何區塊（shape + dimensions + slope + 即時預覽）
+  // v2.8.0：加 irregular（不規則多邊形）
   const dimType = meth.dimensionType || 'slope_distance';
   const dimTypeLabel = dimType === 'slope_distance' ? '沿坡距' : '水平投影';
   const shapeOptions = [
     { value: 'circle', label: '圓形' },
     { value: 'square', label: '方形' },
-    { value: 'rectangle', label: '矩形' }
+    { value: 'rectangle', label: '矩形' },
+    { value: 'irregular', label: '不規則多邊形（v2.8）' }
   ];
   const initShape = existing?.shape || meth.plotShape || 'circle';
+
+  // v2.8.0：irregular 用 vertices 陣列（local m 相對 plot 中心；3-50 頂點，CCW，simple polygon）
+  let irregularVertices = (existing?.shape === 'irregular' && Array.isArray(existing?.plotDimensions?.vertices))
+    ? existing.plotDimensions.vertices.map(v => Array.isArray(v) ? { x: Number(v[0]), y: Number(v[1]) } : { x: Number(v.x), y: Number(v.y) })
+    : [];
+  let irregularSrcInfo = null;  // 'GeoJSON: filename'
 
   const shapeSel = el('select', { id: 'f-shape', name: 'shape', required: 'true' },
     ...shapeOptions.map(o => {
@@ -1388,6 +1424,130 @@ export async function openPlotForm(project, existing = null) {
     )
   );
 
+  // v2.8.0：不規則多邊形區塊（表格 + GeoJSON 上傳）
+  const irregularBody = el('div', { class: 'space-y-2' });
+  const irregularValidation = el('div', { class: 'text-xs' });
+
+  function renderIrregularTable() {
+    irregularBody.innerHTML = '';
+    const srcLine = irregularSrcInfo
+      ? el('div', { class: 'text-xs text-blue-700 bg-blue-50 rounded px-2 py-1' }, `📂 來源：${irregularSrcInfo}`)
+      : null;
+    if (srcLine) irregularBody.appendChild(srcLine);
+    const table = el('table', { class: 'w-full text-xs', style: 'border-collapse:collapse' });
+    const thead = el('thead', { class: 'bg-stone-100' },
+      el('tr', {},
+        el('th', { class: 'p-1 text-left' }, '#'),
+        el('th', { class: 'p-1 text-left' }, `X (m, 相對中心)`),
+        el('th', { class: 'p-1 text-left' }, `Y (m, 相對中心)`),
+        el('th', { class: 'p-1' }, '')
+      )
+    );
+    const tbody = el('tbody', {});
+    irregularVertices.forEach((v, i) => {
+      const xIn = el('input', {
+        type: 'number', step: '0.01', value: Number(v.x).toFixed(2),
+        class: 'border rounded px-1 py-0.5 w-24 text-xs',
+        oninput: (ev) => { irregularVertices[i].x = parseFloat(ev.target.value); validateAndPreviewIrregular(); }
+      });
+      const yIn = el('input', {
+        type: 'number', step: '0.01', value: Number(v.y).toFixed(2),
+        class: 'border rounded px-1 py-0.5 w-24 text-xs',
+        oninput: (ev) => { irregularVertices[i].y = parseFloat(ev.target.value); validateAndPreviewIrregular(); }
+      });
+      const delBtn = el('button', {
+        type: 'button', class: 'text-red-600 hover:bg-red-50 rounded px-2 py-0.5',
+        onclick: (ev) => { ev.preventDefault(); irregularVertices.splice(i, 1); irregularSrcInfo = null; renderIrregularTable(); validateAndPreviewIrregular(); }
+      }, '🗑');
+      tbody.appendChild(el('tr', { class: 'border-b border-stone-200' },
+        el('td', { class: 'p-1 text-stone-500' }, String(i + 1)),
+        el('td', { class: 'p-1' }, xIn),
+        el('td', { class: 'p-1' }, yIn),
+        el('td', { class: 'p-1' }, delBtn)
+      ));
+    });
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    irregularBody.appendChild(table);
+    const addBtn = el('button', {
+      type: 'button', class: 'mt-1 border bg-stone-50 hover:bg-stone-100 px-2 py-1 rounded text-xs',
+      onclick: (ev) => {
+        ev.preventDefault();
+        if (irregularVertices.length >= VERTEX_MAX) { toast(`已達上限 ${VERTEX_MAX} 頂點`); return; }
+        irregularVertices.push({ x: 0, y: 0 });
+        irregularSrcInfo = null;
+        renderIrregularTable();
+        validateAndPreviewIrregular();
+      }
+    }, '➕ 新增頂點');
+    irregularBody.appendChild(addBtn);
+    irregularBody.appendChild(irregularValidation);
+  }
+
+  function validateAndPreviewIrregular() {
+    const v = validatePolygon(irregularVertices);
+    if (!v.ok) {
+      irregularValidation.innerHTML = `<span class="text-red-700">⚠️ ${v.error}</span>`;
+      previewBox.innerHTML = `<span class="text-red-700">不規則多邊形：${v.error}</span>`;
+      return;
+    }
+    const area = v.area;
+    const slope = parseFloat(slopeInput.value) || 0;
+    const areaH = computeAreaHorizontal(area, slope, dimType);
+    const slopeNote = (slope > 0 && dimType === 'slope_distance')
+      ? `　│　水平投影面積：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(× cos ${slope.toFixed(1)}°)</span>`
+      : '';
+    irregularValidation.innerHTML = `<span class="text-green-700">✅ ${v.vertices.length} 頂點 / 簡單多邊形 / CCW 已校正</span>`;
+    previewBox.innerHTML = `不規則多邊形（${dimTypeLabel}）：頂點 <b>${v.vertices.length}</b>　│　Shoelace 面積 <b>${area.toFixed(1)} m²</b>` + slopeNote;
+  }
+
+  // GeoJSON 上傳
+  const geoFileInput = el('input', { type: 'file', accept: '.geojson,.json,application/geo+json,application/json', class: 'text-xs' });
+  geoFileInput.addEventListener('change', async () => {
+    const file = geoFileInput.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      // GPS 是否已設？
+      const lng = parseFloat(lngInput.value);
+      const lat = parseFloat(latInput.value);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        toast('請先設定樣區 GPS（GeoJSON 解析時要計算 local 偏移）');
+        return;
+      }
+      const center = wgs84ToTwd97(lng, lat);
+      const result = parseGeoJsonPolygon(json, center, twd97ToWgs84, wgs84ToTwd97);
+      if (result.vertices.length > VERTEX_MAX) {
+        toast(`頂點數 ${result.vertices.length} 超過上限 ${VERTEX_MAX}`);
+        return;
+      }
+      irregularVertices = result.vertices.map(v => ({ x: v.x, y: v.y }));
+      irregularSrcInfo = `${file.name}（${result.srcSystem}，${result.vertices.length} 頂點）`;
+      renderIrregularTable();
+      validateAndPreviewIrregular();
+      toast(`已從 ${file.name} 載入 ${result.vertices.length} 頂點`);
+    } catch (e) {
+      toast('GeoJSON 解析失敗：' + e.message);
+      console.error('[GeoJSON]', e);
+    }
+    geoFileInput.value = '';  // reset for re-upload
+  });
+
+  const irregularFields = el('div', { class: 'field', style: 'display:none;background:#fefce8;border:1px solid #fde047;border-radius:6px;padding:8px' },
+    el('div', { class: 'flex items-center justify-between gap-2 mb-2' },
+      el('span', { style: 'font-weight:600;font-size:13px' }, `🗺️ 不規則多邊形邊界 (${VERTEX_MIN}–${VERTEX_MAX} 頂點)`),
+      el('label', { class: 'border px-2 py-1 rounded text-xs cursor-pointer hover:bg-stone-50', title: '上傳 GeoJSON 檔（自動偵測 WGS84 / TWD97 / 轉成 local m）' },
+        '📂 GeoJSON 上傳', geoFileInput
+      )
+    ),
+    el('div', { class: 'text-xs text-stone-600 mb-1' },
+      `頂點以「local meters 相對 plot.locationTWD97」儲存。系統會自動：去重連續點 / 強制 CCW / 自交檢查 / 算 Shoelace 面積。`
+    ),
+    irregularBody
+  );
+  renderIrregularTable();
+
   const slopeSourceInit = existing?.slopeSource || (existing?.slopeDegrees != null ? 'field' : '');
   const slopeSourceWrap = el('div', { class: 'flex flex-wrap gap-3 text-xs' },
     ...[
@@ -1408,7 +1568,12 @@ export async function openPlotForm(project, existing = null) {
   function recompute() {
     const shape = shapeSel.value;
     rectFields.style.display = shape === 'rectangle' ? '' : 'none';
-    areaSelField.style.display = shape === 'rectangle' ? 'none' : '';
+    irregularFields.style.display = shape === 'irregular' ? '' : 'none';
+    areaSelField.style.display = (shape === 'rectangle' || shape === 'irregular') ? 'none' : '';
+    if (shape === 'irregular') {
+      validateAndPreviewIrregular();
+      return;
+    }
     let area = NaN;
     if (shape === 'rectangle') {
       const w = parseFloat(widthInput.value);
@@ -1444,6 +1609,7 @@ export async function openPlotForm(project, existing = null) {
     ),
     areaSelField,
     rectFields,
+    irregularFields,
     el('div', { class: 'field-row' },
       el('div', { class: 'field' },
         el('label', { for: 'f-slopeDegrees' }, '坡度 (°)', el('span', { style: 'font-size:11px;color:#57534e' }, '　0–90，平地填 0')),
@@ -1490,7 +1656,7 @@ export async function openPlotForm(project, existing = null) {
     // v1.6：照片 required 驗證
     if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張樣區照片'); return; }
     const t97 = wgs84ToTwd97(lng, lat);
-    // v2.7.16：幾何 + 坡度 — 算 area + plotDimensions + areaHorizontal_m2
+    // v2.7.16 / v2.8.0：幾何 + 坡度 — 算 area + plotDimensions + areaHorizontal_m2
     const shape = fd.get('shape');
     let area_m2, plotDimensions;
     if (shape === 'rectangle') {
@@ -1501,6 +1667,17 @@ export async function openPlotForm(project, existing = null) {
       }
       area_m2 = w * l;
       plotDimensions = { width: w, length: l };
+    } else if (shape === 'irregular') {
+      // v2.8.0：不規則多邊形 — strict 驗證 + Shoelace 面積
+      const v = validatePolygon(irregularVertices);
+      if (!v.ok) { toast('不規則多邊形驗證失敗：' + v.error); return; }
+      area_m2 = v.area;
+      const bbox = computeBbox(v.vertices);
+      plotDimensions = {
+        vertices: v.vertices,           // [{x,y},...] CCW + 去重後
+        bbox,                            // { minX, maxX, minY, maxY }
+      };
+      if (irregularSrcInfo) plotDimensions.sourceInfo = irregularSrcInfo;
     } else if (shape === 'circle') {
       area_m2 = parseInt(fd.get('area_m2'), 10);
       plotDimensions = { radius: Math.sqrt(area_m2 / Math.PI) };

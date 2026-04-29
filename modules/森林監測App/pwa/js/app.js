@@ -15,17 +15,17 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=27180";
-import * as forms from "./forms.js?v=27180";
-import * as analytics from "./analytics.js?v=27180";
-import * as importWizard from "./import-wizard.js?v=27180";
-import { renderTreeDistribution } from "./distribution.js?v=27180";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27180";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=28000";
+import * as forms from "./forms.js?v=28000";
+import * as analytics from "./analytics.js?v=28000";
+import * as importWizard from "./import-wizard.js?v=28000";
+import { renderTreeDistribution } from "./distribution.js?v=28000";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28000";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, pickRandomSample, getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, computeErrorStats, defaultQaqc } from "./plot-qaqc.js?v=27180";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27180";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, pickRandomSample, getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, computeErrorStats, defaultQaqc } from "./plot-qaqc.js?v=28000";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28000";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27180";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28000";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -302,7 +302,7 @@ async function renderGeoMigrationBanner(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=27180');
+    const m = await import('./migration-v2715.js?v=28000');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1065,7 +1065,8 @@ async function renderProjectHome(root, projectId) {
           headerRight
         ),
         el('p', { class: 'text-sm text-stone-500' },
-          `${dd.forestUnit || ''} · ${({ circle: '圓', square: '方', rectangle: '矩' })[dd.shape] || '方'} ${dd.area_m2 || '?'}m²` +
+          `${dd.forestUnit || ''} · ${({ circle: '圓', square: '方', rectangle: '矩', irregular: '不規則' })[dd.shape] || '方'} ${dd.area_m2 ? Math.round(dd.area_m2) : '?'}m²` +
+          (dd.shape === 'irregular' && Array.isArray(dd.plotDimensions?.vertices) ? ` · ${dd.plotDimensions.vertices.length}頂點` : '') +
           (Number.isFinite(dd.slopeDegrees) && dd.slopeDegrees > 0 ? ` · 坡 ${dd.slopeDegrees.toFixed(0)}°` : '')),
         el('p', { class: 'text-xs text-stone-400 mt-1' },
           isShell

@@ -8,9 +8,9 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=27180';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=28000';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=27180';
+import { TREES } from './species-dict.js?v=28000';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
@@ -627,10 +627,16 @@ function checkOriginTypeMismatch() {
 const PLOT_MAX_SPAN_M = 40;
 
 // v2.7.16：per-plot 動態上限
+// v2.8.0：irregular 用 bbox 推算 max span
 function getPerPlotMaxSpan(plotCode) {
   const ex = W.existingPlotsByCode?.get?.(plotCode);
   if (ex) {
     const dims = ex.plotDimensions || {};
+    // irregular：bbox 邊長 × 1.5
+    if (ex.shape === 'irregular' && dims.bbox) {
+      const span = Math.max(dims.bbox.maxX - dims.bbox.minX, dims.bbox.maxY - dims.bbox.minY);
+      return Math.max(span * 1.5, PLOT_MAX_SPAN_M);
+    }
     if (Number.isFinite(dims.width) && Number.isFinite(dims.length)) {
       return Math.max(Math.max(dims.width, dims.length) * 1.5, PLOT_MAX_SPAN_M);
     }

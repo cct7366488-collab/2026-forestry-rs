@@ -1,3 +1,6 @@
+// v2.8.0：irregular plot 多邊形繪製 + 點對多邊形判斷
+import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=28000';
+
 // ===== distribution.js — 立木分布散布圖（v2.6.2 / v2.5.1 backlog 🅲 落地）=====
 //
 // 把樣區內每株立木的 localX_m / localY_m 畫成 Canvas 散布圖。
@@ -72,7 +75,9 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   const originType = methodology?.plotOriginType || 'center';
 
   // 「stored」幾何（在 dimensionType 空間下；half-extent 形式）
+  // v2.8.0：irregular 用 bbox（vertices 的邊界框）決定範圍 + 邊界用 vertices 直接畫
   let xExtentStored, yExtentStored;
+  let irregularVertsStored = null;  // [[x,y],...] 給 boundary / inside 判斷用
   if (shape === 'circle') {
     const r = Number.isFinite(dims.radius) ? dims.radius : Math.sqrt(area / Math.PI);
     xExtentStored = r; yExtentStored = r;
@@ -80,6 +85,23 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
     const w = Number.isFinite(dims.width)  ? dims.width  : Math.sqrt(area);
     const l = Number.isFinite(dims.length) ? dims.length : Math.sqrt(area);
     xExtentStored = w / 2; yExtentStored = l / 2;
+  } else if (shape === 'irregular') {
+    irregularVertsStored = vertsToArrays(dims.vertices || []);
+    if (irregularVertsStored.length >= 3) {
+      const bbox = dims.bbox || (() => {
+        let mnX = Infinity, mxX = -Infinity, mnY = Infinity, mxY = -Infinity;
+        for (const [x, y] of irregularVertsStored) {
+          if (x < mnX) mnX = x; if (x > mxX) mxX = x;
+          if (y < mnY) mnY = y; if (y > mxY) mxY = y;
+        }
+        return { minX: mnX, maxX: mxX, minY: mnY, maxY: mxY };
+      })();
+      xExtentStored = Math.max(Math.abs(bbox.minX), Math.abs(bbox.maxX));
+      yExtentStored = Math.max(Math.abs(bbox.minY), Math.abs(bbox.maxY));
+    } else {
+      xExtentStored = Math.sqrt(area) / 2;  // fallback
+      yExtentStored = xExtentStored;
+    }
   } else {  // square
     const s = Number.isFinite(dims.side) ? dims.side : Math.sqrt(area);
     xExtentStored = s / 2; yExtentStored = s / 2;
@@ -165,17 +187,22 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
 
   // 7. 畫底圖
   drawAxes(ctx, cssSize, originType, xMin, xMax, yMin, yMax, mxToPx, myToPy);
-  drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myToPy);
+  // v2.8.0：irregular 把 vertices 套 yMult（顯示空間）後傳給 boundary 函式
+  const irregularVertsDisplay = irregularVertsStored
+    ? irregularVertsStored.map(([x, y]) => [x, y * yMult])
+    : null;
+  drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myToPy, irregularVertsDisplay);
 
   // 8. 點集（先把資料整理好，方便 hover lookup）
   //    v2.7.16：localY 套 yMult 切換 沿坡距 ↔ 水平投影；inside 用顯示空間判斷
+  //    v2.8.0：irregular 用 point-in-polygon 判斷
   const points = withXY.map(t => {
     const xd = t.localX_m;
     const yd = t.localY_m * yMult;
     const px = mxToPx(xd);
     const py = myToPy(yd);
     const r  = POINT_R_MIN + ((t.dbh_cm || 0) / maxDbh) * (POINT_R_MAX - POINT_R_MIN);
-    const inside = isInsideBoundary(xd, yd, shape, originType, xExtent, yExtent);
+    const inside = isInsideBoundary(xd, yd, shape, originType, xExtent, yExtent, irregularVertsDisplay);
     return { ...t, px, py, r, inside, _displayY: yd };
   });
 
@@ -202,10 +229,11 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   // 10. info 行
   const outOfBounds = points.filter(p => !p.inside).length;
   const lines = [];
-  const shapeLabel = { circle: '圓形', square: '方形', rectangle: '矩形' }[shape] || shape;
+  const shapeLabel = { circle: '圓形', square: '方形', rectangle: '矩形', irregular: '不規則多邊形' }[shape] || shape;
   let dimDesc;
   if (shape === 'circle') dimDesc = `半徑 ≈ ${xExtentStored.toFixed(1)} m`;
   else if (shape === 'rectangle') dimDesc = `寬×長 ≈ ${(xExtentStored * 2).toFixed(1)}×${(yExtentStored * 2).toFixed(1)} m`;
+  else if (shape === 'irregular') dimDesc = `${irregularVertsStored?.length || 0} 頂點 / bbox ${(xExtentStored * 2).toFixed(1)}×${(yExtentStored * 2).toFixed(1)} m`;
   else dimDesc = `邊長 ≈ ${(xExtentStored * 2).toFixed(1)} m`;
   const viewLabel = viewMode === 'slope_distance' ? '沿坡距' : '水平投影';
   const slopeNote = slope > 0 ? `　│　坡度 ${slope.toFixed(1)}°　│　視圖 <b>${viewLabel}</b>` : '';
@@ -272,6 +300,7 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
       const svg = buildPlotSVG({
         size: cssSize, points, xMin, xMax, yMin, yMax,
         shape, originType, xExtent, yExtent, mxToPx, myToPy, plot, viewMode, slope,
+        irregularVertsDisplay,
       });
       downloadSvg(svg, plot.code);
     };
@@ -402,12 +431,22 @@ function drawAxes(ctx, size, originType, xMin, xMax, yMin, yMax, mxToPx, myToPy)
 // ===== 樣區邊界（虛線）=====
 // v2.7.16：簽名改 (xExtent, yExtent) half-extents — circle 在水平視圖時 xExtent !== yExtent → 橢圓
 //          rectangle 直接支援；square 仍是 xExtent === yExtent
-function drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myToPy) {
+// v2.8.0：irregular 走 polygon path（vertices 已是顯示空間 [[x,y],...]）
+function drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myToPy, irregularVerts) {
   ctx.strokeStyle = '#10b981';   // emerald-500
   ctx.lineWidth = 1.5;
   ctx.setLineDash([5, 4]);
 
-  if (shape === 'circle') {
+  if (shape === 'irregular' && Array.isArray(irregularVerts) && irregularVerts.length >= 3) {
+    ctx.beginPath();
+    irregularVerts.forEach(([x, y], i) => {
+      const px = mxToPx(x), py = myToPy(y);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.stroke();
+  } else if (shape === 'circle') {
     // center: 圓心 (0,0)；corner: 圓心 (xExtent, yExtent)
     const cx = originType === 'center' ? 0 : xExtent;
     const cy = originType === 'center' ? 0 : yExtent;
@@ -433,7 +472,11 @@ function drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myTo
 }
 
 // ===== 邊界判斷（決定點是否畫紅圈描邊）=====
-function isInsideBoundary(x, y, shape, originType, xExtent, yExtent) {
+// v2.8.0：irregular 用 point-in-polygon（plot-polygon.js#isPointInPolygon）
+function isInsideBoundary(x, y, shape, originType, xExtent, yExtent, irregularVerts) {
+  if (shape === 'irregular' && Array.isArray(irregularVerts) && irregularVerts.length >= 3) {
+    return isPointInPolygon(x, y, irregularVerts);
+  }
   if (shape === 'circle') {
     const cx = originType === 'center' ? 0 : xExtent;
     const cy = originType === 'center' ? 0 : yExtent;
@@ -463,7 +506,7 @@ function downloadCanvasPng(canvas, plotCode) {
 // ===== v2.7.13：匯出 SVG（vector，學術論文 / Adobe Illustrator 後製用） =====
 // 與 PNG 範圍一致：背景 + grid + 軸 + 邊界 + 點。不含外部 info / legend / count（DOM 層）。
 // SVG 內元素全部 inline style，不依賴外部 CSS（脫離 app 也能正確顯示）。
-function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType, xExtent, yExtent, mxToPx, myToPy, plot, viewMode, slope }) {
+function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType, xExtent, yExtent, mxToPx, myToPy, plot, viewMode, slope, irregularVertsDisplay }) {
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('xmlns', NS);
@@ -512,8 +555,11 @@ function buildPlotSVG({ size, points, xMin, xMax, yMin, yMax, shape, originType,
   }
   appendNS(svg, 'text', { x: size - PAD - 40, y: PAD - 8, fill: '#57534e', 'font-size': 11 }, '單位：m');
 
-  // 樣區邊界（虛線）— v2.7.16：circle 用 ellipse（兩軸不同半徑時表現坡度導致的扁化）；rectangle 直接支援
-  if (shape === 'circle') {
+  // 樣區邊界（虛線）— v2.7.16：circle 用 ellipse；rectangle/square 用 rect；v2.8.0：irregular 用 polygon
+  if (shape === 'irregular' && Array.isArray(irregularVertsDisplay) && irregularVertsDisplay.length >= 3) {
+    const pts = irregularVertsDisplay.map(([x, y]) => `${mxToPx(x)},${myToPy(y)}`).join(' ');
+    appendNS(svg, 'polygon', { points: pts, fill: 'none', stroke: '#10b981', 'stroke-width': 1.5, 'stroke-dasharray': '5,4' });
+  } else if (shape === 'circle') {
     const cx = originType === 'center' ? 0 : xExtent;
     const cy = originType === 'center' ? 0 : yExtent;
     const px = mxToPx(cx), py = myToPy(cy);

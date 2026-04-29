@@ -2,9 +2,9 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=27180';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=28000';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
-import { getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=27180';
+import { getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=28000';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -267,7 +267,7 @@ export async function renderMap(project) {
       weight: 2
     }).bindPopup(`
       <strong>${p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${p.qaStatus || 'pending'}</span><br>
-      ${p.forestUnit || ''} · ${({ circle: '圓', square: '方', rectangle: '矩' })[p.shape] || '方'} ${p.area_m2}m²${Number.isFinite(p.slopeDegrees) && p.slopeDegrees > 0 ? ` · 坡 ${p.slopeDegrees.toFixed(0)}°` : ''}<br>
+      ${p.forestUnit || ''} · ${({ circle: '圓', square: '方', rectangle: '矩', irregular: '不規則' })[p.shape] || '方'} ${p.area_m2 ? Math.round(p.area_m2) : '?'}m²${p.shape === 'irregular' && Array.isArray(p.plotDimensions?.vertices) ? ' · ' + p.plotDimensions.vertices.length + '頂點' : ''}${Number.isFinite(p.slopeDegrees) && p.slopeDegrees > 0 ? ` · 坡 ${p.slopeDegrees.toFixed(0)}°` : ''}<br>
       立木 ${tCount} 株<br>
       調查者：${surveyorLabel}<br>
       <a href="#/p/${project.id}/plot/${p.id}">→ 開啟樣區</a>
@@ -290,9 +290,14 @@ export async function exportXlsx(project) {
     形狀: p.shape,
     面積_m2: p.area_m2,
     // v2.7.16：樣區幾何 + 坡度修正欄位（IPCC TACCC 對齊：透明、可比、完整、一致）
+    // v2.8.0：irregular 加頂點數與 bbox
     寬_m: p.plotDimensions?.width ?? '',
     長_m: p.plotDimensions?.length ?? '',
     半徑_m: p.plotDimensions?.radius ?? '',
+    頂點數: (p.shape === 'irregular' && Array.isArray(p.plotDimensions?.vertices)) ? p.plotDimensions.vertices.length : '',
+    bbox_寬_m: (p.shape === 'irregular' && p.plotDimensions?.bbox) ? (p.plotDimensions.bbox.maxX - p.plotDimensions.bbox.minX).toFixed(2) : '',
+    bbox_長_m: (p.shape === 'irregular' && p.plotDimensions?.bbox) ? (p.plotDimensions.bbox.maxY - p.plotDimensions.bbox.minY).toFixed(2) : '',
+    多邊形來源: p.plotDimensions?.sourceInfo || '',
     坡度_度: Number.isFinite(p.slopeDegrees) ? p.slopeDegrees : '',
     坡向_度: p.slopeAspect ?? '',
     坡度來源: p.slopeSource || '',
@@ -602,7 +607,7 @@ export async function exportQaqcDocReport(project) {
       return `
         <tr>
           <td>${p.code}</td>
-          <td>${({ circle: '圓', square: '方', rectangle: '矩' })[p.shape] || p.shape}</td>
+          <td>${({ circle: '圓', square: '方', rectangle: '矩', irregular: '不規則' })[p.shape] || p.shape}</td>
           <td style="text-align:right">${Number.isFinite(p.slopeDegrees) ? p.slopeDegrees.toFixed(1) + '°' : '-'}</td>
           <td style="text-align:right">${Number.isFinite(q.slopeVerified) ? q.slopeVerified.toFixed(1) + '°' : '-'}</td>
           <td style="text-align:right">${Number.isFinite(q.slopeError_deg) ? '±' + q.slopeError_deg.toFixed(2) + '°' : '-'}</td>
@@ -691,6 +696,12 @@ export async function exportQaqcDocReport(project) {
 <div class="formula">
 areaHorizontal_m2 = area_m2 × cos(slopeDegrees × π / 180)　　當 dimensionType = 'slope_distance'<br>
 areaHorizontal_m2 = area_m2　　　　　　　　　　　　　　　　　當 dimensionType = 'horizontal'
+</div>
+
+<h3>不規則多邊形面積（Shoelace 公式，v2.8.0）</h3>
+<div class="formula">
+Area = |Σᵢ (xᵢ × yᵢ₊₁ − xᵢ₊₁ × yᵢ)| / 2　　vertices 以 local meters 相對 plot.locationTWD97 儲存<br>
+邊界驗證：3–50 頂點、CCW 順序、簡單多邊形（無自交）、面積 ≥ 1 m²
 </div>
 
 <h3>立木座標換算（沿坡距 ↔ 水平投影）</h3>

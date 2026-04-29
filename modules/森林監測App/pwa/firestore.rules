@@ -33,10 +33,11 @@ service cloud.firestore {
     function willOwn()            { return request.resource.data.createdBy == request.auth.uid; }
 
     // v2.7.15：樣區幾何 schema 升級的欄位驗證（plot create/update 用）
+    // v2.8.0：plotShape enum 加 'irregular'（不規則多邊形）
     //   寬鬆策略：欄位若不存在或為 null → 跳過驗證（既有資料無欄位 = 待補登）
     //   只在欄位實際存在時檢 enum / range；不檢 areaHorizontal_m2（client 端算，db 端不再演算驗證避免 floating point）
     function validPlotGeomFields(d) {
-      return (!('shape' in d) || d.shape in ['circle', 'square', 'rectangle'])
+      return (!('shape' in d) || d.shape in ['circle', 'square', 'rectangle', 'irregular'])
           && (!('dimensionType' in d) || d.dimensionType == null || d.dimensionType in ['slope_distance', 'horizontal'])
           && (!('slopeSource' in d) || d.slopeSource == null || d.slopeSource in ['field', 'dem', 'dem_field_avg'])
           && (!('slopeDegrees' in d) || d.slopeDegrees == null || (d.slopeDegrees is number && d.slopeDegrees >= 0 && d.slopeDegrees <= 90))
@@ -45,7 +46,7 @@ service cloud.firestore {
     // 同樣的 enum 也套到 methodology（project doc 內）
     function validMethodologyGeomFields(d) {
       let m = d.get('methodology', {});
-      return (!('plotShape' in m) || m.plotShape in ['circle', 'square', 'rectangle'])
+      return (!('plotShape' in m) || m.plotShape in ['circle', 'square', 'rectangle', 'irregular'])
           && (!('dimensionType' in m) || m.dimensionType in ['slope_distance', 'horizontal']);
     }
 

@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.18';  // v2.7.18：QAQC 4 衍生小機會（progress pill / 種子 banner + 重現抽樣 / .doc 查證說明書 / 5 步教學導覽精靈）
+const CACHE = 'forest-monitor-v2.8.0';  // v2.8.0：irregular plot（Shoelace + GeoJSON 上傳 + 多邊形邊界繪製 + point-in-polygon）
 const SHELL = [
   './',
   './index.html',
@@ -19,6 +19,7 @@ const SHELL = [
   './js/species-admin.js',    // v2.7.10：admin 樹種字典管理 UI
   './js/plot-geometry.js',    // v2.7.15：樣區幾何 + 坡度修正 utility
   './js/plot-qaqc.js',        // v2.7.17：reviewer QAQC（抽樣 / 誤差 / 閾值）utility
+  './js/plot-polygon.js',     // v2.8.0：irregular plot 多邊形 utility（Shoelace / point-in-polygon / GeoJSON）
   './firebase-config.js'
 ];
 

@@ -1,5 +1,6 @@
 # 資料 Schema（Firestore）
 
+> v2.6.2（2026-04-29，app v2.8.0）：irregular plot 不規則多邊形 — plotShape enum 加 `'irregular'`；plotDimensions 結構加 `vertices`（[{x,y}, ...] CCW + simple + 3–50 頂點，local meters 相對 plot.locationTWD97）+ `bbox` + `sourceInfo`；面積由 Shoelace 公式算；輸入支援表格手填或 GeoJSON 上傳（自動偵測 WGS84 / TWD97 + 轉換）。立木分布散布圖、import wizard 防呆、QAQC 重測（area-only 模式）、Excel + .doc 報告皆同步支援。
 > v2.6.1（2026-04-29，app v2.7.17）：Reviewer QAQC 工作流 — plot 加 `qaqc` map（inSample / slopeVerified / dimensionsVerified / areaVerifiedHorizontal / 誤差 / resolution / 處置紀錄）；project 加 `qaqcConfig`（抽樣比例 / 閾值）+ `qaqcSummary`（簽發摘要）。對標 ISO 14064-3、IPCC GPG（reasonable assurance ±5°/±3%）、TMS 方法學監測計畫。
 > v2.6（2026-04-29，app v2.7.15 schema / v2.7.16 UI）：樣區幾何 schema 升級 — plotShape 加 'rectangle'、新增 dimensionType（沿坡距 / 水平投影）、slopeDegrees / slopeAspect / slopeSource、areaHorizontal_m2（cos 校正）、migrationPending（既有資料待補登 flag）。v2.7.16 落地：plot form 幾何/坡度欄位 + 即時水平投影預覽、methodology dimensionType radio、立木分布圖「沿坡距 ↔ 水平投影」切換鈕、migration banner（admin DRY-RUN → 批次標記）、import-wizard 防呆改 per-plot 動態上限。
 > v2.5（2026-04-27）：立木個體座標（localX/Y + absolute TWD97/WGS84）+ methodology.plotOriginType
@@ -90,9 +91,9 @@
 | locationTWD97 | map | ✅ | `{ x, y }` |
 | locationAccuracy_m | number | ⭕ | GPS 精度 |
 | insideBoundary | bool | ⭕ | |
-| shape | enum | ✅ | v2.6：`circle` / `square` / `rectangle`（從 methodology 帶） |
+| shape | enum | ✅ | v2.6：`circle` / `square` / `rectangle`；v2.6.2 加 `irregular`（不規則多邊形） |
 | area_m2 | number | ✅ | 名目面積（單位由 dimensionType 決定，sloped or horizontal） |
-| **plotDimensions** | map | ⭕ | v2.6：rectangle/square `{ width, length }` 或 circle `{ radius }`；單位 m |
+| **plotDimensions** | map | ⭕ | v2.6：rectangle/square `{ width, length }` 或 circle `{ radius }`；v2.6.2 irregular `{ vertices: [{x,y},...], bbox: {minX,maxX,minY,maxY}, sourceInfo? }`；單位 m |
 | **dimensionType** | enum | ⭕ | v2.6：`slope_distance` \| `horizontal`；缺省 = methodology 帶；舊資料 normalize 預設 `horizontal` |
 | **slopeDegrees** | number | ⭕ | v2.6：樣區平均坡度（°，0–90）；舊資料缺省為 0（平地） |
 | **slopeAspect** | number | ⭕ | v2.6：坡向（°，0–360；0=北、順時針）；optional |
@@ -131,6 +132,28 @@
 | `resolvedAt` / `resolvedBy` | timestamp / uid | 處置 metadata |
 
 **Rules（v2.7.17 加）**：reviewer 可寫 `qaqc` + `updatedAt` 兩欄位（即使 project locked），其他欄位仍受 PI/admin/surveyor 路徑控制。
+
+#### irregular 多邊形補充說明（v2.6.2 / v2.8.0）
+
+| 子欄位 | 型別 | 說明 |
+|------|------|------|
+| `vertices` | array<map> | `[{x, y}, ...]`（陣列內物件，繞過 Firestore「array of array 不支援」限制） |
+| `bbox` | map | `{ minX, maxX, minY, maxY }`（auto-compute；給散布圖座標範圍 + 防呆 max span） |
+| `sourceInfo` | string | 選填；GeoJSON 上傳來源（filename + WGS84/TWD97 偵測結果） |
+
+**驗證流程**（plot-polygon.js#validatePolygon）：
+1. 頂點數 ∈ [3, 50]
+2. 每點 x, y 為有限數
+3. 移除連續重複頂點（誤填 / GeoJSON 閉合重複）
+4. 自交檢查（O(n²)，3–50 頂點下接受）
+5. 面積 ≥ 1 m²（防退化）
+6. 強制 CCW（CW → reverse）
+
+**面積公式**：Shoelace `|Σᵢ (xᵢ × yᵢ₊₁ − xᵢ₊₁ × yᵢ)| / 2`
+
+**散布圖點對多邊形**：ray casting algorithm（plot-polygon.js#isPointInPolygon）
+
+**QAQC area-only 模式**：reviewer 不重畫多邊形，直接填重測水平面積；`qaqc.dimensionsVerified = { areaH_user: N }`，誤差仍以 `areaError_pct` 比對 `areaHorizontal_m2`。
 
 ### 四、`/projects/{projectId}/plots/{plotId}/trees/{treeId}`
 
@@ -182,6 +205,13 @@ areaHorizontal_m2 = area_m2                                  // 當 dimensionTyp
 ```
 horizontalY_m = localY_m × cos(slopeDegrees × π / 180)        // dimensionType='slope_distance' 時
 horizontalY_m = localY_m                                       // dimensionType='horizontal' 時
+```
+
+### v2.6.2 不規則多邊形（Shoelace）
+
+```
+Area = |Σᵢ (xᵢ × yᵢ₊₁ − xᵢ₊₁ × yᵢ)| / 2     // i = 0..n-1，i+1 取 mod n
+areaHorizontal_m2 = ShoelaceArea × cos(slope)  // dimensionType='slope_distance' 時的整體簡化假設
 ```
 
 **MRV 對齊**：IPCC LULUCF 與 TMS 方法學的單位面積（m²/ha）皆指水平投影。`areaHorizontal_m2` 為碳計算 / 密度推算的分母；`area_m2` 留給野外管理（樣區放樣、皮尺驗收）。

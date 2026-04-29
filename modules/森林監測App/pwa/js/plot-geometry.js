@@ -12,7 +12,8 @@
 // v2.7.15 schema only：本檔僅提供工具函式，UI / 立木分布圖整合在 v2.7.16。
 
 // ----- enum -----
-export const PLOT_SHAPES = ['circle', 'square', 'rectangle'];
+// v2.8.0：plotShape 加 'irregular'（不規則多邊形，依 plotDimensions.vertices 推算面積）
+export const PLOT_SHAPES = ['circle', 'square', 'rectangle', 'irregular'];
 export const DIMENSION_TYPES = ['slope_distance', 'horizontal'];
 export const SLOPE_SOURCES = ['field', 'dem', 'dem_field_avg'];
 
@@ -71,6 +72,7 @@ export function horizontalToLocal(horizX_m, horizY_m, slopeDeg) {
 //   shape='circle'    → { radius }
 //   shape='square'    → { side } 或 { width, length } 且 width===length
 //   shape='rectangle' → { width, length }
+//   shape='irregular' → { vertices: [{x,y},...] }（v2.8.0；3-50 頂點，深度驗證見 plot-polygon.js）
 export function validatePlotDimensions(shape, dimensions) {
   if (!shape || !PLOT_SHAPES.includes(shape)) {
     return { ok: false, error: `不支援的 shape: ${shape}（允許: ${PLOT_SHAPES.join(', ')}）` };
@@ -88,14 +90,25 @@ export function validatePlotDimensions(shape, dimensions) {
     if (!Number.isFinite(side) || side <= 0) return { ok: false, error: 'square 需 side（或 width/length）> 0' };
     return { ok: true };
   }
-  // rectangle
-  const w = Number(dimensions.width), l = Number(dimensions.length);
-  if (!Number.isFinite(w) || w <= 0) return { ok: false, error: 'rectangle 需 width > 0' };
-  if (!Number.isFinite(l) || l <= 0) return { ok: false, error: 'rectangle 需 length > 0' };
-  return { ok: true };
+  if (shape === 'rectangle') {
+    const w = Number(dimensions.width), l = Number(dimensions.length);
+    if (!Number.isFinite(w) || w <= 0) return { ok: false, error: 'rectangle 需 width > 0' };
+    if (!Number.isFinite(l) || l <= 0) return { ok: false, error: 'rectangle 需 length > 0' };
+    return { ok: true };
+  }
+  // irregular（v2.8.0）— 淺驗證（深驗證在 plot-polygon.js#validatePolygon）
+  if (shape === 'irregular') {
+    if (!Array.isArray(dimensions.vertices) || dimensions.vertices.length < 3) {
+      return { ok: false, error: 'irregular 需 vertices 陣列且 ≥ 3 頂點（深度驗證請呼叫 plot-polygon.js#validatePolygon）' };
+    }
+    return { ok: true };
+  }
+  return { ok: false, error: `未實作 shape=${shape} 的驗證` };
 }
 
 // ===== 從 plotDimensions 推算名目面積（沿坡距 or 水平投影，取決於 dimensionType）=====
+//   v2.8.0：irregular 用 Shoelace 公式（呼叫 plot-polygon.js）
+//   為避免循環 import，這裡只做基本算法 — circle/square/rectangle；irregular 由 caller 預先算好填 dimensions._cachedArea
 export function dimensionsToArea(shape, dimensions) {
   if (shape === 'circle') {
     const r = Number(dimensions?.radius);
@@ -108,6 +121,23 @@ export function dimensionsToArea(shape, dimensions) {
   if (shape === 'rectangle') {
     const w = Number(dimensions?.width), l = Number(dimensions?.length);
     return Number.isFinite(w) && Number.isFinite(l) && w > 0 && l > 0 ? w * l : 0;
+  }
+  if (shape === 'irregular') {
+    // 簡單 Shoelace（避免從 plot-polygon.js 循環引入）
+    const verts = dimensions?.vertices;
+    if (!Array.isArray(verts) || verts.length < 3) return 0;
+    let sum = 0;
+    const n = verts.length;
+    for (let i = 0; i < n; i++) {
+      const a = verts[i], b = verts[(i + 1) % n];
+      const ax = Array.isArray(a) ? a[0] : a?.x;
+      const ay = Array.isArray(a) ? a[1] : a?.y;
+      const bx = Array.isArray(b) ? b[0] : b?.x;
+      const by = Array.isArray(b) ? b[1] : b?.y;
+      if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) return 0;
+      sum += ax * by - bx * ay;
+    }
+    return Math.abs(sum) / 2;
   }
   return 0;
 }
