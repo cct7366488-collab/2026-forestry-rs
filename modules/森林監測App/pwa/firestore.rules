@@ -76,17 +76,23 @@ service cloud.firestore {
       // v2.7：reviewer 限定一條路 — review→verified 完成審查
       //   條件：cur status='review'、new status='verified'、僅改狀態機相關欄位（不可動 methodology/members 等）
       // v2.7.15：methodology enum 驗證套到所有 update path（reviewer 沒改 methodology → 既有值仍合法 → pass）
+      // v2.7.17：reviewer 在 status=review 時可改 qaqcConfig（抽樣比例 / 閾值；專業判斷）
       allow update: if isSignedIn() && validMethodologyGeomFields(request.resource.data) && (
         isPi(projectId) || isSystemAdmin() ||
-        (isReviewer(projectId)
-          && resource.data.get('status', 'active') == 'review'
-          && request.resource.data.status == 'verified'
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'status', 'statusChangedAt', 'statusChangedBy',
-              'locked', 'lockedAt', 'lockedBy', 'autoLockReason',
-              'verifiedAt', 'verifiedBy'
-            ])
-        )
+        (isReviewer(projectId) && (
+          (resource.data.get('status', 'active') == 'review'
+            && request.resource.data.status == 'verified'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'status', 'statusChangedAt', 'statusChangedBy',
+                'locked', 'lockedAt', 'lockedBy', 'autoLockReason',
+                'verifiedAt', 'verifiedBy',
+                'qaqcSummary'
+              ])
+          ) ||
+          (resource.data.get('status', 'active') == 'review'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqcConfig'])
+          )
+        ))
       );
 
       // admin 可刪空殼專案（v1.5 簡化：不檢查 plotCount）
@@ -104,11 +110,18 @@ service cloud.firestore {
 
         // v1.7.1.3：systemAdmin god view，跨任何專案角色限制
         // v2.7.15：同 create 套 plot 幾何欄位 enum 驗證
-        allow update: if isSignedIn() && !isLocked(projectId)
+        // v2.7.17：reviewer 可寫 qaqc 子結構（與既有 PI/surveyor 寫權限平行）
+        //   - 既有路徑（PI/admin/surveyor）：須 !isLocked（防止鎖定後 surveyor 仍能改）
+        //   - reviewer 路徑：允許 isLocked 狀態（鎖定是擋 surveyor 的，不擋查證）；diff 只能是 qaqc + updatedAt
+        allow update: if isSignedIn()
                       && validPlotGeomFields(request.resource.data) && (
-          isSystemAdmin() ||
-          isPi(projectId) ||
-          (isSurveyor(projectId) && (isOwner() || resource.data.get('assignedTo', null) == request.auth.uid))
+          (!isLocked(projectId) && (
+            isSystemAdmin() ||
+            isPi(projectId) ||
+            (isSurveyor(projectId) && (isOwner() || resource.data.get('assignedTo', null) == request.auth.uid))
+          )) ||
+          (isReviewer(projectId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt']))
         );
 
         allow delete: if isSignedIn() && (

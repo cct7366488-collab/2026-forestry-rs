@@ -1,14 +1,16 @@
 ﻿// ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=27160';
+import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=27170';
+// v2.7.17：reviewer QAQC 工作流
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, computeQaqcErrors, RESOLUTION_LABEL } from './plot-qaqc.js?v=27170';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=27160';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=27170';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -611,6 +613,8 @@ export function openProjectForm(existing = null) {
       members,
       memberUids: piUids,
       methodology: { ...DEFAULT_METHODOLOGY },
+      // v2.7.17：reviewer QAQC 預設 config（reviewer 進審查時可改）
+      qaqcConfig: { ...DEFAULT_QAQC_CONFIG },
       locked: false,
       // v2.3：階段 2 狀態機初始狀態
       status: STATUS.CREATED,
@@ -1007,6 +1011,8 @@ export async function openBatchPlotsForm(project) {
           dimensionType: dimType,
           areaHorizontal_m2: area,         // slope=0 → cos(0)=1 → = area
           migrationPending: shape === 'rectangle',  // rectangle 空殼缺 dimensions → 待補登
+          // v2.7.17：QAQC 預設子結構
+          qaqc: defaultQaqc(),
           location: null,
           locationTWD97: null,
           locationAccuracy_m: null,
@@ -1104,8 +1110,208 @@ export async function markQA(project, plotId, subDoc, status) {
   } catch (e) { toast('標記失敗：' + e.message); }
 }
 
+// ===== v2.7.17：Reviewer QAQC 重測表單（抽樣 plot 才能開）=====
+//   reviewer / admin 對 inSample plot 開此 modal 填重測值；存檔只動 qaqc field（受 rules hasOnly(['qaqc','updatedAt']) 約束）
+//   超閾值時必須填 resolution + resolutionNote 才能存
+export async function openQaqcRemeasureForm(project, plot) {
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
+  const q = plot.qaqc || defaultQaqc();
+  const shape = plot.shape || 'square';
+  const dims = plot.plotDimensions || {};
+  const dimType = plot.dimensionType || 'horizontal';
+
+  // 重測欄位 inputs（依 shape 而定）
+  const slopeInput = el('input', { type: 'number', step: '0.1', min: '0', max: '90', name: 'slopeVerified',
+    placeholder: '°', value: q.slopeVerified ?? '', class: 'border rounded px-2 py-1 text-sm' });
+
+  // dimensionsVerified：mirror 既有 plotDimensions 結構
+  let dimsVerifiedInputs = el('div', {});
+  let getDimensionsVerified = () => null;
+  if (shape === 'circle') {
+    const radiusVer = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'radiusVer',
+      placeholder: '半徑 m', value: q.dimensionsVerified?.radius ?? '', class: 'border rounded px-2 py-1 text-sm w-32' });
+    dimsVerifiedInputs = el('div', { class: 'flex items-center gap-2 text-sm' },
+      el('span', { class: 'w-16' }, '半徑 (m)：'), radiusVer);
+    getDimensionsVerified = () => {
+      const r = parseFloat(radiusVer.value);
+      return Number.isFinite(r) && r > 0 ? { radius: r } : null;
+    };
+  } else if (shape === 'rectangle') {
+    const widthVer = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'widthVer',
+      placeholder: '寬 m', value: q.dimensionsVerified?.width ?? '', class: 'border rounded px-2 py-1 text-sm w-24' });
+    const lengthVer = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'lengthVer',
+      placeholder: '長 m', value: q.dimensionsVerified?.length ?? '', class: 'border rounded px-2 py-1 text-sm w-24' });
+    dimsVerifiedInputs = el('div', { class: 'flex items-center gap-2 text-sm flex-wrap' },
+      el('span', { class: 'w-16' }, '寬 / 長：'), widthVer, el('span', {}, '×'), lengthVer, el('span', { class: 'text-xs' }, 'm'));
+    getDimensionsVerified = () => {
+      const w = parseFloat(widthVer.value);
+      const l = parseFloat(lengthVer.value);
+      return Number.isFinite(w) && w > 0 && Number.isFinite(l) && l > 0 ? { width: w, length: l } : null;
+    };
+  } else {  // square
+    const sideVer = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'sideVer',
+      placeholder: '邊長 m', value: q.dimensionsVerified?.side ?? '', class: 'border rounded px-2 py-1 text-sm w-32' });
+    dimsVerifiedInputs = el('div', { class: 'flex items-center gap-2 text-sm' },
+      el('span', { class: 'w-16' }, '邊長 (m)：'), sideVer);
+    getDimensionsVerified = () => {
+      const s = parseFloat(sideVer.value);
+      return Number.isFinite(s) && s > 0 ? { side: s, width: s, length: s } : null;
+    };
+  }
+
+  // 即時誤差預覽
+  const errorBox = el('div', { class: 'bg-stone-50 rounded p-2 text-xs my-2' });
+  // 處置區（先建好，根據誤差決定顯示）
+  const resolutionSelect = el('select', { name: 'resolution', class: 'border rounded px-2 py-1 text-sm' },
+    el('option', { value: '' }, '— 選擇處置 —'),
+    ...Object.entries(RESOLUTION_LABEL).map(([v, label]) => {
+      const o = el('option', { value: v }, label);
+      if (q.resolution === v) o.setAttribute('selected', 'true');
+      return o;
+    })
+  );
+  const resolutionNote = el('textarea', { name: 'resolutionNote', rows: '2',
+    placeholder: '說明判斷依據（必填若超閾值）', class: 'border rounded px-2 py-1 text-sm w-full' }, q.resolutionNote || '');
+  const resolutionBlock = el('div', { class: 'mt-2 bg-red-50 border border-red-300 rounded p-2 hidden' },
+    el('div', { class: 'text-xs font-semibold text-red-800 mb-1' }, '⚠️ 誤差超閾值 — 必填處置與說明'),
+    el('div', { class: 'flex items-center gap-2 text-sm mb-1' },
+      el('span', { class: 'w-12' }, '處置：'), resolutionSelect),
+    resolutionNote
+  );
+
+  function recompute() {
+    const slopeVer = parseFloat(slopeInput.value);
+    const dimsVer = getDimensionsVerified();
+    let areaVerH = null;
+    if (dimsVer) {
+      const areaSlope = dimensionsToArea(shape, dimsVer);
+      areaVerH = computeAreaHorizontal(areaSlope, Number.isFinite(slopeVer) ? slopeVer : 0, dimType);
+    }
+    const errs = computeQaqcErrors(plot, { slopeVerified: slopeVer, areaVerifiedHorizontal: areaVerH }, cfg);
+    const slopeOk = errs.slopeError_deg == null ? null : errs.slopeError_deg <= cfg.slopeThreshold_deg;
+    const areaOk  = errs.areaError_pct == null ? null : errs.areaError_pct <= cfg.areaThreshold_pct;
+    const lines = [];
+    lines.push(`<b>surveyor 原值</b>：slope=${Number.isFinite(plot.slopeDegrees) ? plot.slopeDegrees.toFixed(1) + '°' : '-'} / area_h=${Number.isFinite(plot.areaHorizontal_m2) ? plot.areaHorizontal_m2.toFixed(1) + ' m²' : '-'}`);
+    lines.push(`<b>reviewer 重測</b>：slope=${Number.isFinite(slopeVer) ? slopeVer.toFixed(1) + '°' : '-'} / area_h=${Number.isFinite(areaVerH) ? areaVerH.toFixed(1) + ' m²' : '-'}`);
+    const slopeBadge = errs.slopeError_deg == null ? '<span class="text-stone-400">slope: 待填</span>' :
+      (slopeOk ? `<span class="text-green-700">slope ±${errs.slopeError_deg.toFixed(2)}° ✅ (≤${cfg.slopeThreshold_deg}°)</span>` :
+                 `<span class="text-red-700">slope ±${errs.slopeError_deg.toFixed(2)}° ❌ (>${cfg.slopeThreshold_deg}°)</span>`);
+    const areaBadge = errs.areaError_pct == null ? '<span class="text-stone-400">area: 待填</span>' :
+      (areaOk ? `<span class="text-green-700">area ±${errs.areaError_pct.toFixed(2)}% ✅ (≤${cfg.areaThreshold_pct}%)</span>` :
+                `<span class="text-red-700">area ±${errs.areaError_pct.toFixed(2)}% ❌ (>${cfg.areaThreshold_pct}%)</span>`);
+    lines.push(`<b>誤差</b>：${slopeBadge}　${areaBadge}`);
+    errorBox.innerHTML = lines.join('<br>');
+    // 超閾值（任一）→ 顯示處置區
+    const failed = (slopeOk === false) || (areaOk === false);
+    resolutionBlock.classList.toggle('hidden', !failed);
+  }
+  [slopeInput].forEach(i => { i.addEventListener('input', recompute); i.addEventListener('change', recompute); });
+  if (shape === 'circle') {
+    dimsVerifiedInputs.querySelector('input').addEventListener('input', recompute);
+  } else if (shape === 'rectangle') {
+    dimsVerifiedInputs.querySelectorAll('input').forEach(i => i.addEventListener('input', recompute));
+  } else {
+    dimsVerifiedInputs.querySelector('input').addEventListener('input', recompute);
+  }
+
+  const f = el('form', { class: 'space-y-3' },
+    el('div', { class: 'bg-blue-50 border border-blue-200 rounded p-3 text-sm' },
+      el('div', { class: 'font-semibold' }, `🔍 QAQC 重測：${plot.code}`),
+      el('div', { class: 'text-xs text-stone-600 mt-1' },
+        `形狀 ${({ circle: '圓', square: '方', rectangle: '矩' })[shape]} / 量測單位 ${dimType === 'slope_distance' ? '沿坡距' : '水平投影'} / 抽樣理由 ${q.sampleReason || '-'}`)
+    ),
+    el('div', { class: 'field' },
+      el('label', {}, '重測坡度 (°)', el('span', { class: 'req' }, ' *')),
+      slopeInput
+    ),
+    el('div', { class: 'field' },
+      el('label', {}, '重測 dimensions', el('span', { class: 'req' }, ' *')),
+      dimsVerifiedInputs
+    ),
+    errorBox,
+    resolutionBlock,
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-blue-700 hover:bg-blue-800 text-white py-2 rounded' }, '💾 儲存重測'),
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消'),
+      q.inSample ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-stone-600 text-xs', onclick: () => qaqcRemoveFromSample(project, plot) }, '↩️ 移出抽樣') : null
+    )
+  );
+  recompute();
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const slopeVer = parseFloat(slopeInput.value);
+    const dimsVer = getDimensionsVerified();
+    if (!Number.isFinite(slopeVer)) { toast('請填重測坡度'); return; }
+    if (!dimsVer) { toast('請填重測 dimensions'); return; }
+    const areaSlope = dimensionsToArea(shape, dimsVer);
+    const areaVerH = computeAreaHorizontal(areaSlope, slopeVer, dimType);
+    const errs = computeQaqcErrors(plot, { slopeVerified: slopeVer, areaVerifiedHorizontal: areaVerH }, cfg);
+    // 超閾值 → 必填 resolution + note
+    if (errs.withinThreshold === false) {
+      const res = resolutionSelect.value;
+      const note = resolutionNote.value.trim();
+      if (!res) { toast('誤差超閾值，請選擇處置（accepted / remeasured / rejected）'); return; }
+      if (!note) { toast('誤差超閾值，請填處置說明'); return; }
+    }
+    const newQaqc = {
+      ...(plot.qaqc || defaultQaqc()),
+      inSample: true,  // 走完重測一定 inSample
+      slopeVerified: slopeVer,
+      dimensionsVerified: dimsVer,
+      areaVerifiedHorizontal: areaVerH,
+      verifiedAt: new Date(),
+      verifiedBy: state.user.uid,
+      slopeError_deg: errs.slopeError_deg,
+      areaError_pct: errs.areaError_pct,
+      withinThreshold: errs.withinThreshold,
+    };
+    if (errs.withinThreshold === false) {
+      newQaqc.resolution = resolutionSelect.value;
+      newQaqc.resolutionNote = resolutionNote.value.trim();
+      newQaqc.resolvedAt = new Date();
+      newQaqc.resolvedBy = state.user.uid;
+    } else {
+      // 通過 → 清掉舊處置（若有）
+      newQaqc.resolution = null;
+      newQaqc.resolutionNote = null;
+      newQaqc.resolvedAt = null;
+      newQaqc.resolvedBy = null;
+    }
+    try {
+      await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id), { qaqc: newQaqc, updatedAt: fb.serverTimestamp() });
+      toast(errs.withinThreshold === false ? '已儲存（誤差超閾值，已記錄處置）' : '✅ 已儲存（誤差通過閾值）', 3500);
+      closeModal();
+      // QAQC tab 若開啟 → 重整
+      if (typeof window.location !== 'undefined' && window.location.hash.includes('/p/')) {
+        // re-render QAQC tab if active
+        const qaqcSection = document.querySelector('[data-tab-content="qaqc"]:not(.hidden)');
+        if (qaqcSection) {
+          const tab = document.querySelector('[data-tab="qaqc"]');
+          if (tab) tab.click();
+        }
+      }
+    } catch (e) { toast('儲存失敗：' + e.message); console.error(e); }
+  });
+  openModal(`🔍 QAQC 重測 — ${plot.code}`, f);
+}
+
+async function qaqcRemoveFromSample(project, plot) {
+  if (!confirm(`從抽樣移除「${plot.code}」？已填的重測值會清除。`)) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id), { qaqc: defaultQaqc(), updatedAt: fb.serverTimestamp() });
+    toast('已移出抽樣');
+    closeModal();
+  } catch (e) { toast('失敗：' + e.message); }
+}
+
 // ===== 樣區表單 =====
 export async function openPlotForm(project, existing = null) {
+  // v2.7.17：reviewer（非 admin）對 inSample plot 自動跳轉 QAQC 重測 modal
+  //   admin god view 維持原本完整 plot 編輯權
+  if (existing && existing.qaqc?.inSample === true && isReviewer() && !isSystemAdmin()) {
+    return openQaqcRemeasureForm(project, existing);
+  }
   const loc = existing?.location;
   const t97 = existing?.locationTWD97;
   // v1.5：套用 methodology + 警示超過目標數
@@ -1344,6 +1550,7 @@ export async function openPlotForm(project, existing = null) {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
         data.qaStatus = 'pending';
+        data.qaqc = defaultQaqc();  // v2.7.17：新 plot 帶 QAQC 預設子結構
         const ref = await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), data);
         plotId = ref.id;
       }
@@ -2684,6 +2891,8 @@ export async function seedDemoData(project) {
         dimensionType: dimType,
         areaHorizontal_m2: p.area_m2,
         migrationPending: false,
+        // v2.7.17：QAQC 預設
+        qaqc: defaultQaqc(),
         establishedAt: new Date(),
         notes: p.notes,
         insideBoundary: true,

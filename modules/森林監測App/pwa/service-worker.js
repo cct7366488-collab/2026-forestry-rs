@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.7.16';  // v2.7.16：UI 落地（plot form 幾何 + 坡度欄位 / methodology dimensionType / 散布圖切換鈕 / migration banner / dynamic 防呆）
+const CACHE = 'forest-monitor-v2.7.17';  // v2.7.17：Reviewer QAQC 工作流（抽樣 → 重測 → 誤差計算 → 合格簽發）+ 報告匯出（QAQC sheet + 面積換算說明）
 const SHELL = [
   './',
   './index.html',
@@ -17,7 +17,8 @@ const SHELL = [
   './js/import-wizard.js',    // v2.5：Excel 匯入 wizard（雛形 / DRY-RUN）
   './js/distribution.js',     // v2.6.2：立木分布散布圖（Canvas）
   './js/species-admin.js',    // v2.7.10：admin 樹種字典管理 UI
-  './js/plot-geometry.js',    // v2.7.15：樣區幾何 + 坡度修正 utility（v2.7.16 UI 會用）
+  './js/plot-geometry.js',    // v2.7.15：樣區幾何 + 坡度修正 utility
+  './js/plot-qaqc.js',        // v2.7.17：reviewer QAQC（抽樣 / 誤差 / 閾值）utility
   './firebase-config.js'
 ];
 

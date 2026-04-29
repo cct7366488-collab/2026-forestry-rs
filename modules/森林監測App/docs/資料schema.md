@@ -1,5 +1,6 @@
 # 資料 Schema（Firestore）
 
+> v2.6.1（2026-04-29，app v2.7.17）：Reviewer QAQC 工作流 — plot 加 `qaqc` map（inSample / slopeVerified / dimensionsVerified / areaVerifiedHorizontal / 誤差 / resolution / 處置紀錄）；project 加 `qaqcConfig`（抽樣比例 / 閾值）+ `qaqcSummary`（簽發摘要）。對標 ISO 14064-3、IPCC GPG（reasonable assurance ±5°/±3%）、TMS 方法學監測計畫。
 > v2.6（2026-04-29，app v2.7.15 schema / v2.7.16 UI）：樣區幾何 schema 升級 — plotShape 加 'rectangle'、新增 dimensionType（沿坡距 / 水平投影）、slopeDegrees / slopeAspect / slopeSource、areaHorizontal_m2（cos 校正）、migrationPending（既有資料待補登 flag）。v2.7.16 落地：plot form 幾何/坡度欄位 + 即時水平投影預覽、methodology dimensionType radio、立木分布圖「沿坡距 ↔ 水平投影」切換鈕、migration banner（admin DRY-RUN → 批次標記）、import-wizard 防呆改 per-plot 動態上限。
 > v2.5（2026-04-27）：立木個體座標（localX/Y + absolute TWD97/WGS84）+ methodology.plotOriginType
 > v1.5（2026-04-25）：5 角色 + 方法學 + Lock + QA 機制
@@ -48,6 +49,8 @@
 | **locked** | bool | ⭕ | 預設 false；true 後資料無法寫入 |
 | **lockedAt** | timestamp | ⭕ | Lock 時間 |
 | **lockedBy** | uid | ⭕ | Lock 者 |
+| **qaqcConfig** | map | ⭕ | v2.6.1：reviewer QAQC 設定（samplingFraction / minSampleSize / slopeThreshold_deg / areaThreshold_pct） |
+| **qaqcSummary** | map | ⭕ | v2.6.1：簽發摘要（sampledCount / passedCount / errorStats / verifiedAt / verifiedBy）— reviewer 點 ✅ 完成查證時寫入 |
 | createdBy | uid | ✅ | 建立者（admin） |
 | createdAt | timestamp | ✅ | |
 
@@ -98,6 +101,7 @@
 | **slopeDemDegrees** | number | ⭕ | v2.6：DEM 推導值（同上） |
 | **areaHorizontal_m2** | number | ⭕ | v2.6：水平投影面積（m²）= `area_m2 × cos(slopeDegrees)`（dimensionType=`slope_distance` 時）；client 端寫入時自動算（見 `plot-geometry.js#computeAreaHorizontal`） |
 | **migrationPending** | bool | ⭕ | v2.6：true = 待補登 v2.6 新欄位；migration helper（`migration-v2715.js`）批次標 |
+| **qaqc** | map | ⭕ | v2.6.1：reviewer QAQC 子結構（見下表） |
 | establishedAt | timestamp | ✅ | |
 | photos | array<string> | ⭕ | Storage 路徑 |
 | notes | string | ⭕ | |
@@ -108,6 +112,25 @@
 | createdBy | uid | ✅ | |
 | createdAt | timestamp | ✅ | |
 | updatedAt | timestamp | ✅ | |
+
+#### `qaqc` 子結構（v2.6.1，reviewer QAQC 工作流）
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `inSample` | bool | 是否被 reviewer 抽樣 |
+| `sampledAt` / `sampledBy` / `sampleReason` | timestamp / uid / enum | 抽樣 metadata（reason: random / targeted / flagged） |
+| `slopeVerified` | number | reviewer 重測坡度（°） |
+| `dimensionsVerified` | map | reviewer 重測 dimensions（mirror plotDimensions 結構） |
+| `areaVerifiedHorizontal` | number | 重測 dimensions 推得的水平投影面積（m²） |
+| `verifiedAt` / `verifiedBy` | timestamp / uid | 重測 metadata |
+| `slopeError_deg` | number | 自動算：`abs(slopeVerified - slopeDegrees)` |
+| `areaError_pct` | number | 自動算：`abs(areaVerifiedHorizontal - areaHorizontal_m2) / areaHorizontal_m2 × 100` |
+| `withinThreshold` | bool | 兩誤差皆通過閾值 |
+| `resolution` | enum | 處置（accepted / remeasured / rejected）— 超閾值時必填 |
+| `resolutionNote` | string | 處置說明（超閾值必填，IPCC TACCC「透明」要求） |
+| `resolvedAt` / `resolvedBy` | timestamp / uid | 處置 metadata |
+
+**Rules（v2.7.17 加）**：reviewer 可寫 `qaqc` + `updatedAt` 兩欄位（即使 project locked），其他欄位仍受 PI/admin/surveyor 路徑控制。
 
 ### 四、`/projects/{projectId}/plots/{plotId}/trees/{treeId}`
 

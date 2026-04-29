@@ -197,7 +197,7 @@ export async function applyStatusAfterMethodologySaved(project) {
  * 保留 Lock（autoLockReason 改 'reviewer-approved'，lockedBy 改 reviewer uid）
  * 同時寫 verifiedAt / verifiedBy 兩個獨立欄位作為查證歷史紀錄（不可被覆蓋）
  */
-export async function applyStatusAfterReviewerApprove(project) {
+export async function applyStatusAfterReviewerApprove(project, extras = null) {
   if (!project) throw new Error('project required');
   if (project.archived) throw new Error('已封存專案不可再審查');
   const cur = project.status || STATUS.ACTIVE;
@@ -217,7 +217,10 @@ export async function applyStatusAfterReviewerApprove(project) {
     autoLockReason: 'reviewer-approved',
     // 永久查證紀錄欄位（後續即使狀態再變動也保留）
     verifiedAt: fb.serverTimestamp(),
-    verifiedBy: reviewerUid
+    verifiedBy: reviewerUid,
+    // v2.7.17：併寫額外欄位（如 qaqcSummary）— 必須在 review→verified 的 single updateDoc 內
+    //         否則 verified 後 reviewer 已無寫權限
+    ...(extras && typeof extras === 'object' ? extras : {}),
   };
   await fb.updateDoc(projectRef, updates);
 

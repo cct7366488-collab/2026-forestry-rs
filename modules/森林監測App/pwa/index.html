@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=27160">
+  <link rel="stylesheet" href="style.css?v=27170">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -217,6 +217,8 @@
       <a href="#" data-tab="myflagged" data-role-show="surveyor" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">我被 flag <span id="myflagged-count" class="ml-1 text-xs bg-red-100 text-red-800 px-1.5 rounded-full"></span></a>
       <a href="#" data-tab="dashboard" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">儀表板</a>
       <a href="#" data-tab="map" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">地圖</a>
+      <!-- v2.7.17：審查（QAQC）— reviewer / admin 才看到 -->
+      <a href="#" data-tab="qaqc" data-role-show="reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">🔍 審查（QAQC） <span id="qaqc-progress-pill" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
       <a href="#" data-tab="export" data-role-show="pi,reviewer" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">匯出</a>
       <a href="#" data-tab="settings" data-role-show="pi,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設定</a>
     </nav>
@@ -239,6 +241,49 @@
         <button id="btn-reviewer-approve" class="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded text-sm font-medium">✅ 完成審查並查證全案</button>
       </div>
       <div id="plot-list" class="grid sm:grid-cols-2 gap-3"></div>
+    </section>
+
+    <!-- v2.7.17：審查（QAQC）分頁 — reviewer / admin 才見到 -->
+    <section data-tab-content="qaqc" class="hidden space-y-4">
+      <div>
+        <h2 class="text-lg font-semibold mb-1">🔍 審查（QAQC）— 抽樣 → 現場核對 → 誤差計算 → 合格簽發</h2>
+        <p class="text-sm text-stone-600">對標 ISO 14064-3、IPCC GPG（合理保證）、TMS 方法學監測計畫。本分頁僅 reviewer / admin 可見。</p>
+      </div>
+
+      <!-- 設定區（折疊；reviewer 在 status=review 時可改）-->
+      <details class="bg-white rounded-lg shadow p-4">
+        <summary class="cursor-pointer font-medium">⚙️ QAQC 設定（抽樣比例 / 閾值）</summary>
+        <div id="qaqc-config-form" class="mt-3"></div>
+      </details>
+
+      <!-- 抽樣管理 -->
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-3">📋 抽樣管理</h3>
+        <div id="qaqc-sample-summary" class="text-sm mb-3"></div>
+        <div class="flex flex-wrap gap-2">
+          <button id="btn-qaqc-random-sample" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-sm">🎲 隨機抽樣</button>
+          <button id="btn-qaqc-clear-sample" class="border px-3 py-1.5 rounded text-sm hover:bg-stone-50">✋ 清空抽樣</button>
+        </div>
+      </div>
+
+      <!-- 抽樣 plot 清單 -->
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-3">📊 抽樣 plot 清單與重測狀態</h3>
+        <div id="qaqc-plot-table" class="overflow-x-auto text-sm"></div>
+      </div>
+
+      <!-- 誤差統計 -->
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-3">📈 誤差統計</h3>
+        <div id="qaqc-error-stats" class="text-sm"></div>
+      </div>
+
+      <!-- 合格簽發 -->
+      <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-600">
+        <h3 class="font-semibold mb-2">✅ 合格簽發（取代 v2.7 簡易簽發）</h3>
+        <div id="qaqc-approve-gate" class="text-sm mb-2"></div>
+        <button id="btn-qaqc-approve" class="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>✅ 完成查證並簽發（含 QAQC 報告）</button>
+      </div>
     </section>
 
     <section data-tab-content="design" class="hidden">
@@ -470,6 +515,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=27160"></script>
+<script type="module" src="js/app.js?v=27170"></script>
 </body>
 </html>

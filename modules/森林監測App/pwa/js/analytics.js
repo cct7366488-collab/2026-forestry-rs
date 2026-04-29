@@ -2,7 +2,9 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=27160';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=27170';
+// v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
+import { getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=27170';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -345,6 +347,69 @@ export async function exportXlsx(project) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(plotsRows), '樣區');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(treesRows), '立木');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(regenRows), '更新');
+
+  // v2.7.17：QAQC 抽樣查證表（reviewer 抽樣 → 重測 → 誤差 → 處置）+ 面積換算說明
+  const qaqcRows = plots
+    .filter(p => p.qaqc?.inSample === true || p.qaqc?.verifiedAt != null)
+    .map(p => {
+      const q = p.qaqc || {};
+      const status = getPlotQaqcStatus(p);
+      return {
+        樣區編號: p.code,
+        抽樣理由: q.sampleReason || '',
+        抽樣時間: q.sampledAt ? fmtDate(q.sampledAt) : '',
+        抽樣者: q.sampledBy ? anonOrReal(q.sampledBy) : '',
+        surveyor原坡度_度: Number.isFinite(p.slopeDegrees) ? p.slopeDegrees : '',
+        reviewer重測坡度_度: Number.isFinite(q.slopeVerified) ? q.slopeVerified : '',
+        坡度誤差_度: Number.isFinite(q.slopeError_deg) ? q.slopeError_deg : '',
+        surveyor原水平面積_m2: Number.isFinite(p.areaHorizontal_m2) ? p.areaHorizontal_m2 : '',
+        reviewer重測水平面積_m2: Number.isFinite(q.areaVerifiedHorizontal) ? q.areaVerifiedHorizontal : '',
+        面積誤差_pct: Number.isFinite(q.areaError_pct) ? q.areaError_pct : '',
+        通過閾值: q.withinThreshold === true ? '✅' : (q.withinThreshold === false ? '❌' : ''),
+        重測時間: q.verifiedAt ? fmtDate(q.verifiedAt) : '',
+        重測者: q.verifiedBy ? anonOrReal(q.verifiedBy) : '',
+        QAQC狀態: QAQC_STATUS_META[status]?.label || '',
+        處置: q.resolution ? (RESOLUTION_LABEL[q.resolution] || q.resolution) : '',
+        處置說明: q.resolutionNote || '',
+        處置時間: q.resolvedAt ? fmtDate(q.resolvedAt) : '',
+      };
+    });
+  if (qaqcRows.length > 0) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qaqcRows), 'QAQC抽樣查證');
+  }
+
+  // v2.7.17：面積換算 + QAQC 摘要說明（給第三方查證 reference；IPCC TACCC 對齊）
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
+  const stats = computeErrorStats(plots);
+  const realPlotCount = plots.filter(p => p.qaStatus !== 'shell').length;
+  const sampledCount = plots.filter(p => p.qaqc?.inSample === true).length;
+  const docRows = [
+    { 項目: '專案代碼', 值: project.code, 備註: '' },
+    { 項目: '專案名稱', 值: project.name || '', 備註: '' },
+    { 項目: '匯出時間', 值: new Date().toISOString().slice(0, 19).replace('T', ' '), 備註: '' },
+    { 項目: '——————', 值: '——————', 備註: '——————' },
+    { 項目: '樣區數（不含 shell）', 值: realPlotCount, 備註: '' },
+    { 項目: '抽樣數', 值: sampledCount, 備註: `目標 ≥ ${Math.max(Math.ceil(realPlotCount * cfg.samplingFraction), cfg.minSampleSize)}（${(cfg.samplingFraction * 100).toFixed(0)}% × ${realPlotCount}，最低 ${cfg.minSampleSize}）` },
+    { 項目: '坡度誤差閾值', 值: `±${cfg.slopeThreshold_deg}°`, 備註: 'IPCC GPG 合理保證等級' },
+    { 項目: '面積誤差閾值', 值: `±${cfg.areaThreshold_pct}%`, 備註: 'ISO 14064-3 reasonable assurance' },
+    { 項目: '——————', 值: '——————', 備註: '——————' },
+    { 項目: '坡度誤差統計', 值: stats.slope.n > 0 ? `n=${stats.slope.n} mean=${stats.slope.mean.toFixed(2)}° max=${stats.slope.max.toFixed(2)}° std=${stats.slope.std.toFixed(2)}°` : '無資料', 備註: '' },
+    { 項目: '面積誤差統計', 值: stats.area.n > 0 ? `n=${stats.area.n} mean=${stats.area.mean.toFixed(2)}% max=${stats.area.max.toFixed(2)}% std=${stats.area.std.toFixed(2)}%` : '無資料', 備註: '' },
+    { 項目: '——————', 值: '——————', 備註: '——————' },
+    { 項目: '面積換算說明', 值: '', 備註: '本案件樣區面積以「水平投影」為碳計算分母（IPCC LULUCF 標準）' },
+    { 項目: '· 水平投影公式', 值: 'areaHorizontal_m2 = area_m2 × cos(slopeDegrees)', 備註: '當 dimensionType=slope_distance 時' },
+    { 項目: '· 水平投影公式（已水平）', 值: 'areaHorizontal_m2 = area_m2', 備註: '當 dimensionType=horizontal 時' },
+    { 項目: '· 立木座標', 值: 'horizontalY = localY × cos(slope) ; localX 不變', 備註: 'X 沿等高線、Y 沿坡向；切換沿坡距 ↔ 水平投影僅影響 Y 軸' },
+    { 項目: '· MRV 引用', 值: 'IPCC 2006 GL Vol.4 Ch.4 Forest Land', 備註: '面積、生質、碳計算單位皆指水平投影' },
+  ];
+  if (project.qaqcSummary) {
+    const qs = project.qaqcSummary;
+    docRows.push({ 項目: '——————', 值: '——————', 備註: '——————' });
+    docRows.push({ 項目: '簽發時間', 值: qs.verifiedAt ? fmtDate(qs.verifiedAt) : '', 備註: '' });
+    docRows.push({ 項目: '簽發者', 值: qs.verifiedBy ? anonOrReal(qs.verifiedBy) : '', 備註: '' });
+    docRows.push({ 項目: '簽發類型', 值: '✅ 含 QAQC 抽樣查證', 備註: '完整版（v2.7.17）' });
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(docRows), '面積換算與QAQC說明');
 
   // v2.0：地被植物（將 species nested array 展平成多列，每物種一列）
   if (understory.length > 0) {

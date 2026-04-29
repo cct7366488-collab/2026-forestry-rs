@@ -15,15 +15,17 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=27160";
-import * as forms from "./forms.js?v=27160";
-import * as analytics from "./analytics.js?v=27160";
-import * as importWizard from "./import-wizard.js?v=27160";
-import { renderTreeDistribution } from "./distribution.js?v=27160";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27160";   // v2.7.10：admin 樹種字典管理
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27160";
+import { firebaseConfig } from "../firebase-config.js?v=27170";
+import * as forms from "./forms.js?v=27170";
+import * as analytics from "./analytics.js?v=27170";
+import * as importWizard from "./import-wizard.js?v=27170";
+import { renderTreeDistribution } from "./distribution.js?v=27170";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27170";   // v2.7.10：admin 樹種字典管理
+// v2.7.17：reviewer QAQC 工作流
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, pickRandomSample, getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, computeErrorStats, defaultQaqc } from "./plot-qaqc.js?v=27170";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27170";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27160";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27170";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -300,7 +302,7 @@ async function renderGeoMigrationBanner(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=27160');
+    const m = await import('./migration-v2715.js?v=27170');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -383,21 +385,28 @@ function renderReviewerApprovalCard() {
     card.classList.remove('hidden');
     btn.classList.remove('hidden');
     statusEl.innerHTML = `<div class="text-amber-700">🔍 全資料 verified，等待 reviewer 完成審查</div>
-      <div class="text-xs text-stone-500 mt-1">完成後資料永久查證、不可再 markQA。如需退回，請對任一筆 markQA flag/reject。</div>`;
+      <div class="text-xs text-stone-500 mt-1">v2.7.17：完整查證請至「<a href="#" data-go-qaqc class="underline text-amber-800">🔍 審查（QAQC）</a>」分頁進行抽樣 → 現場核對 → 誤差計算 → 合格簽發。本卡的「簡易簽發」保留給未啟用 QAQC 的小專案 fallback；按下去同樣會走 review→verified，但不寫 QAQC 摘要。</div>`;
+    // v2.7.17：點連結切到 QAQC 分頁
+    statusEl.querySelector('[data-go-qaqc]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const tab = $('[data-tab="qaqc"]');
+      if (tab) tab.click();
+    });
     btn.disabled = false;
-    btn.textContent = '✅ 完成審查並查證全案';
+    btn.textContent = '⚠️ 簡易簽發（不含 QAQC）';
+    btn.className = 'border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-900 px-4 py-2 rounded text-sm font-medium';
     btn.onclick = async () => {
-      if (!confirm('完成審查後：\n• 專案狀態 → ✅ 已查證\n• 全部資料永久鎖定，不可再修改或 markQA\n• 無法再退回 review（除非 admin 介入）\n\n確定通過全案？')) return;
+      if (!confirm('⚠️ 簡易簽發（不含 QAQC 抽樣）：\n• 專案狀態 → ✅ 已查證\n• 全部資料永久鎖定，不可再修改或 markQA\n• 無法再退回 review（除非 admin 介入）\n• 不寫 QAQC 摘要 — 本案的查證紀錄不含抽樣 / 誤差統計\n\n較鬆 — 建議改用「審查（QAQC）」分頁的合格簽發路徑。仍要走簡易？')) return;
       try {
         btn.disabled = true;
         btn.textContent = '⏳ 處理中…';
         await applyStatusAfterReviewerApprove(state.project);
-        toast('✅ 已完成審查，全案查證', 4000);
+        toast('✅ 已完成簡易簽發（不含 QAQC）', 4000);
         renderStatusBanner();
       } catch (e) {
         toast('完成審查失敗：' + e.message);
         btn.disabled = false;
-        btn.textContent = '✅ 完成審查並查證全案';
+        btn.textContent = '⚠️ 簡易簽發（不含 QAQC）';
       }
     };
     return;
@@ -909,6 +918,7 @@ async function renderProjectHome(root, projectId) {
     if (tab === 'design') renderDesign();
     if (tab === 'pending') renderPending();
     if (tab === 'myflagged') renderMyFlagged();
+    if (tab === 'qaqc') renderQaqc(state.project);  // v2.7.17：reviewer QAQC
     if (tab === 'settings') renderSettings();
   }));
 
@@ -1193,6 +1203,247 @@ async function renderPending() {
   } catch (e) {
     list.innerHTML = `<div class="p-4 text-red-700 text-sm">載入失敗：${e.message}</div>`;
   }
+}
+
+// ===== v2.7.17：審查（QAQC）分頁 =====
+//   抽樣 → 現場核對 → 誤差計算 → 合格簽發
+//   reviewer / admin 可見；對標 ISO 14064-3、IPCC GPG（合理保證）
+async function renderQaqc(project) {
+  const isReviewerNow = projectRole() === 'reviewer';
+  const isAdminNow = isSystemAdmin();
+  if (!isReviewerNow && !isAdminNow) {
+    $('#qaqc-sample-summary').innerHTML = '<div class="text-stone-500">本分頁限 reviewer / admin 角色使用。</div>';
+    return;
+  }
+  const projectId = project.id;
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
+
+  // 載入全部 plots
+  const snap = await getDocs(collection(db, 'projects', projectId, 'plots'));
+  const plots = [];
+  snap.forEach(d => plots.push({ id: d.id, ...d.data() }));
+  const realPlots = plots.filter(p => p.qaStatus !== 'shell');
+
+  // ----- 設定區 -----
+  renderQaqcConfigForm(project, cfg, isReviewerNow, isAdminNow);
+
+  // ----- 抽樣管理 -----
+  const target = computeTargetSampleSize(realPlots.length, cfg);
+  const sampledPlots = realPlots.filter(p => p.qaqc?.inSample === true);
+  $('#qaqc-sample-summary').innerHTML = `
+    <div class="flex items-center gap-3 flex-wrap">
+      <span>已抽樣 <b>${sampledPlots.length}</b> / 目標 <b>${target}</b>（${(cfg.samplingFraction * 100).toFixed(0)}% × ${realPlots.length} plots，最低 ${cfg.minSampleSize}）</span>
+      <span class="text-xs text-stone-500">（不含 ${plots.length - realPlots.length} 個 shell 樣區）</span>
+    </div>
+  `;
+
+  $('#btn-qaqc-random-sample').onclick = () => qaqcRandomSample(project, realPlots, target, cfg);
+  $('#btn-qaqc-clear-sample').onclick = () => qaqcClearSample(project, sampledPlots);
+
+  // ----- 抽樣 plot 清單 -----
+  renderQaqcPlotTable(project, sampledPlots);
+
+  // ----- 誤差統計 -----
+  renderQaqcErrorStats(realPlots);
+
+  // ----- 合格簽發 -----
+  renderQaqcApproveGate(project, realPlots, cfg);
+}
+
+function renderQaqcConfigForm(project, cfg, isReviewerNow, isAdminNow) {
+  const root = $('#qaqc-config-form');
+  if (!root) return;
+  const canEdit = (isReviewerNow || isAdminNow) && (project.status === 'review' || isAdminNow);
+  const fld = (label, name, value, suffix = '', step = '0.01') =>
+    el('div', { class: 'flex items-center gap-2 text-sm' },
+      el('label', { for: `qcfg-${name}`, class: 'w-44' }, label),
+      el('input', { id: `qcfg-${name}`, name, type: 'number', step, value: String(value),
+        class: 'border rounded px-2 py-1 w-24 text-sm', ...(canEdit ? {} : { disabled: 'true' }) }),
+      el('span', { class: 'text-xs text-stone-500' }, suffix)
+    );
+  root.innerHTML = '';
+  root.appendChild(el('div', { class: 'space-y-2' },
+    fld('抽樣比例', 'samplingFraction', cfg.samplingFraction, '（0–1，例 0.30 = 30%）', '0.01'),
+    fld('最低樣本數', 'minSampleSize', cfg.minSampleSize, '個（小專案防呆）', '1'),
+    fld('坡度誤差閾值', 'slopeThreshold_deg', cfg.slopeThreshold_deg, '° （IPCC GPG 合理保證 ±5°）', '0.5'),
+    fld('面積誤差閾值', 'areaThreshold_pct', cfg.areaThreshold_pct, '% （ISO 14064-3 reasonable assurance ±3–5%）', '0.5'),
+    canEdit
+      ? el('button', {
+          class: 'mt-2 bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-sm',
+          onclick: () => saveQaqcConfig(project)
+        }, '💾 儲存設定')
+      : el('p', { class: 'text-xs text-stone-500 mt-2' },
+          project.status === 'review' ? '（admin 才能改）' : '（status=review 時 reviewer/admin 可改）')
+  ));
+}
+
+async function saveQaqcConfig(project) {
+  const cfg = {
+    samplingFraction: parseFloat($('#qcfg-samplingFraction').value) || DEFAULT_QAQC_CONFIG.samplingFraction,
+    minSampleSize: parseInt($('#qcfg-minSampleSize').value, 10) || DEFAULT_QAQC_CONFIG.minSampleSize,
+    slopeThreshold_deg: parseFloat($('#qcfg-slopeThreshold_deg').value) || DEFAULT_QAQC_CONFIG.slopeThreshold_deg,
+    areaThreshold_pct: parseFloat($('#qcfg-areaThreshold_pct').value) || DEFAULT_QAQC_CONFIG.areaThreshold_pct,
+    requireAllSampledPassed: true,
+    requireResolutionForFailed: true,
+  };
+  try {
+    await updateDoc(doc(db, 'projects', project.id), { qaqcConfig: cfg });
+    state.project.qaqcConfig = cfg;
+    toast('QAQC 設定已儲存');
+    renderQaqc(state.project);
+  } catch (e) { toast('儲存失敗：' + e.message); }
+}
+
+async function qaqcRandomSample(project, realPlots, target, cfg) {
+  const seed = Date.now();
+  const sample = pickRandomSample(realPlots, target, seed);
+  if (!confirm(`將隨機抽樣 ${sample.length} 個 plot（種子 ${seed}，可重現）：\n\n${sample.slice(0, 8).map(p => p.code).join('、')}${sample.length > 8 ? ` 等 ${sample.length} 個` : ''}\n\n注意：本動作會把這些 plot 標 inSample=true（既有抽樣保留）。`)) return;
+  toast('寫入中...');
+  let count = 0, errors = 0;
+  for (const p of sample) {
+    try {
+      const newQaqc = { ...(p.qaqc || defaultQaqc()) };
+      newQaqc.inSample = true;
+      newQaqc.sampledAt = new Date();
+      newQaqc.sampledBy = state.user.uid;
+      newQaqc.sampleReason = newQaqc.sampleReason || 'random';
+      await updateDoc(doc(db, 'projects', project.id, 'plots', p.id), { qaqc: newQaqc });
+      count++;
+    } catch (e) { errors++; console.warn('[qaqc sample]', p.code, e); }
+  }
+  toast(`抽樣完成：${count} 成功${errors ? ` / ${errors} 失敗` : ''}`);
+  renderQaqc(state.project);
+}
+
+async function qaqcClearSample(project, sampledPlots) {
+  if (sampledPlots.length === 0) { toast('目前沒有抽樣 plot'); return; }
+  if (!confirm(`清空 ${sampledPlots.length} 個 plot 的抽樣標記？已重測的資料會清除（slopeVerified / dimensionsVerified / 誤差 / resolution）。`)) return;
+  let count = 0;
+  for (const p of sampledPlots) {
+    try {
+      await updateDoc(doc(db, 'projects', project.id, 'plots', p.id), { qaqc: defaultQaqc() });
+      count++;
+    } catch (e) { console.warn('[qaqc clear]', p.code, e); }
+  }
+  toast(`已清空 ${count} 個抽樣標記`);
+  renderQaqc(state.project);
+}
+
+function renderQaqcPlotTable(project, sampledPlots) {
+  const root = $('#qaqc-plot-table');
+  if (!root) return;
+  if (sampledPlots.length === 0) {
+    root.innerHTML = '<div class="text-stone-500 text-sm">尚無抽樣 plot — 點上方「🎲 隨機抽樣」開始。</div>';
+    return;
+  }
+  const rows = sampledPlots.map(p => {
+    const q = p.qaqc || {};
+    const status = getPlotQaqcStatus(p);
+    const meta = QAQC_STATUS_META[status];
+    const slopeOrig = Number.isFinite(p.slopeDegrees) ? p.slopeDegrees.toFixed(1) + '°' : '-';
+    const slopeVer  = Number.isFinite(q.slopeVerified) ? q.slopeVerified.toFixed(1) + '°' : '-';
+    const slopeErr  = Number.isFinite(q.slopeError_deg) ? '±' + q.slopeError_deg.toFixed(1) + '°' : '-';
+    const areaOrig  = Number.isFinite(p.areaHorizontal_m2) ? p.areaHorizontal_m2.toFixed(1) + ' m²' : '-';
+    const areaVer   = Number.isFinite(q.areaVerifiedHorizontal) ? q.areaVerifiedHorizontal.toFixed(1) + ' m²' : '-';
+    const areaErr   = Number.isFinite(q.areaError_pct) ? '±' + q.areaError_pct.toFixed(2) + '%' : '-';
+    const resolution = q.resolution ? `${q.resolution}: ${(q.resolutionNote || '').slice(0, 40)}${(q.resolutionNote || '').length > 40 ? '…' : ''}` : '-';
+    return `<tr class="border-b hover:bg-stone-50">
+      <td class="py-1 px-2 font-mono text-xs"><a href="#/p/${project.id}/plot/${p.id}" class="text-forest-700 hover:underline">${p.code}</a></td>
+      <td class="py-1 px-2">${slopeOrig}</td>
+      <td class="py-1 px-2">${slopeVer}</td>
+      <td class="py-1 px-2">${slopeErr}</td>
+      <td class="py-1 px-2">${areaOrig}</td>
+      <td class="py-1 px-2">${areaVer}</td>
+      <td class="py-1 px-2">${areaErr}</td>
+      <td class="py-1 px-2"><span class="${meta.cls} text-xs px-2 py-0.5 rounded">${meta.badge} ${meta.label}</span></td>
+      <td class="py-1 px-2 text-xs">${resolution}</td>
+    </tr>`;
+  }).join('');
+  root.innerHTML = `
+    <table class="min-w-full">
+      <thead class="bg-stone-100 text-xs">
+        <tr>
+          <th class="text-left py-1 px-2">樣區</th>
+          <th class="text-left py-1 px-2">原坡度</th>
+          <th class="text-left py-1 px-2">重測坡度</th>
+          <th class="text-left py-1 px-2">坡度誤差</th>
+          <th class="text-left py-1 px-2">原面積（水平）</th>
+          <th class="text-left py-1 px-2">重測面積（水平）</th>
+          <th class="text-left py-1 px-2">面積誤差</th>
+          <th class="text-left py-1 px-2">狀態</th>
+          <th class="text-left py-1 px-2">處置</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="text-xs text-stone-500 mt-2">點樣區編號 → 進入樣區編輯，捲到「🔍 QAQC 重測」區填寫重測值。</p>
+  `;
+}
+
+function renderQaqcErrorStats(realPlots) {
+  const root = $('#qaqc-error-stats');
+  if (!root) return;
+  const stats = computeErrorStats(realPlots);
+  const fmt = (s) => s.n === 0
+    ? '—'
+    : `n=${s.n}　mean=${s.mean.toFixed(2)}${s.unit}　max=${s.max.toFixed(2)}${s.unit}　std=${s.std.toFixed(2)}${s.unit}`;
+  root.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="bg-stone-50 rounded p-2">
+        <div class="font-semibold text-stone-700">坡度誤差</div>
+        <div class="text-xs text-stone-600 mt-1">${fmt(stats.slope)}</div>
+      </div>
+      <div class="bg-stone-50 rounded p-2">
+        <div class="font-semibold text-stone-700">面積誤差（相對）</div>
+        <div class="text-xs text-stone-600 mt-1">${fmt(stats.area)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderQaqcApproveGate(project, realPlots, cfg) {
+  const gateBox = $('#qaqc-approve-gate');
+  const btn = $('#btn-qaqc-approve');
+  if (!gateBox || !btn) return;
+  const result = checkApprovalGate(realPlots, cfg);
+  const s = result.summary;
+  const lines = [];
+  lines.push(`抽樣狀態：${s.sampled} / ${s.totalPlots}（target ≥${computeTargetSampleSize(s.totalPlots, cfg)}）`);
+  lines.push(`✅ 通過 <b>${s.passed}</b>　🟢 已處置 <b>${s.failedResolved}</b>　🟡 待重測 <b>${s.pending}</b>　❌ 待處置 <b>${s.failedUnresolved}</b>`);
+  if (!result.canApprove && result.reasons.length) {
+    lines.push('<div class="mt-2 text-red-700 text-xs"><b>未滿足簽發條件：</b><ul class="list-disc list-inside">' +
+      result.reasons.map(r => `<li>${r}</li>`).join('') + '</ul></div>');
+  }
+  gateBox.innerHTML = lines.join('<br>');
+  btn.disabled = !result.canApprove;
+  btn.onclick = () => qaqcApprove(project, realPlots, cfg, result);
+}
+
+async function qaqcApprove(project, realPlots, cfg, gateResult) {
+  const s = gateResult.summary;
+  if (!confirm(`確認簽發 — 將完成本專案查證：\n\n· 抽樣 ${s.sampled} / ${s.totalPlots} plots\n· 通過 ${s.passed} / 已處置 ${s.failedResolved}\n· 全資料永久鎖定，不可再 markQA\n\n本動作會把專案 status: review → verified，並寫入 QAQC 摘要到 project.qaqcSummary。`)) return;
+  try {
+    // v2.7.17：QAQC 摘要與 review→verified 同一筆 updateDoc 寫入
+    //          （reviewer 在 verified 後就失去寫權限，必須在 transition 內合併）
+    const qaqcSummary = {
+      sampledCount: s.sampled,
+      totalPlots: s.totalPlots,
+      passedCount: s.passed,
+      failedResolvedCount: s.failedResolved,
+      slopeThreshold_deg: cfg.slopeThreshold_deg,
+      areaThreshold_pct: cfg.areaThreshold_pct,
+      samplingFraction: cfg.samplingFraction,
+      verifiedAt: new Date(),
+      verifiedBy: state.user.uid,
+      errorStats: computeErrorStats(realPlots),
+    };
+    const result = await applyStatusAfterReviewerApprove(project, { qaqcSummary });
+    state.project.qaqcSummary = qaqcSummary;
+    if (result === 'verified') {
+      toast('✅ 簽發成功，全案已查證並鎖定', 4000);
+      setTimeout(() => location.reload(), 1500);
+    }
+  } catch (e) { toast('簽發失敗：' + e.message); }
 }
 
 async function renderMyFlagged() {
