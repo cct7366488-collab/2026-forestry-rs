@@ -3,17 +3,17 @@
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=28020';
+import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=28030';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=28020';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=28030';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28020';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28030';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28020';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28030';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -649,12 +649,15 @@ export function openMethodologyForm(project) {
     field({ label: '目標樣區數', name: 'targetPlotCount', type: 'number', step: '1', min: '1', required: true, value: m.targetPlotCount }),
     field({ label: '樣區形狀（預設）', name: 'plotShape', required: true,
       options: [
+        // v2.8.3：rectangle 提到第一個 + 註明台灣永久樣區慣例
+        { value: 'rectangle', label: '矩形（台灣永久樣區，0.05 ha = 20 × 25 m）★ 推薦' },
         { value: 'circle', label: '圓形' },
         { value: 'square', label: '方形' },
-        { value: 'rectangle', label: '矩形（v2.7.16）' },
         { value: 'irregular', label: '不規則多邊形（v2.8）' }
       ],
       value: m.plotShape }),
+    el('p', { class: 'text-xs text-stone-600 -mt-2 mb-2', style: 'margin-left:2px' },
+      '📌 台灣永久樣區（林業及自然保育署 / 中華紙漿廠等）多採 0.05 ha 矩形 20 × 25 m（X 沿等高線、Y 沿坡）。建議首選矩形以符合實務量測幾何。'),
     field({ label: '允許的樣區面積（m²，逗號分隔）', name: 'plotAreaOptions', required: true,
       value: (m.plotAreaOptions || []).join(','), placeholder: '400, 500, 1000' }),
     // v2.7.16：dimensionType — 量測單位（沿坡距 vs 水平投影）
@@ -949,11 +952,12 @@ export async function openBatchPlotsForm(project) {
     ),
     field({ label: '預設形狀', name: 'shape',
       options: [
+        // v2.8.3：rectangle 提前 + 加台灣 20×25 預設說明
+        { value: 'rectangle', label: '矩形（台灣 20×25 m，預設帶值；surveyor 可改）★' },
         { value: 'circle', label: '圓形' },
-        { value: 'square', label: '方形' },
-        { value: 'rectangle', label: '矩形（v2.7.16，寬/長由 surveyor 填）' }
+        { value: 'square', label: '方形' }
       ],
-      value: meth.plotShape || 'circle', required: true }),
+      value: meth.plotShape || 'rectangle', required: true }),
     previewBox,
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '建立'),
@@ -993,11 +997,13 @@ export async function openBatchPlotsForm(project) {
     try {
       const colRef = fb.collection(fb.db, 'projects', project.id, 'plots');
       // v2.7.16：批次空殼也帶 v2.6 schema 欄位（surveyor 後續編輯時補真實坡度與 dimensions）
+      // v2.8.3：rectangle 預設帶 20×25（台灣永久樣區慣例）；只在 area=500 時帶值，其餘留空
       const dimType = meth.dimensionType || 'slope_distance';
       let shellPlotDimensions;
       if (shape === 'circle') shellPlotDimensions = { radius: Math.sqrt(area / Math.PI) };
       else if (shape === 'square') { const side = Math.sqrt(area); shellPlotDimensions = { side, width: side, length: side }; }
-      else shellPlotDimensions = null;  // rectangle：留空殼，surveyor 填寬/長
+      else if (shape === 'rectangle' && area === 500) shellPlotDimensions = { width: 20, length: 25 };  // v2.8.3：台灣 0.05 ha 預設
+      else shellPlotDimensions = null;  // rectangle 非 500 m²：留空殼，surveyor 填寬/長
       let success = 0;
       for (let i = 0; i < count; i++) {
         const n = start + i;
@@ -1014,7 +1020,8 @@ export async function openBatchPlotsForm(project) {
           slopeSource: null,
           dimensionType: dimType,
           areaHorizontal_m2: area,         // slope=0 → cos(0)=1 → = area
-          migrationPending: shape === 'rectangle',  // rectangle 空殼缺 dimensions → 待補登
+          // v2.8.3：rectangle 500m² 預設 20×25 帶值 → 不再 pending；非 500 仍 pending
+          migrationPending: shape === 'rectangle' && area !== 500,
           // v2.7.17：QAQC 預設子結構
           qaqc: defaultQaqc(),
           location: null,
@@ -1719,13 +1726,14 @@ export async function openPlotForm(project, existing = null) {
   // v2.8.0：加 irregular（不規則多邊形）
   const dimType = meth.dimensionType || 'slope_distance';
   const dimTypeLabel = dimType === 'slope_distance' ? '沿坡距' : '水平投影';
+  // v2.8.3：rectangle 提到第一個 + 預設值改 rectangle
   const shapeOptions = [
+    { value: 'rectangle', label: '矩形（台灣 20×25）★' },
     { value: 'circle', label: '圓形' },
     { value: 'square', label: '方形' },
-    { value: 'rectangle', label: '矩形' },
-    { value: 'irregular', label: '不規則多邊形（v2.8）' }
+    { value: 'irregular', label: '不規則多邊形' }
   ];
-  const initShape = existing?.shape || meth.plotShape || 'circle';
+  const initShape = existing?.shape || meth.plotShape || 'rectangle';
 
   // v2.8.0：irregular 用 vertices 陣列（local m 相對 plot 中心；3-50 頂點，CCW，simple polygon）
   let irregularVertices = (existing?.shape === 'irregular' && Array.isArray(existing?.plotDimensions?.vertices))
@@ -1918,6 +1926,11 @@ export async function openPlotForm(project, existing = null) {
     rectFields.style.display = shape === 'rectangle' ? '' : 'none';
     irregularFields.style.display = shape === 'irregular' ? '' : 'none';
     areaSelField.style.display = (shape === 'rectangle' || shape === 'irregular') ? 'none' : '';
+    // v2.8.3：切到 rectangle 且 width/length 都空 → auto-fill 台灣 20×25 預設
+    if (shape === 'rectangle' && !widthInput.value && !lengthInput.value) {
+      widthInput.value = '20';
+      lengthInput.value = '25';
+    }
     if (shape === 'irregular') {
       validateAndPreviewIrregular();
       return;
@@ -3395,18 +3408,21 @@ export async function seedDemoData(project) {
   toast('灌入中...');
   try {
     // 三個示範樣區（蓮華池研究中心附近）
+    // v2.8.3：rectangle 20×25 為台灣永久樣區慣例 → 改一半 demo 為 rectangle，其餘保留 circle/square 作對照
     const demoPlots = [
-      { code: `${project.code}-001`, lat: 23.9176, lng: 120.8838, forestUnit: '示範-1', shape: 'circle', area_m2: 500, notes: '柳杉人工林' },
-      { code: `${project.code}-002`, lat: 23.9192, lng: 120.8856, forestUnit: '示範-2', shape: 'square', area_m2: 400, notes: '天然闊葉林' },
-      { code: `${project.code}-003`, lat: 23.9158, lng: 120.8821, forestUnit: '示範-1', shape: 'circle', area_m2: 500, notes: '混合林' }
+      { code: `${project.code}-001`, lat: 23.9176, lng: 120.8838, forestUnit: '示範-1', shape: 'rectangle', area_m2: 500, notes: '柳杉人工林（20×25 矩形，台灣永久樣區慣例）' },
+      { code: `${project.code}-002`, lat: 23.9192, lng: 120.8856, forestUnit: '示範-2', shape: 'square', area_m2: 400, notes: '天然闊葉林（方形對照組）' },
+      { code: `${project.code}-003`, lat: 23.9158, lng: 120.8821, forestUnit: '示範-1', shape: 'rectangle', area_m2: 500, notes: '混合林（20×25 矩形）' }
     ];
     // v2.7.16：seed plots 帶 v2.6 schema 欄位（slope=0 平地、dimensionType 從 methodology）
+    // v2.8.3：rectangle shape 用 20×25（500 m²）；其他形狀沿用既有計算
     const dimType = project?.methodology?.dimensionType || 'slope_distance';
     for (const p of demoPlots) {
       const t97 = wgs84ToTwd97(p.lng, p.lat);
-      const dims = p.shape === 'circle'
-        ? { radius: Math.sqrt(p.area_m2 / Math.PI) }
-        : { side: Math.sqrt(p.area_m2), width: Math.sqrt(p.area_m2), length: Math.sqrt(p.area_m2) };
+      let dims;
+      if (p.shape === 'circle') dims = { radius: Math.sqrt(p.area_m2 / Math.PI) };
+      else if (p.shape === 'rectangle') dims = { width: 20, length: 25 };  // 台灣永久樣區
+      else dims = { side: Math.sqrt(p.area_m2), width: Math.sqrt(p.area_m2), length: Math.sqrt(p.area_m2) };
       const plotRef = await fb.addDoc(fb.collection(fb.db, 'projects', project.id, 'plots'), {
         code: p.code,
         forestUnit: p.forestUnit,

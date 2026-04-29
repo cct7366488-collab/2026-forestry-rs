@@ -15,18 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=28020";
-import * as forms from "./forms.js?v=28020";
-import * as analytics from "./analytics.js?v=28020";
-import * as importWizard from "./import-wizard.js?v=28020";
-import { renderTreeDistribution } from "./distribution.js?v=28020";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28020";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=28030";
+import * as forms from "./forms.js?v=28030";
+import * as analytics from "./analytics.js?v=28030";
+import * as importWizard from "./import-wizard.js?v=28030";
+import { renderTreeDistribution } from "./distribution.js?v=28030";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28030";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=28020";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28020";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=28030";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28030";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28020";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28030";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -69,9 +69,10 @@ export function isLocked() { return state.project?.locked === true; }
 // 預設方法學（v1.5 新專案/無 methodology 的舊專案 fallback）
 // v2.0：擴展 understory（地被植物）/ soilCons（水土保持）兩模組可開關
 // v2.7.15：新增 dimensionType（沿坡距 / 水平投影），plotShape 擴充 'rectangle'（plot 層支援，methodology 仍可指定預設）
+// v2.8.3：plotShape 預設改 'rectangle'（台灣永久樣區 0.05 ha = 20 × 25 m，林業及自然保育署 SOP / 中華紙漿廠實務）
 export const DEFAULT_METHODOLOGY = {
   targetPlotCount: 50,
-  plotShape: 'circle',                           // v2.7.15：'circle' | 'square' | 'rectangle'
+  plotShape: 'rectangle',                        // v2.8.3：'rectangle' 為台灣永久樣區慣例（20 × 25 m）；亦支援 circle / square / irregular
   plotAreaOptions: [400, 500, 1000],
   // v2.7.15：dimensionType 決定 plot.area_m2 / plotDimensions 的單位語意
   //   'slope_distance'：野外實採（皮尺沿坡）→ 寫入時自動算 areaHorizontal_m2
@@ -301,9 +302,76 @@ async function renderGeoMigrationBanner(projectId) {
   }
 }
 
+// v2.8.3：square → rectangle 20×25 批次轉換 banner
+//   admin 看見；對 shape='square' AND area_m2=500 AND qaStatus≠'shell' 的 plots 一鍵轉
+//   含 QAQC 整合（重置 area-related 欄位，保留 slope 與抽樣狀態）
+async function renderRectConversionBanner(projectId) {
+  const banner = $('#rect-conversion-banner');
+  if (!banner) return;
+  banner.classList.add('hidden');
+  banner.innerHTML = '';
+  try {
+    const snap = await getDocs(collection(db, 'projects', projectId, 'plots'));
+    let candidates = 0, withQaqc = 0;
+    snap.forEach(d => {
+      const p = d.data();
+      if (p.qaStatus === 'shell') return;
+      if (p.shape !== 'square') return;
+      if (Number(p.area_m2) !== 500) return;
+      candidates++;
+      if (p.qaqc?.verifiedAt) withQaqc++;
+    });
+    if (candidates === 0) return;
+    banner.classList.remove('hidden');
+    const verifiedNote = (state.project?.status === 'verified')
+      ? ' <span class="text-red-700">⚠ 專案已查證，請先 admin 退回 review 才能批次轉換</span>'
+      : '';
+    banner.innerHTML = `
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <b>📐 偵測 ${candidates} 個 square / 500 m² 樣區可轉為 rectangle 20 × 25</b>
+          <div class="text-xs mt-1">
+            台灣永久樣區慣例為 20×25 m 矩形（林業及自然保育署 / 中華紙漿廠等），現有 square 22.36×22.36 邊界畫法會讓樣木落界外。本動作只動 area=500 的 square plots${withQaqc > 0 ? `；其中 <b>${withQaqc}</b> 個已 QAQC 重測，將被重置（slope 重測 + 抽樣狀態保留，僅 area 重測重做）` : ''}。${verifiedNote}
+          </div>
+        </div>
+        <button id="btn-rect-conversion" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs font-medium shrink-0" ${state.project?.status === 'verified' ? 'disabled' : ''}>📐 一鍵批次轉換</button>
+      </div>
+    `;
+    $('#btn-rect-conversion')?.addEventListener('click', () => triggerRectConversion(projectId));
+  } catch (e) {
+    console.warn('[rect-conversion banner] count failed', e);
+  }
+}
+
+async function triggerRectConversion(projectId) {
+  if (state.project?.status === 'verified') {
+    toast('專案已查證，請先 admin 退回 review');
+    return;
+  }
+  try {
+    const m = await import('./migration-v2715.js?v=28030');
+    toast('掃描中...');
+    const dry = await m.dryRunSquareToRectangle(projectId);
+    if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
+    const sample = dry.targets.slice(0, 5).map(t => t.code).join('、');
+    const more = dry.targets.length > 5 ? ` 等 ${dry.targets.length} 個` : '';
+    const qaqcWarn = dry.withQaqcCount > 0
+      ? `\n\n⚠️ 其中 ${dry.withQaqcCount} 個樣區有既存 QAQC 面積重測 — 將清除（slope 重測 + 抽樣狀態保留）。reviewer 需重新確認面積。`
+      : '';
+    if (!confirm(`將 ${dry.targets.length} 個樣區轉為 rectangle 20 × 25 m：\n\n${sample}${more}\n\n變更欄位：shape='square' → 'rectangle'；plotDimensions={width:20, length:25}；migrationPending=false。area_m2 不變（500）。${qaqcWarn}\n\n確定執行？`)) return;
+    toast('批次寫入中...');
+    const result = await m.convertSquareToRectangle(projectId, { execute: true });
+    toast(`✓ 完成：${result.count} 樣區已轉 rectangle${result.qaqcResetCount > 0 ? `（${result.qaqcResetCount} QAQC 重置）` : ''}`, 4500);
+    setTimeout(() => location.reload(), 1800);
+  } catch (e) {
+    toast('批次轉換失敗：' + e.message);
+    console.error('[rect-conversion]', e);
+  }
+}
+
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=28020');
+    const m = await import('./migration-v2715.js?v=28030');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -903,6 +971,10 @@ async function renderProjectHome(root, projectId) {
   // v2.7.16：樣區幾何 schema 升級 — admin / PI 看到「N 個樣區待補登」banner（一次性掃描，不放 onSnapshot）
   if (canQA() || isSystemAdmin()) {
     queueMicrotask(() => renderGeoMigrationBanner(projectId));
+  }
+  // v2.8.3：square → rectangle 20×25 批次轉換 banner（admin 才能執行）
+  if (isSystemAdmin()) {
+    queueMicrotask(() => renderRectConversionBanner(projectId));
   }
 
   // tab 切換

@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=28020">
+  <link rel="stylesheet" href="style.css?v=28030">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.8.2</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.8.3</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -237,6 +237,8 @@
       </div>
       <!-- v2.7.16：樣區幾何 schema 升級提示（admin / PI 看見；無人需補登時 hidden）-->
       <div id="geo-migration-banner" class="hidden bg-yellow-50 border border-yellow-300 text-yellow-900 text-sm px-3 py-2 rounded mb-3"></div>
+      <!-- v2.8.3：square → rectangle 20×25 批次轉換提示（admin 看見；無 square/500 plots 時 hidden）-->
+      <div id="rect-conversion-banner" class="hidden bg-emerald-50 border border-emerald-300 text-emerald-900 text-sm px-3 py-2 rounded mb-3"></div>
       <!-- v2.7：Reviewer 完成審查卡（顯示時機：reviewer/admin 角色 + status=review/verified）-->
       <div id="reviewer-approval-card" class="hidden bg-white rounded-lg shadow p-4 mb-3 border-l-4 border-amber-500">
         <h3 class="font-semibold mb-2">🔍 完成審查（Reviewer）</h3>
@@ -529,6 +531,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=28020"></script>
+<script type="module" src="js/app.js?v=28030"></script>
 </body>
 </html>
