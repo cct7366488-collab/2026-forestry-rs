@@ -8,9 +8,9 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=28010';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=28020';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=28010';
+import { TREES } from './species-dict.js?v=28020';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;

@@ -15,18 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=28010";
-import * as forms from "./forms.js?v=28010";
-import * as analytics from "./analytics.js?v=28010";
-import * as importWizard from "./import-wizard.js?v=28010";
-import { renderTreeDistribution } from "./distribution.js?v=28010";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28010";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=28020";
+import * as forms from "./forms.js?v=28020";
+import * as analytics from "./analytics.js?v=28020";
+import * as importWizard from "./import-wizard.js?v=28020";
+import { renderTreeDistribution } from "./distribution.js?v=28020";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28020";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=28010";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28010";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=28020";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28020";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28010";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28020";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -303,7 +303,7 @@ async function renderGeoMigrationBanner(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=28010');
+    const m = await import('./migration-v2715.js?v=28020');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1251,6 +1251,9 @@ async function renderQaqc(project) {
   const projectId = project.id;
   const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
 
+  // v2.8.2：立木層級 QAQC banner（依目前狀態渲染）— 一鍵啟用 / 關閉
+  renderQaqcTreeLevelBanner(project, cfg);
+
   // 載入全部 plots
   const snap = await getDocs(collection(db, 'projects', projectId, 'plots'));
   const plots = [];
@@ -1323,6 +1326,46 @@ async function renderQaqc(project) {
 
   // v2.7.18：更新 tab 上的進度 pill
   refreshBadgeCounts(projectId);
+}
+
+// v2.8.2：立木層級 QAQC banner — 醒目顯示 + 一鍵啟用 / 關閉
+function renderQaqcTreeLevelBanner(project, cfg) {
+  const banner = $('#qaqc-tree-level-banner');
+  if (!banner) return;
+  banner.classList.remove('hidden');
+  const enabled = cfg.enableTreeLevelQaqc === true;
+  const canEdit = (projectRole() === 'reviewer' || isSystemAdmin()) && (project.status === 'review' || isSystemAdmin());
+  if (enabled) {
+    banner.className = 'bg-green-50 border border-green-300 rounded p-3 text-sm flex items-center justify-between gap-3 flex-wrap';
+    banner.innerHTML = `
+      <div class="flex-1">
+        <b>🌳 立木層級 QAQC 已啟用（v2.8.1）</b>
+        <span class="text-xs text-stone-600 ml-2">每抽樣 plot 內再抽 ${(cfg.treeSamplingFraction * 100).toFixed(0)}% 立木重測 DBH ±${cfg.dbhThreshold_cm}cm/${cfg.dbhThreshold_pct}%、H ±${cfg.heightThreshold_m}m/${cfg.heightThreshold_pct}%、位置 ±${cfg.positionThreshold_m}m</span>
+      </div>
+      ${canEdit ? '<button id="btn-toggle-tree-qaqc" class="border bg-white hover:bg-stone-50 px-3 py-1 rounded text-xs">🔒 停用</button>' : ''}
+    `;
+  } else {
+    banner.className = 'bg-amber-50 border border-amber-300 rounded p-3 text-sm flex items-center justify-between gap-3 flex-wrap';
+    banner.innerHTML = `
+      <div class="flex-1">
+        <b>🌳 立木層級 QAQC（v2.8.1，目前未啟用）</b>
+        <div class="text-xs text-stone-700 mt-1">啟用後 reviewer 可在每抽樣 plot 內再抽 ~10% 立木重測 DBH / 高度 / 位置（IPCC GPG 延伸：1cm DBH 誤差於 30cm 樹 ≈ 6% 生質量誤差）。</div>
+      </div>
+      ${canEdit
+        ? '<button id="btn-toggle-tree-qaqc" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-sm shrink-0">🔓 一鍵啟用</button>'
+        : `<span class="text-xs text-stone-500 shrink-0">${project.status === 'review' ? '（admin 才能改）' : '（status=review 時 reviewer/admin 可改）'}</span>`
+      }
+    `;
+  }
+  $('#btn-toggle-tree-qaqc')?.addEventListener('click', async () => {
+    const newCfg = { ...cfg, enableTreeLevelQaqc: !enabled };
+    try {
+      await updateDoc(doc(db, 'projects', project.id), { qaqcConfig: newCfg });
+      state.project.qaqcConfig = newCfg;
+      toast(enabled ? '已停用立木層級 QAQC' : '✅ 已啟用立木層級 QAQC');
+      renderQaqc(state.project);
+    } catch (e) { toast('切換失敗：' + e.message); }
+  });
 }
 
 function renderQaqcConfigForm(project, cfg, isReviewerNow, isAdminNow) {
@@ -1511,8 +1554,14 @@ function renderQaqcPlotTable(project, sampledPlots, treeMap = new Map(), cfg = D
       }
       treeCol = `<td class="py-1 px-2"><button class="hover:underline" data-open-tree-sampling="${p.id}">${chip}</button></td>`;
     }
+    // v2.8.2：明確的 plot-level 重測按鈕（admin / reviewer 都可用，不必透過 plot 詳情頁繞）
+    const remeasureBtn = `<button class="border bg-blue-50 hover:bg-blue-100 text-blue-900 px-2 py-0.5 rounded text-xs" data-open-plot-remeasure="${p.id}" title="開 plot QAQC 重測 modal（填重測 slope / dimensions）">🔍 plot 重測</button>`;
+    // v2.8.2：明確的 tree sampling 按鈕（treeEnabled 才啟用，否則灰掉 + tooltip）
+    const treeBtn = treeEnabled
+      ? `<button class="border bg-green-50 hover:bg-green-100 text-green-900 px-2 py-0.5 rounded text-xs" data-open-tree-sampling="${p.id}" title="開立木抽樣 modal（隨機抽 ~10% 立木 + 重測 DBH/H/位置）">🌳 立木抽樣</button>`
+      : `<button class="border bg-stone-50 text-stone-400 px-2 py-0.5 rounded text-xs cursor-not-allowed" title="立木層級 QAQC 未啟用，請至上方 banner 一鍵啟用" disabled>🌳 立木抽樣</button>`;
     return `<tr class="border-b hover:bg-stone-50">
-      <td class="py-1 px-2 font-mono text-xs"><a href="#/p/${project.id}/plot/${p.id}" class="text-forest-700 hover:underline">${p.code}</a></td>
+      <td class="py-1 px-2 font-mono text-xs"><a href="#/p/${project.id}/plot/${p.id}" class="text-forest-700 hover:underline" title="進入樣區詳情頁">${p.code}</a></td>
       <td class="py-1 px-2">${slopeOrig}</td>
       <td class="py-1 px-2">${slopeVer}</td>
       <td class="py-1 px-2">${slopeErr}</td>
@@ -1522,6 +1571,7 @@ function renderQaqcPlotTable(project, sampledPlots, treeMap = new Map(), cfg = D
       <td class="py-1 px-2"><span class="${meta.cls} text-xs px-2 py-0.5 rounded">${meta.badge} ${meta.label}</span></td>
       ${treeCol}
       <td class="py-1 px-2 text-xs">${resolution}</td>
+      <td class="py-1 px-2"><div class="flex gap-1 flex-wrap">${remeasureBtn}${treeBtn}</div></td>
     </tr>`;
   }).join('');
   root.innerHTML = `
@@ -1538,13 +1588,26 @@ function renderQaqcPlotTable(project, sampledPlots, treeMap = new Map(), cfg = D
           <th class="text-left py-1 px-2">plot 狀態</th>
           ${treeEnabled ? '<th class="text-left py-1 px-2">🌳 立木</th>' : ''}
           <th class="text-left py-1 px-2">處置</th>
+          <th class="text-left py-1 px-2">操作</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <p class="text-xs text-stone-500 mt-2">點樣區編號 → 進入樣區編輯，捲到「🔍 QAQC 重測」區填寫重測值。${treeEnabled ? '　點「🌳 立木」chip → 開立木抽樣與重測。' : ''}</p>
+    <p class="text-xs text-stone-500 mt-2">
+      🔍 plot 重測 = 開 QAQC 重測 modal（reviewer / admin 都可用，無需切到樣區詳情頁）。
+      ${treeEnabled ? '🌳 立木抽樣 = 開該 plot 內立木抽樣管理 + 個別立木重測。' : '🌳 立木抽樣按鈕灰掉中 — 至上方 banner 一鍵啟用立木層級 QAQC（v2.8.1）。'}
+    </p>
   `;
-  // v2.8.1：tree sampling chip click
+  // v2.8.2：plot 重測按鈕 click
+  root.querySelectorAll('[data-open-plot-remeasure]').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const pid = btn.dataset.openPlotRemeasure;
+      const p = sampledPlots.find(x => x.id === pid);
+      if (p) forms.openQaqcRemeasureForm(state.project, p);
+    });
+  });
+  // v2.8.1：tree sampling chip / button click
   if (treeEnabled) {
     root.querySelectorAll('[data-open-tree-sampling]').forEach(btn => {
       btn.addEventListener('click', (ev) => {

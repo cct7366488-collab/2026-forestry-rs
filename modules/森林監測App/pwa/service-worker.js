@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.8.1';  // v2.8.1：tree-level QAQC（每抽樣 plot 內再抽 ~10% 立木重測 DBH/高度/位置；reviewer 寫 tree.qaqc；簽發 gate 擴充）
+const CACHE = 'forest-monitor-v2.8.2';  // v2.8.2：UX patch — topbar 版本號 / QAQC tab 立木層級可見度（banner + 設定預設展開）/ plot 表格加 🔍 重測 + 🌳 立木抽樣 明確按鈕
 const SHELL = [
   './',
   './index.html',

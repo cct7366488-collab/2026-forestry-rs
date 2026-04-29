@@ -1,5 +1,5 @@
 // v2.8.0：irregular plot 多邊形繪製 + 點對多邊形判斷
-import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=28010';
+import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=28020';
 
 // ===== distribution.js — 立木分布散布圖（v2.6.2 / v2.5.1 backlog 🅲 落地）=====
 //

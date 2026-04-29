@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=28010">
+  <link rel="stylesheet" href="style.css?v=28020">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -39,7 +39,11 @@
     <a href="#/" class="flex items-center gap-2 leading-tight">
       <span class="text-2xl">🌲</span>
       <span class="flex flex-col">
-        <span class="text-base font-bold tracking-wide">ForestMRV</span>
+        <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
+          ForestMRV
+          <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.8.2</span>
+        </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
     </a>
@@ -253,9 +257,12 @@
         <button id="btn-qaqc-tour" class="border bg-blue-50 hover:bg-blue-100 text-blue-900 px-3 py-1.5 rounded text-sm shrink-0" title="開啟查證流程教學（5 步導覽）">🎓 教學</button>
       </div>
 
-      <!-- 設定區（折疊；reviewer 在 status=review 時可改）-->
-      <details class="bg-white rounded-lg shadow p-4">
-        <summary class="cursor-pointer font-medium">⚙️ QAQC 設定（抽樣比例 / 閾值）</summary>
+      <!-- v2.8.2：立木層級 QAQC 啟用 banner（醒目，預設關閉時提示啟用） -->
+      <div id="qaqc-tree-level-banner" class="hidden bg-amber-50 border border-amber-300 rounded p-3 text-sm flex items-center justify-between gap-3 flex-wrap"></div>
+
+      <!-- 設定區（v2.8.2：預設展開 — 否則使用者找不到立木層級切換） -->
+      <details class="bg-white rounded-lg shadow p-4" open>
+        <summary class="cursor-pointer font-medium">⚙️ QAQC 設定（抽樣比例 / 閾值 / 立木層級開關）</summary>
         <div id="qaqc-config-form" class="mt-3"></div>
       </details>
 
@@ -522,6 +529,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=28010"></script>
+<script type="module" src="js/app.js?v=28020"></script>
 </body>
 </html>
