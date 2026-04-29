@@ -1,5 +1,6 @@
 # 資料 Schema（Firestore）
 
+> v2.6.3（2026-04-29，app v2.8.1）：tree-level QAQC — tree 加 `qaqc` map（mirror plot.qaqc：inSample / dbhVerified / heightVerified / localXVerified / localYVerified / 誤差 / resolution）；project.qaqcConfig 加 tree-level 開關 + 閾值（預設 enableTreeLevelQaqc=false / 10% / min 3 / DBH ±2cm-5% / H ±1.5m-10% / 位置 ±1m）；project.qaqcSummary 加 tree-level 摘要。reviewer 在 status=review 可寫 tree.qaqc 子集合（rules hasOnly + 限 trees subColl）。對應 IPCC GPG 延伸（1cm DBH 誤差於 30cm 樹 ≈ 6% 生質量誤差）。
 > v2.6.2（2026-04-29，app v2.8.0）：irregular plot 不規則多邊形 — plotShape enum 加 `'irregular'`；plotDimensions 結構加 `vertices`（[{x,y}, ...] CCW + simple + 3–50 頂點，local meters 相對 plot.locationTWD97）+ `bbox` + `sourceInfo`；面積由 Shoelace 公式算；輸入支援表格手填或 GeoJSON 上傳（自動偵測 WGS84 / TWD97 + 轉換）。立木分布散布圖、import wizard 防呆、QAQC 重測（area-only 模式）、Excel + .doc 報告皆同步支援。
 > v2.6.1（2026-04-29，app v2.7.17）：Reviewer QAQC 工作流 — plot 加 `qaqc` map（inSample / slopeVerified / dimensionsVerified / areaVerifiedHorizontal / 誤差 / resolution / 處置紀錄）；project 加 `qaqcConfig`（抽樣比例 / 閾值）+ `qaqcSummary`（簽發摘要）。對標 ISO 14064-3、IPCC GPG（reasonable assurance ±5°/±3%）、TMS 方法學監測計畫。
 > v2.6（2026-04-29，app v2.7.15 schema / v2.7.16 UI）：樣區幾何 schema 升級 — plotShape 加 'rectangle'、新增 dimensionType（沿坡距 / 水平投影）、slopeDegrees / slopeAspect / slopeSource、areaHorizontal_m2（cos 校正）、migrationPending（既有資料待補登 flag）。v2.7.16 落地：plot form 幾何/坡度欄位 + 即時水平投影預覽、methodology dimensionType radio、立木分布圖「沿坡距 ↔ 水平投影」切換鈕、migration banner（admin DRY-RUN → 批次標記）、import-wizard 防呆改 per-plot 動態上限。
@@ -158,6 +159,24 @@
 ### 四、`/projects/{projectId}/plots/{plotId}/trees/{treeId}`
 
 新增同樣 4 欄 QA 欄位（qaStatus / qaMarkedBy / qaMarkedAt / qaComment），其餘同 v1.0。
+
+#### v2.6.3：`tree.qaqc` 子結構（reviewer 立木層級 QAQC）
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `inSample` | bool | reviewer 標記為抽樣立木 |
+| `sampledAt` / `sampledBy` / `sampleReason` | timestamp / uid / enum | 抽樣 metadata |
+| `dbhVerified` | number | reviewer 重測 DBH（cm） |
+| `heightVerified` | number | reviewer 重測高度（m） |
+| `localXVerified` / `localYVerified` | number | reviewer 重測位置（m，相對 plot 原點；選填，依 `qaqcConfig.requirePositionVerified`） |
+| `verifiedAt` / `verifiedBy` | timestamp / uid | 重測 metadata |
+| `dbhError_cm` / `dbhError_pct` | number | 自動算：絕對 / 相對 DBH 誤差 |
+| `heightError_m` / `heightError_pct` | number | 自動算：絕對 / 相對高度誤差 |
+| `positionError_m` | number | 自動算：歐式距離 |
+| `withinThreshold` | bool | 三項皆通過閾值（取絕對 OR 相對較鬆者） |
+| `resolution` / `resolutionNote` / `resolvedAt` / `resolvedBy` | enum / string / ts / uid | 處置（accepted/remeasured/rejected）+ 說明 |
+
+**Rules（v2.8.1 加）**：reviewer 可寫 `tree.qaqc` + `updatedAt` 兩欄位（限 `subColl='trees'`）；其他欄位仍受 PI/admin/surveyor 路徑控制。
 
 #### v2.5：立木個體座標（4 欄，林保署永久樣區格式）
 

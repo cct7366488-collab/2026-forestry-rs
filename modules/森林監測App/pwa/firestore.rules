@@ -140,10 +140,15 @@ service cloud.firestore {
             canCollect(projectId) && willOwn() && !isLocked(projectId);
 
           // v1.7.1.3：systemAdmin god view
-          allow update: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'] && !isLocked(projectId) && (
-            isSystemAdmin() ||
-            isPi(projectId) ||
-            (isSurveyor(projectId) && isOwner())
+          // v2.8.1：reviewer 可寫 tree.qaqc（hasOnly + 限 trees subcollection；允許 isLocked 狀態以利查證）
+          allow update: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'] && (
+            (!isLocked(projectId) && (
+              isSystemAdmin() ||
+              isPi(projectId) ||
+              (isSurveyor(projectId) && isOwner())
+            )) ||
+            (isReviewer(projectId) && subColl == 'trees'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt']))
           );
 
           allow delete: if isSignedIn() && subColl in ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'] && (

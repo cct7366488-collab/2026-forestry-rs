@@ -2,9 +2,10 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=28000';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=28010';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
-import { getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=28000';
+// v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=28010';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -383,6 +384,45 @@ export async function exportXlsx(project) {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qaqcRows), 'QAQC抽樣查證');
   }
 
+  // v2.8.1：立木層級 QAQC sheet（trees with qaqc.inSample=true）
+  const treeQaqcRows = trees.filter(t => t.qaqc?.inSample === true || t.qaqc?.verifiedAt != null).map(t => {
+    const q = t.qaqc || {};
+    const status = getTreeQaqcStatus(t);
+    return {
+      樣區: t.plotCode || '',
+      立木編號: t.treeCode || ('#' + (t.treeNum || '')),
+      樹種: t.speciesZh || '',
+      抽樣時間: q.sampledAt ? fmtDate(q.sampledAt) : '',
+      抽樣者: q.sampledBy ? anonOrReal(q.sampledBy) : '',
+      surveyor原DBH_cm: Number.isFinite(t.dbh_cm) ? t.dbh_cm : '',
+      reviewer重測DBH_cm: Number.isFinite(q.dbhVerified) ? q.dbhVerified : '',
+      DBH誤差_cm: Number.isFinite(q.dbhError_cm) ? q.dbhError_cm : '',
+      DBH誤差_pct: Number.isFinite(q.dbhError_pct) ? q.dbhError_pct : '',
+      surveyor原H_m: Number.isFinite(t.height_m) ? t.height_m : '',
+      reviewer重測H_m: Number.isFinite(q.heightVerified) ? q.heightVerified : '',
+      H誤差_m: Number.isFinite(q.heightError_m) ? q.heightError_m : '',
+      H誤差_pct: Number.isFinite(q.heightError_pct) ? q.heightError_pct : '',
+      surveyor原X_m: Number.isFinite(t.localX_m) ? t.localX_m : '',
+      surveyor原Y_m: Number.isFinite(t.localY_m) ? t.localY_m : '',
+      reviewer重測X_m: Number.isFinite(q.localXVerified) ? q.localXVerified : '',
+      reviewer重測Y_m: Number.isFinite(q.localYVerified) ? q.localYVerified : '',
+      位置誤差_m: Number.isFinite(q.positionError_m) ? q.positionError_m : '',
+      通過閾值: q.withinThreshold === true ? '✅' : (q.withinThreshold === false ? '❌' : ''),
+      重測時間: q.verifiedAt ? fmtDate(q.verifiedAt) : '',
+      重測者: q.verifiedBy ? anonOrReal(q.verifiedBy) : '',
+      QAQC狀態: ({
+        not_sampled: '不在抽樣', pending: '待重測', passed: '通過',
+        failed_unresolved: '超閾待處置', failed_resolved: '已處置'
+      })[status] || '',
+      處置: q.resolution ? (RESOLUTION_LABEL[q.resolution] || q.resolution) : '',
+      處置說明: q.resolutionNote || '',
+      處置時間: q.resolvedAt ? fmtDate(q.resolvedAt) : '',
+    };
+  });
+  if (treeQaqcRows.length > 0) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(treeQaqcRows), 'QAQC立木查證');
+  }
+
   // v2.7.17：面積換算 + QAQC 摘要說明（給第三方查證 reference；IPCC TACCC 對齊）
   const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
   const stats = computeErrorStats(plots);
@@ -595,6 +635,23 @@ export async function exportQaqcDocReport(project) {
     const sampledPlots = realPlots.filter(p => p.qaqc?.inSample === true);
     const stats = computeErrorStats(realPlots);
 
+    // v2.8.1：抓抽樣 plots 內的所有 trees（給 tree-level QAQC 段用）
+    const treeLevelEnabled = cfg.enableTreeLevelQaqc === true;
+    let allSampledTrees = [];
+    if (treeLevelEnabled && sampledPlots.length > 0) {
+      try {
+        const treeArrs = await Promise.all(sampledPlots.map(async p => {
+          const ts = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', p.id, 'trees'));
+          const arr = [];
+          ts.forEach(d => arr.push({ id: d.id, plotCode: p.code, ...d.data() }));
+          return arr;
+        }));
+        allSampledTrees = [].concat(...treeArrs);
+      } catch (e) { console.warn('[doc report tree fetch]', e); }
+    }
+    const sampledTrees = allSampledTrees.filter(t => t.qaqc?.inSample === true);
+    const treeStats = treeLevelEnabled ? computeTreeErrorStats(allSampledTrees) : null;
+
     const piLabel = userLabel(project.pi, '—');
     const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const targetSize = Math.max(Math.ceil(realPlots.length * cfg.samplingFraction), cfg.minSampleSize);
@@ -772,6 +829,57 @@ ${resolutionRows ? `
   ${resolutionRows}
 </table>
 <p class="small">※ 依 IPCC TACCC 之「透明」原則，所有超閾值 plots 之處置與判斷依據皆列。</p>
+` : ''}
+
+${treeLevelEnabled && sampledTrees.length > 0 ? `
+<h2>${sampledPlots.length > 0 ? '陸之二' : '陸'}、立木層級 QAQC（v2.8.1）</h2>
+
+<h3>抽樣摘要</h3>
+<table>
+  <tr><th>項目</th><th>值</th><th>說明</th></tr>
+  <tr><td>立木抽樣比例</td><td>${(cfg.treeSamplingFraction * 100).toFixed(0)}%</td><td>每 plot 內</td></tr>
+  <tr><td>每 plot 最低樣本數</td><td>${cfg.minTreeSampleSize}</td><td>棵</td></tr>
+  <tr><td>抽樣立木總數</td><td>${sampledTrees.length}</td><td>跨 ${sampledPlots.length} 個抽樣 plots</td></tr>
+  <tr><td>DBH 閾值</td><td>±${cfg.dbhThreshold_cm} cm 或 ±${cfg.dbhThreshold_pct}%</td><td>取較鬆者通過</td></tr>
+  <tr><td>高度閾值</td><td>±${cfg.heightThreshold_m} m 或 ±${cfg.heightThreshold_pct}%</td><td>取較鬆者通過</td></tr>
+  <tr><td>位置閾值</td><td>±${cfg.positionThreshold_m} m</td><td>歐式距離；位置${cfg.requirePositionVerified ? '必填' : '選填'}</td></tr>
+</table>
+
+<h3>各立木重測紀錄與誤差</h3>
+<table style="font-size:9pt">
+  <tr><th>樣區</th><th>立木</th><th>樹種</th><th>原DBH</th><th>重測DBH</th><th>誤差</th><th>原H</th><th>重測H</th><th>誤差</th><th>位置誤差</th><th>狀態</th></tr>
+  ${sampledTrees.map(t => {
+    const q = t.qaqc || {};
+    const status = getTreeQaqcStatus(t);
+    const sl = ({
+      not_sampled: '⚪', pending: '🟡', passed: '✅',
+      failed_unresolved: '❌', failed_resolved: '🟢'
+    })[status] || '?';
+    return `<tr>
+      <td>${t.plotCode || '-'}</td>
+      <td>${t.treeCode || '#' + (t.treeNum || '?')}</td>
+      <td>${t.speciesZh || '-'}</td>
+      <td style="text-align:right">${Number.isFinite(t.dbh_cm) ? t.dbh_cm.toFixed(1) : '-'}</td>
+      <td style="text-align:right">${Number.isFinite(q.dbhVerified) ? q.dbhVerified.toFixed(1) : '-'}</td>
+      <td style="text-align:right">${Number.isFinite(q.dbhError_cm) ? '±' + q.dbhError_cm.toFixed(2) + ' cm' : '-'}</td>
+      <td style="text-align:right">${Number.isFinite(t.height_m) ? t.height_m.toFixed(1) : '-'}</td>
+      <td style="text-align:right">${Number.isFinite(q.heightVerified) ? q.heightVerified.toFixed(1) : '-'}</td>
+      <td style="text-align:right">${Number.isFinite(q.heightError_m) ? '±' + q.heightError_m.toFixed(2) + ' m' : '-'}</td>
+      <td style="text-align:right">${Number.isFinite(q.positionError_m) ? '±' + q.positionError_m.toFixed(2) + ' m' : '-'}</td>
+      <td>${sl}</td>
+    </tr>`;
+  }).join('')}
+</table>
+
+<h3>立木誤差統計</h3>
+<table>
+  <tr><th>項目</th><th>n</th><th>平均</th><th>最大</th><th>標準差</th></tr>
+  <tr><td>DBH 誤差</td><td>${treeStats.dbh.n}</td><td>${treeStats.dbh.n > 0 ? treeStats.dbh.mean.toFixed(2) + ' cm' : '-'}</td><td>${treeStats.dbh.n > 0 ? treeStats.dbh.max.toFixed(2) + ' cm' : '-'}</td><td>${treeStats.dbh.n > 0 ? treeStats.dbh.std.toFixed(2) + ' cm' : '-'}</td></tr>
+  <tr><td>高度誤差</td><td>${treeStats.height.n}</td><td>${treeStats.height.n > 0 ? treeStats.height.mean.toFixed(2) + ' m' : '-'}</td><td>${treeStats.height.n > 0 ? treeStats.height.max.toFixed(2) + ' m' : '-'}</td><td>${treeStats.height.n > 0 ? treeStats.height.std.toFixed(2) + ' m' : '-'}</td></tr>
+  <tr><td>位置誤差</td><td>${treeStats.position.n}</td><td>${treeStats.position.n > 0 ? treeStats.position.mean.toFixed(2) + ' m' : '-'}</td><td>${treeStats.position.n > 0 ? treeStats.position.max.toFixed(2) + ' m' : '-'}</td><td>${treeStats.position.n > 0 ? treeStats.position.std.toFixed(2) + ' m' : '-'}</td></tr>
+</table>
+
+<p class="small">※ 立木層級 QAQC 對應 IPCC GPG 合理保證等級之延伸（DBH/H 直接影響碳估算精度，1 cm DBH 誤差於 30 cm 樹 ≈ 6% 生質量誤差）。</p>
 ` : ''}
 
 ${verifiedSection}

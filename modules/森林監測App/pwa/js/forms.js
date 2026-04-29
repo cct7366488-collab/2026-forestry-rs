@@ -3,16 +3,17 @@
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=28000';
+import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=28010';
 // v2.7.17：reviewer QAQC 工作流
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, computeQaqcErrors, RESOLUTION_LABEL } from './plot-qaqc.js?v=28000';
+// v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=28010';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28000';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28010';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28000';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28010';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -1333,6 +1334,353 @@ async function qaqcRemoveFromSample(project, plot) {
   } catch (e) { toast('失敗：' + e.message); }
 }
 
+// ===== v2.8.1：立木層級 QAQC 重測 modal =====
+//   reviewer / admin 對 tree.qaqc.inSample=true 的立木開此 modal 填重測值
+//   存檔只動 tree.qaqc + updatedAt（受 rules hasOnly 約束）
+//   超閾值時必填 resolution + resolutionNote
+export async function openTreeQaqcRemeasureForm(project, plot, tree) {
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
+  const q = tree.qaqc || defaultTreeQaqc();
+
+  const dbhInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'dbhVerified',
+    placeholder: 'cm', value: q.dbhVerified ?? '', class: 'border rounded px-2 py-1 text-sm w-28' });
+  const hInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'heightVerified',
+    placeholder: 'm', value: q.heightVerified ?? '', class: 'border rounded px-2 py-1 text-sm w-28' });
+  const xInput = el('input', { type: 'number', step: '0.01', name: 'localXVerified',
+    placeholder: cfg.requirePositionVerified ? 'm' : '可空', value: q.localXVerified ?? '', class: 'border rounded px-2 py-1 text-sm w-28' });
+  const yInput = el('input', { type: 'number', step: '0.01', name: 'localYVerified',
+    placeholder: cfg.requirePositionVerified ? 'm' : '可空', value: q.localYVerified ?? '', class: 'border rounded px-2 py-1 text-sm w-28' });
+
+  const errorBox = el('div', { class: 'bg-stone-50 rounded p-2 text-xs my-2' });
+  const resolutionSelect = el('select', { name: 'resolution', class: 'border rounded px-2 py-1 text-sm' },
+    el('option', { value: '' }, '— 選擇處置 —'),
+    ...Object.entries(RESOLUTION_LABEL).map(([v, label]) => {
+      const o = el('option', { value: v }, label);
+      if (q.resolution === v) o.setAttribute('selected', 'true');
+      return o;
+    })
+  );
+  const resolutionNote = el('textarea', { name: 'resolutionNote', rows: '2',
+    placeholder: '說明判斷依據（必填若超閾值）', class: 'border rounded px-2 py-1 text-sm w-full' }, q.resolutionNote || '');
+  const resolutionBlock = el('div', { class: 'mt-2 bg-red-50 border border-red-300 rounded p-2 hidden' },
+    el('div', { class: 'text-xs font-semibold text-red-800 mb-1' }, '⚠️ 誤差超閾值 — 必填處置與說明'),
+    el('div', { class: 'flex items-center gap-2 text-sm mb-1' },
+      el('span', { class: 'w-12' }, '處置：'), resolutionSelect),
+    resolutionNote
+  );
+
+  function recompute() {
+    const verified = {
+      dbhVerified: parseFloat(dbhInput.value),
+      heightVerified: parseFloat(hInput.value),
+      localXVerified: parseFloat(xInput.value),
+      localYVerified: parseFloat(yInput.value),
+    };
+    const errs = computeTreeQaqcErrors(tree, verified, cfg);
+    const lines = [];
+    lines.push(`<b>surveyor 原值</b>：DBH ${Number.isFinite(tree.dbh_cm) ? tree.dbh_cm.toFixed(1) + ' cm' : '-'} / H ${Number.isFinite(tree.height_m) ? tree.height_m.toFixed(1) + ' m' : '-'} / (X,Y) (${Number.isFinite(tree.localX_m) ? tree.localX_m.toFixed(2) : '-'}, ${Number.isFinite(tree.localY_m) ? tree.localY_m.toFixed(2) : '-'})`);
+    lines.push(`<b>reviewer 重測</b>：DBH ${Number.isFinite(verified.dbhVerified) ? verified.dbhVerified.toFixed(1) + ' cm' : '-'} / H ${Number.isFinite(verified.heightVerified) ? verified.heightVerified.toFixed(1) + ' m' : '-'} / (X,Y) (${Number.isFinite(verified.localXVerified) ? verified.localXVerified.toFixed(2) : '-'}, ${Number.isFinite(verified.localYVerified) ? verified.localYVerified.toFixed(2) : '-'})`);
+    // DBH chip
+    const dbhChip = (errs.dbhError_cm == null) ? '<span class="text-stone-400">DBH: 待填</span>' :
+      ((errs.dbhError_cm <= cfg.dbhThreshold_cm || (errs.dbhError_pct != null && errs.dbhError_pct <= cfg.dbhThreshold_pct))
+        ? `<span class="text-green-700">DBH ±${errs.dbhError_cm.toFixed(2)} cm (${errs.dbhError_pct?.toFixed(1)}%) ✅</span>`
+        : `<span class="text-red-700">DBH ±${errs.dbhError_cm.toFixed(2)} cm (${errs.dbhError_pct?.toFixed(1)}%) ❌ (>${cfg.dbhThreshold_cm}cm 且 >${cfg.dbhThreshold_pct}%)</span>`);
+    // 高度 chip
+    const hChip = (errs.heightError_m == null) ? '<span class="text-stone-400">H: 待填</span>' :
+      ((errs.heightError_m <= cfg.heightThreshold_m || (errs.heightError_pct != null && errs.heightError_pct <= cfg.heightThreshold_pct))
+        ? `<span class="text-green-700">H ±${errs.heightError_m.toFixed(2)} m (${errs.heightError_pct?.toFixed(1)}%) ✅</span>`
+        : `<span class="text-red-700">H ±${errs.heightError_m.toFixed(2)} m (${errs.heightError_pct?.toFixed(1)}%) ❌</span>`);
+    // 位置 chip
+    let posChip;
+    if (errs.positionError_m == null) {
+      posChip = cfg.requirePositionVerified
+        ? '<span class="text-stone-400">位置: 待填（必填）</span>'
+        : '<span class="text-stone-400">位置: 未填（選填）</span>';
+    } else {
+      posChip = (errs.positionError_m <= cfg.positionThreshold_m)
+        ? `<span class="text-green-700">位置 ±${errs.positionError_m.toFixed(2)} m ✅</span>`
+        : `<span class="text-red-700">位置 ±${errs.positionError_m.toFixed(2)} m ❌ (>${cfg.positionThreshold_m}m)</span>`;
+    }
+    lines.push(`<b>誤差</b>：${dbhChip}　${hChip}　${posChip}`);
+    errorBox.innerHTML = lines.join('<br>');
+    resolutionBlock.classList.toggle('hidden', errs.withinThreshold !== false);
+  }
+  [dbhInput, hInput, xInput, yInput].forEach(i => {
+    i.addEventListener('input', recompute);
+    i.addEventListener('change', recompute);
+  });
+
+  const f = el('form', { class: 'space-y-3' },
+    el('div', { class: 'bg-blue-50 border border-blue-200 rounded p-3 text-sm' },
+      el('div', { class: 'font-semibold' }, `🌳 立木 QAQC 重測：${tree.treeCode || '#' + (tree.treeNum || '?')}`),
+      el('div', { class: 'text-xs text-stone-600 mt-1' },
+        `樣區 ${plot.code} / 樹種 ${tree.speciesZh || '-'} / 抽樣理由 ${q.sampleReason || '-'}`)
+    ),
+    el('div', { class: 'field-row' },
+      el('div', { class: 'field' },
+        el('label', {}, '重測 DBH (cm)', el('span', { class: 'req' }, ' *')),
+        dbhInput
+      ),
+      el('div', { class: 'field' },
+        el('label', {}, '重測高度 (m)', el('span', { class: 'req' }, ' *')),
+        hInput
+      ),
+    ),
+    el('div', { class: 'field-row' },
+      el('div', { class: 'field' },
+        el('label', {}, '重測 X (m)', cfg.requirePositionVerified ? el('span', { class: 'req' }, ' *') : el('span', { class: 'text-xs text-stone-500' }, ' （選填）')),
+        xInput
+      ),
+      el('div', { class: 'field' },
+        el('label', {}, '重測 Y (m)', cfg.requirePositionVerified ? el('span', { class: 'req' }, ' *') : el('span', { class: 'text-xs text-stone-500' }, ' （選填）')),
+        yInput
+      ),
+    ),
+    errorBox,
+    resolutionBlock,
+    el('div', { class: 'flex gap-2 pt-2' },
+      el('button', { type: 'submit', class: 'flex-1 bg-blue-700 hover:bg-blue-800 text-white py-2 rounded' }, '💾 儲存重測'),
+      el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消'),
+      q.inSample ? el('button', { type: 'button', class: 'border py-2 px-3 rounded text-stone-600 text-xs',
+        onclick: () => qaqcRemoveTreeFromSample(project, plot, tree) }, '↩️ 移出抽樣') : null
+    )
+  );
+  recompute();
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const dbhV = parseFloat(dbhInput.value);
+    const hV = parseFloat(hInput.value);
+    const xV = parseFloat(xInput.value);
+    const yV = parseFloat(yInput.value);
+    if (!Number.isFinite(dbhV)) { toast('請填重測 DBH'); return; }
+    if (!Number.isFinite(hV)) { toast('請填重測高度'); return; }
+    if (cfg.requirePositionVerified && (!Number.isFinite(xV) || !Number.isFinite(yV))) {
+      toast('方法學要求位置必填（重測 X / Y 都要填）'); return;
+    }
+    const errs = computeTreeQaqcErrors(tree, {
+      dbhVerified: dbhV, heightVerified: hV,
+      localXVerified: xV, localYVerified: yV
+    }, cfg);
+    if (errs.withinThreshold === false) {
+      const res = resolutionSelect.value;
+      const note = resolutionNote.value.trim();
+      if (!res) { toast('誤差超閾值，請選擇處置'); return; }
+      if (!note) { toast('誤差超閾值，請填處置說明'); return; }
+    }
+    const newQaqc = {
+      ...(tree.qaqc || defaultTreeQaqc()),
+      inSample: true,
+      dbhVerified: dbhV,
+      heightVerified: hV,
+      localXVerified: Number.isFinite(xV) ? xV : null,
+      localYVerified: Number.isFinite(yV) ? yV : null,
+      verifiedAt: new Date(),
+      verifiedBy: state.user.uid,
+      dbhError_cm: errs.dbhError_cm,
+      dbhError_pct: errs.dbhError_pct,
+      heightError_m: errs.heightError_m,
+      heightError_pct: errs.heightError_pct,
+      positionError_m: errs.positionError_m,
+      withinThreshold: errs.withinThreshold,
+    };
+    if (errs.withinThreshold === false) {
+      newQaqc.resolution = resolutionSelect.value;
+      newQaqc.resolutionNote = resolutionNote.value.trim();
+      newQaqc.resolvedAt = new Date();
+      newQaqc.resolvedBy = state.user.uid;
+    } else {
+      newQaqc.resolution = null;
+      newQaqc.resolutionNote = null;
+      newQaqc.resolvedAt = null;
+      newQaqc.resolvedBy = null;
+    }
+    try {
+      await fb.updateDoc(
+        fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', tree.id),
+        { qaqc: newQaqc, updatedAt: fb.serverTimestamp() }
+      );
+      toast(errs.withinThreshold === false ? '已儲存（誤差超閾值，已記錄處置）' : '✅ 已儲存（誤差通過閾值）', 3500);
+      closeModal();
+      // 若上層 sampling modal 開著 → 重整
+      const samplingModal = document.querySelector('[data-tree-sampling-plot-id]');
+      if (samplingModal) {
+        const tab = document.querySelector('[data-tab="qaqc"]');
+        if (tab) tab.click();
+      }
+    } catch (e) { toast('儲存失敗：' + e.message); console.error(e); }
+  });
+  openModal(`🌳 立木 QAQC 重測 — ${tree.treeCode || '#' + tree.treeNum}`, f);
+}
+
+async function qaqcRemoveTreeFromSample(project, plot, tree) {
+  if (!confirm(`從抽樣移除立木「${tree.treeCode || '#' + tree.treeNum}」？已填的重測值會清除。`)) return;
+  try {
+    await fb.updateDoc(
+      fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', tree.id),
+      { qaqc: defaultTreeQaqc(), updatedAt: fb.serverTimestamp() }
+    );
+    toast('已移出抽樣');
+    closeModal();
+  } catch (e) { toast('失敗：' + e.message); }
+}
+
+// ===== v2.8.1：plot 內立木抽樣 modal =====
+//   reviewer 對 plot.qaqc.inSample=true 的 plot 開此 modal
+//   功能：列出 plot 內所有 trees + inSample / 重測狀態 chip + 隨機 / 清空抽樣 + 點 row 開重測
+export async function openPlotTreeSamplingModal(project, plot) {
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...(project.qaqcConfig || {}) };
+  const tableWrap = el('div', { class: 'space-y-2' });
+  const summary = el('div', { class: 'text-sm' });
+  const navBar = el('div', { class: 'flex flex-wrap gap-2' });
+
+  let trees = [];
+
+  async function reload() {
+    summary.innerHTML = '<span class="text-stone-500">載入立木中...</span>';
+    tableWrap.innerHTML = '';
+    try {
+      const snap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees'));
+      trees = [];
+      snap.forEach(d => trees.push({ id: d.id, ...d.data() }));
+    } catch (e) {
+      summary.innerHTML = `<span class="text-red-700">載入失敗：${e.message}</span>`;
+      return;
+    }
+    render();
+  }
+
+  function render() {
+    const sampled = trees.filter(t => t.qaqc?.inSample === true);
+    const target = computeTreeSampleSize(trees.length, cfg);
+    summary.innerHTML = `
+      <div class="flex items-center gap-3 flex-wrap">
+        <span>樣區 <b>${plot.code}</b> 內立木 <b>${trees.length}</b> 棵</span>
+        <span>已抽樣 <b>${sampled.length}</b> / 目標 <b>${target}</b>（${(cfg.treeSamplingFraction * 100).toFixed(0)}% × ${trees.length}，最低 ${cfg.minTreeSampleSize}）</span>
+      </div>
+    `;
+    // 表格
+    if (trees.length === 0) {
+      tableWrap.innerHTML = '<div class="text-stone-500 text-sm p-2">本樣區尚無立木紀錄</div>';
+      return;
+    }
+    const rows = trees.map(t => {
+      const q = t.qaqc || {};
+      const status = getTreeQaqcStatus(t);
+      const meta = ({
+        not_sampled:        { label: '不在抽樣',  cls: 'bg-stone-100 text-stone-600' },
+        pending:            { label: '🟡 待重測',  cls: 'bg-amber-100 text-amber-800' },
+        passed:             { label: '✅ 通過',    cls: 'bg-green-100 text-green-800' },
+        failed_unresolved:  { label: '❌ 待處置',  cls: 'bg-red-100 text-red-800' },
+        failed_resolved:    { label: '🟢 已處置',  cls: 'bg-teal-100 text-teal-800' },
+      })[status] || { label: status, cls: 'bg-stone-100' };
+      return `<tr class="border-b hover:bg-stone-50 cursor-pointer" data-tree-id="${t.id}">
+        <td class="py-1 px-2 font-mono text-xs">${t.treeCode || '#' + (t.treeNum || '?')}</td>
+        <td class="py-1 px-2">${t.speciesZh || '-'}</td>
+        <td class="py-1 px-2 text-right">${Number.isFinite(t.dbh_cm) ? t.dbh_cm.toFixed(1) : '-'}</td>
+        <td class="py-1 px-2 text-right">${Number.isFinite(t.height_m) ? t.height_m.toFixed(1) : '-'}</td>
+        <td class="py-1 px-2 text-right">${Number.isFinite(t.localX_m) ? t.localX_m.toFixed(2) : '-'}</td>
+        <td class="py-1 px-2 text-right">${Number.isFinite(t.localY_m) ? t.localY_m.toFixed(2) : '-'}</td>
+        <td class="py-1 px-2"><span class="${meta.cls} text-xs px-2 py-0.5 rounded">${meta.label}</span></td>
+      </tr>`;
+    }).join('');
+    tableWrap.innerHTML = `
+      <div data-tree-sampling-plot-id="${plot.id}" class="max-h-96 overflow-y-auto border rounded">
+        <table class="min-w-full text-sm">
+          <thead class="bg-stone-100 text-xs sticky top-0">
+            <tr>
+              <th class="text-left py-1 px-2">編號</th>
+              <th class="text-left py-1 px-2">樹種</th>
+              <th class="text-right py-1 px-2">DBH</th>
+              <th class="text-right py-1 px-2">H</th>
+              <th class="text-right py-1 px-2">X</th>
+              <th class="text-right py-1 px-2">Y</th>
+              <th class="text-left py-1 px-2">狀態</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="text-xs text-stone-500 mt-1">點 row 開立木 QAQC 重測 modal（限抽樣立木 ⚪→🟡）。</p>
+    `;
+    // row click handler
+    tableWrap.querySelectorAll('tr[data-tree-id]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const tid = tr.dataset.treeId;
+        const t = trees.find(x => x.id === tid);
+        if (!t) return;
+        if (t.qaqc?.inSample !== true) {
+          toast('該立木尚未進入抽樣 — 請先用上方「🎲 隨機抽樣」或「✋ 手動抽」標記');
+          return;
+        }
+        openTreeQaqcRemeasureForm(project, plot, t);
+      });
+    });
+  }
+
+  navBar.innerHTML = '';
+  const btnRandom = el('button', {
+    type: 'button', class: 'bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-sm',
+    onclick: async () => {
+      const target = computeTreeSampleSize(trees.length, cfg);
+      const seed = Date.now();
+      const sample = pickRandomTreeSample(trees, target, seed);
+      if (!confirm(`將隨機抽樣 ${sample.length} 棵立木（種子 ${seed}，可重現）：\n\n${sample.slice(0, 8).map(t => t.treeCode || '#' + t.treeNum).join('、')}${sample.length > 8 ? ` 等 ${sample.length} 棵` : ''}`)) return;
+      let count = 0;
+      for (const t of sample) {
+        try {
+          const newQaqc = { ...(t.qaqc || defaultTreeQaqc()) };
+          newQaqc.inSample = true;
+          newQaqc.sampledAt = new Date();
+          newQaqc.sampledBy = state.user.uid;
+          newQaqc.sampleReason = newQaqc.sampleReason || 'random';
+          await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', t.id),
+            { qaqc: newQaqc, updatedAt: fb.serverTimestamp() });
+          count++;
+        } catch (e) { console.warn('[tree sample]', t.treeCode, e); }
+      }
+      toast(`已抽樣 ${count} 棵`);
+      reload();
+    }
+  }, '🎲 隨機抽樣');
+  const btnClear = el('button', {
+    type: 'button', class: 'border px-3 py-1.5 rounded text-sm hover:bg-stone-50',
+    onclick: async () => {
+      const sampled = trees.filter(t => t.qaqc?.inSample === true);
+      if (sampled.length === 0) { toast('尚無抽樣立木'); return; }
+      if (!confirm(`清空 ${sampled.length} 棵立木的抽樣標記？已填重測會清除。`)) return;
+      let count = 0;
+      for (const t of sampled) {
+        try {
+          await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', t.id),
+            { qaqc: defaultTreeQaqc(), updatedAt: fb.serverTimestamp() });
+          count++;
+        } catch (e) { console.warn('[tree clear]', e); }
+      }
+      toast(`已清空 ${count} 棵抽樣標記`);
+      reload();
+    }
+  }, '✋ 清空抽樣');
+  navBar.appendChild(btnRandom);
+  navBar.appendChild(btnClear);
+
+  const wrap = el('div', { class: 'space-y-3' },
+    el('div', { class: 'bg-blue-50 border border-blue-200 rounded p-3' },
+      el('div', { class: 'font-semibold' }, `🌳 立木抽樣 — ${plot.code}`),
+      el('div', { class: 'text-xs text-stone-600 mt-1' },
+        `每抽樣 plot 內隨機抽 ~${(cfg.treeSamplingFraction * 100).toFixed(0)}% 立木重測 DBH / 高度${cfg.requirePositionVerified ? ' / 位置（必填）' : ' / 位置（選填）'}。閾值：DBH ±${cfg.dbhThreshold_cm}cm/${cfg.dbhThreshold_pct}%、H ±${cfg.heightThreshold_m}m/${cfg.heightThreshold_pct}%、位置 ±${cfg.positionThreshold_m}m。`)
+    ),
+    summary,
+    navBar,
+    tableWrap,
+    el('div', { class: 'flex justify-end pt-2' },
+      el('button', { type: 'button', class: 'border px-4 py-2 rounded text-sm', onclick: closeModal }, '關閉')
+    )
+  );
+  openModal(`🌳 ${plot.code} 立木抽樣管理`, wrap);
+  reload();
+}
+
 // ===== 樣區表單 =====
 export async function openPlotForm(project, existing = null) {
   // v2.7.17：reviewer（非 admin）對 inSample plot 自動跳轉 QAQC 重測 modal
@@ -1790,6 +2138,11 @@ async function deletePlot(project, plot) {
 //   - 編輯既有：保留原 treeNum，prefix 仍顯示但不可改
 //   - submit 寫入 treeCode（完整字串）+ treeNum（流水號 number）
 export async function openTreeForm(project, plot, existing = null) {
+  // v2.8.1：reviewer（非 admin）對 inSample 立木自動跳轉 QAQC 重測 modal
+  //   admin god view 維持原本完整 tree 編輯權
+  if (existing && existing.qaqc?.inSample === true && isReviewer() && !isSystemAdmin()) {
+    return openTreeQaqcRemeasureForm(project, plot, existing);
+  }
   // v2.3.3：算下一個未用流水號（query 同 plot 已存在的 trees）
   let nextNum = 1;
   if (!existing) {
@@ -2046,6 +2399,7 @@ export async function openTreeForm(project, plot, existing = null) {
         data.createdBy = state.user.uid;
         data.createdAt = fb.serverTimestamp();
         data.qaStatus = 'pending';
+        data.qaqc = defaultTreeQaqc();  // v2.8.1：新立木帶 QAQC 預設子結構
         const ref = await fb.addDoc(colRef, data);
         treeId = ref.id;
       }
@@ -3096,7 +3450,9 @@ export async function seedDemoData(project) {
           createdBy: state.user.uid,
           createdAt: fb.serverTimestamp(),
           updatedAt: fb.serverTimestamp(),
-          qaStatus: 'pending'
+          qaStatus: 'pending',
+          // v2.8.1：seed tree 帶 QAQC 預設子結構
+          qaqc: defaultTreeQaqc()
         });
       }
       // 更新記錄 5-8 筆

@@ -15,17 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=28000";
-import * as forms from "./forms.js?v=28000";
-import * as analytics from "./analytics.js?v=28000";
-import * as importWizard from "./import-wizard.js?v=28000";
-import { renderTreeDistribution } from "./distribution.js?v=28000";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28000";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=28010";
+import * as forms from "./forms.js?v=28010";
+import * as analytics from "./analytics.js?v=28010";
+import * as importWizard from "./import-wizard.js?v=28010";
+import { renderTreeDistribution } from "./distribution.js?v=28010";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28010";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, pickRandomSample, getPlotQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, computeErrorStats, defaultQaqc } from "./plot-qaqc.js?v=28000";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28000";
+// v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=28010";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28010";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28000";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28010";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -302,7 +303,7 @@ async function renderGeoMigrationBanner(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=28000');
+    const m = await import('./migration-v2715.js?v=28010');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1297,14 +1298,28 @@ async function renderQaqc(project) {
   $('#btn-qaqc-random-sample').onclick = () => qaqcRandomSample(project, realPlots, target, cfg);
   $('#btn-qaqc-clear-sample').onclick = () => qaqcClearSample(project, sampledPlots);
 
+  // v2.8.1：若啟用 tree-level QAQC，預先 fetch 全部抽樣 plots 內的 trees（供表格 chip + 簽發 gate + 統計用）
+  let treeMap = new Map();  // plotId → trees array
+  if (cfg.enableTreeLevelQaqc && sampledPlots.length > 0) {
+    try {
+      await Promise.all(sampledPlots.map(async p => {
+        const ts = await getDocs(collection(db, 'projects', projectId, 'plots', p.id, 'trees'));
+        const arr = [];
+        ts.forEach(d => arr.push({ id: d.id, plotId: p.id, ...d.data() }));
+        treeMap.set(p.id, arr);
+      }));
+    } catch (e) { console.warn('[qaqc tree-level fetch]', e); }
+  }
+  const allSampledPlotTrees = [].concat(...Array.from(treeMap.values()));
+
   // ----- 抽樣 plot 清單 -----
-  renderQaqcPlotTable(project, sampledPlots);
+  renderQaqcPlotTable(project, sampledPlots, treeMap, cfg);
 
   // ----- 誤差統計 -----
-  renderQaqcErrorStats(realPlots);
+  renderQaqcErrorStats(realPlots, allSampledPlotTrees, cfg);
 
   // ----- 合格簽發 -----
-  renderQaqcApproveGate(project, realPlots, cfg);
+  renderQaqcApproveGate(project, realPlots, cfg, allSampledPlotTrees);
 
   // v2.7.18：更新 tab 上的進度 pill
   refreshBadgeCounts(projectId);
@@ -1321,12 +1336,48 @@ function renderQaqcConfigForm(project, cfg, isReviewerNow, isAdminNow) {
         class: 'border rounded px-2 py-1 w-24 text-sm', ...(canEdit ? {} : { disabled: 'true' }) }),
       el('span', { class: 'text-xs text-stone-500' }, suffix)
     );
+  // v2.8.1：tree-level toggle + thresholds
+  const treeEnabledChk = el('input', {
+    type: 'checkbox', id: 'qcfg-enableTreeLevelQaqc',
+    style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+    ...(cfg.enableTreeLevelQaqc ? { checked: 'true' } : {}),
+    ...(canEdit ? {} : { disabled: 'true' })
+  });
+  const positionRequiredChk = el('input', {
+    type: 'checkbox', id: 'qcfg-requirePositionVerified',
+    style: 'vertical-align:middle;margin-right:6px;width:14px;height:14px',
+    ...(cfg.requirePositionVerified ? { checked: 'true' } : {}),
+    ...(canEdit ? {} : { disabled: 'true' })
+  });
+
   root.innerHTML = '';
   root.appendChild(el('div', { class: 'space-y-2' },
+    el('div', { class: 'font-semibold text-sm text-forest-800 mt-1' }, '🅿️ 樣區層級 QAQC（plot-level）'),
     fld('抽樣比例', 'samplingFraction', cfg.samplingFraction, '（0–1，例 0.30 = 30%）', '0.01'),
     fld('最低樣本數', 'minSampleSize', cfg.minSampleSize, '個（小專案防呆）', '1'),
     fld('坡度誤差閾值', 'slopeThreshold_deg', cfg.slopeThreshold_deg, '° （IPCC GPG 合理保證 ±5°）', '0.5'),
     fld('面積誤差閾值', 'areaThreshold_pct', cfg.areaThreshold_pct, '% （ISO 14064-3 reasonable assurance ±3–5%）', '0.5'),
+
+    // v2.8.1：tree-level
+    el('div', { class: 'mt-3 pt-3 border-t border-stone-200' },
+      el('div', { class: 'font-semibold text-sm text-forest-800 mb-2' }, '🌳 立木層級 QAQC（tree-level，v2.8.1）'),
+      el('label', { class: 'flex items-center text-sm cursor-pointer mb-2' },
+        treeEnabledChk,
+        el('span', {}, '啟用立木層級 QAQC（每抽樣 plot 內再抽 ~10% 立木重測 DBH / 高度 / 位置）')
+      ),
+      fld('立木抽樣比例', 'treeSamplingFraction', cfg.treeSamplingFraction, '（0–1，例 0.10 = 10%）', '0.01'),
+      fld('每 plot 最低立木數', 'minTreeSampleSize', cfg.minTreeSampleSize, '棵', '1'),
+      fld('DBH 絕對閾值', 'dbhThreshold_cm', cfg.dbhThreshold_cm, 'cm', '0.1'),
+      fld('DBH 相對閾值', 'dbhThreshold_pct', cfg.dbhThreshold_pct, '% （取較鬆者通過）', '0.1'),
+      fld('高度絕對閾值', 'heightThreshold_m', cfg.heightThreshold_m, 'm', '0.1'),
+      fld('高度相對閾值', 'heightThreshold_pct', cfg.heightThreshold_pct, '%', '0.5'),
+      fld('位置歐式距離閾值', 'positionThreshold_m', cfg.positionThreshold_m, 'm', '0.1'),
+      el('label', { class: 'flex items-center text-sm cursor-pointer' },
+        positionRequiredChk,
+        el('span', {}, '位置重測必填（預設選填，因位置最費工）')
+      ),
+    ),
+
     canEdit
       ? el('button', {
           class: 'mt-2 bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-sm',
@@ -1338,13 +1389,25 @@ function renderQaqcConfigForm(project, cfg, isReviewerNow, isAdminNow) {
 }
 
 async function saveQaqcConfig(project) {
+  const existing = project.qaqcConfig || {};
   const cfg = {
+    ...existing,
     samplingFraction: parseFloat($('#qcfg-samplingFraction').value) || DEFAULT_QAQC_CONFIG.samplingFraction,
     minSampleSize: parseInt($('#qcfg-minSampleSize').value, 10) || DEFAULT_QAQC_CONFIG.minSampleSize,
     slopeThreshold_deg: parseFloat($('#qcfg-slopeThreshold_deg').value) || DEFAULT_QAQC_CONFIG.slopeThreshold_deg,
     areaThreshold_pct: parseFloat($('#qcfg-areaThreshold_pct').value) || DEFAULT_QAQC_CONFIG.areaThreshold_pct,
     requireAllSampledPassed: true,
     requireResolutionForFailed: true,
+    // v2.8.1：tree-level 參數
+    enableTreeLevelQaqc: $('#qcfg-enableTreeLevelQaqc')?.checked === true,
+    treeSamplingFraction: parseFloat($('#qcfg-treeSamplingFraction')?.value) || DEFAULT_QAQC_CONFIG.treeSamplingFraction,
+    minTreeSampleSize: parseInt($('#qcfg-minTreeSampleSize')?.value, 10) || DEFAULT_QAQC_CONFIG.minTreeSampleSize,
+    dbhThreshold_cm: parseFloat($('#qcfg-dbhThreshold_cm')?.value) || DEFAULT_QAQC_CONFIG.dbhThreshold_cm,
+    dbhThreshold_pct: parseFloat($('#qcfg-dbhThreshold_pct')?.value) || DEFAULT_QAQC_CONFIG.dbhThreshold_pct,
+    heightThreshold_m: parseFloat($('#qcfg-heightThreshold_m')?.value) || DEFAULT_QAQC_CONFIG.heightThreshold_m,
+    heightThreshold_pct: parseFloat($('#qcfg-heightThreshold_pct')?.value) || DEFAULT_QAQC_CONFIG.heightThreshold_pct,
+    positionThreshold_m: parseFloat($('#qcfg-positionThreshold_m')?.value) || DEFAULT_QAQC_CONFIG.positionThreshold_m,
+    requirePositionVerified: $('#qcfg-requirePositionVerified')?.checked === true,
   };
   try {
     await updateDoc(doc(db, 'projects', project.id), { qaqcConfig: cfg });
@@ -1405,13 +1468,14 @@ async function qaqcClearSample(project, sampledPlots) {
   renderQaqc(state.project);
 }
 
-function renderQaqcPlotTable(project, sampledPlots) {
+function renderQaqcPlotTable(project, sampledPlots, treeMap = new Map(), cfg = DEFAULT_QAQC_CONFIG) {
   const root = $('#qaqc-plot-table');
   if (!root) return;
   if (sampledPlots.length === 0) {
     root.innerHTML = '<div class="text-stone-500 text-sm">尚無抽樣 plot — 點上方「🎲 隨機抽樣」開始。</div>';
     return;
   }
+  const treeEnabled = cfg.enableTreeLevelQaqc === true;
   const rows = sampledPlots.map(p => {
     const q = p.qaqc || {};
     const status = getPlotQaqcStatus(p);
@@ -1423,6 +1487,30 @@ function renderQaqcPlotTable(project, sampledPlots) {
     const areaVer   = Number.isFinite(q.areaVerifiedHorizontal) ? q.areaVerifiedHorizontal.toFixed(1) + ' m²' : '-';
     const areaErr   = Number.isFinite(q.areaError_pct) ? '±' + q.areaError_pct.toFixed(2) + '%' : '-';
     const resolution = q.resolution ? `${q.resolution}: ${(q.resolutionNote || '').slice(0, 40)}${(q.resolutionNote || '').length > 40 ? '…' : ''}` : '-';
+    // v2.8.1：tree-level chip
+    let treeCol = '';
+    if (treeEnabled) {
+      const trees = treeMap.get(p.id) || [];
+      const sampledTrees = trees.filter(t => t.qaqc?.inSample === true);
+      const target = computeTreeSampleSize(trees.length, cfg);
+      let chip;
+      if (sampledTrees.length === 0) {
+        chip = `<span class="bg-stone-100 text-stone-600 text-xs px-2 py-0.5 rounded" title="尚未抽樣立木（目標 ${target} 棵 / ${trees.length} 棵立木）">⚪ 0/${target}</span>`;
+      } else {
+        let donePassed = 0, doneResolved = 0, pending = 0;
+        for (const t of sampledTrees) {
+          const ts = getTreeQaqcStatus(t);
+          if (ts === 'passed') donePassed++;
+          else if (ts === 'failed_resolved') doneResolved++;
+          else pending++;
+        }
+        const allDone = pending === 0;
+        const cls = allDone ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800';
+        const badge = allDone ? '✅' : '🟡';
+        chip = `<span class="${cls} text-xs px-2 py-0.5 rounded" title="抽樣 ${sampledTrees.length} / 目標 ${target} 棵 / 通過 ${donePassed} / 已處置 ${doneResolved} / 待重測 ${pending}">${badge} ${donePassed + doneResolved}/${sampledTrees.length}</span>`;
+      }
+      treeCol = `<td class="py-1 px-2"><button class="hover:underline" data-open-tree-sampling="${p.id}">${chip}</button></td>`;
+    }
     return `<tr class="border-b hover:bg-stone-50">
       <td class="py-1 px-2 font-mono text-xs"><a href="#/p/${project.id}/plot/${p.id}" class="text-forest-700 hover:underline">${p.code}</a></td>
       <td class="py-1 px-2">${slopeOrig}</td>
@@ -1432,6 +1520,7 @@ function renderQaqcPlotTable(project, sampledPlots) {
       <td class="py-1 px-2">${areaVer}</td>
       <td class="py-1 px-2">${areaErr}</td>
       <td class="py-1 px-2"><span class="${meta.cls} text-xs px-2 py-0.5 rounded">${meta.badge} ${meta.label}</span></td>
+      ${treeCol}
       <td class="py-1 px-2 text-xs">${resolution}</td>
     </tr>`;
   }).join('');
@@ -1446,23 +1535,48 @@ function renderQaqcPlotTable(project, sampledPlots) {
           <th class="text-left py-1 px-2">原面積（水平）</th>
           <th class="text-left py-1 px-2">重測面積（水平）</th>
           <th class="text-left py-1 px-2">面積誤差</th>
-          <th class="text-left py-1 px-2">狀態</th>
+          <th class="text-left py-1 px-2">plot 狀態</th>
+          ${treeEnabled ? '<th class="text-left py-1 px-2">🌳 立木</th>' : ''}
           <th class="text-left py-1 px-2">處置</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <p class="text-xs text-stone-500 mt-2">點樣區編號 → 進入樣區編輯，捲到「🔍 QAQC 重測」區填寫重測值。</p>
+    <p class="text-xs text-stone-500 mt-2">點樣區編號 → 進入樣區編輯，捲到「🔍 QAQC 重測」區填寫重測值。${treeEnabled ? '　點「🌳 立木」chip → 開立木抽樣與重測。' : ''}</p>
   `;
+  // v2.8.1：tree sampling chip click
+  if (treeEnabled) {
+    root.querySelectorAll('[data-open-tree-sampling]').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const pid = btn.dataset.openTreeSampling;
+        const p = sampledPlots.find(x => x.id === pid);
+        if (p) forms.openPlotTreeSamplingModal(state.project, p);
+      });
+    });
+  }
 }
 
-function renderQaqcErrorStats(realPlots) {
+function renderQaqcErrorStats(realPlots, sampledTrees = [], cfg = DEFAULT_QAQC_CONFIG) {
   const root = $('#qaqc-error-stats');
   if (!root) return;
   const stats = computeErrorStats(realPlots);
   const fmt = (s) => s.n === 0
     ? '—'
     : `n=${s.n}　mean=${s.mean.toFixed(2)}${s.unit}　max=${s.max.toFixed(2)}${s.unit}　std=${s.std.toFixed(2)}${s.unit}`;
+  // v2.8.1：tree-level stats
+  const treeEnabled = cfg.enableTreeLevelQaqc === true;
+  const treeStats = treeEnabled ? computeTreeErrorStats(sampledTrees) : null;
+  const treeBlock = treeEnabled ? `
+    <div class="bg-stone-50 rounded p-2 col-span-1 md:col-span-2 mt-2">
+      <div class="font-semibold text-stone-700">🌳 立木層級誤差（v2.8.1）</div>
+      <div class="text-xs text-stone-600 mt-1 space-y-0.5">
+        <div>DBH 誤差：${fmt(treeStats.dbh)}</div>
+        <div>高度誤差：${fmt(treeStats.height)}</div>
+        <div>位置誤差：${fmt(treeStats.position)}</div>
+      </div>
+    </div>
+  ` : '';
   root.innerHTML = `
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div class="bg-stone-50 rounded p-2">
@@ -1473,27 +1587,35 @@ function renderQaqcErrorStats(realPlots) {
         <div class="font-semibold text-stone-700">面積誤差（相對）</div>
         <div class="text-xs text-stone-600 mt-1">${fmt(stats.area)}</div>
       </div>
+      ${treeBlock}
     </div>
   `;
 }
 
-function renderQaqcApproveGate(project, realPlots, cfg) {
+function renderQaqcApproveGate(project, realPlots, cfg, sampledTrees = []) {
   const gateBox = $('#qaqc-approve-gate');
   const btn = $('#btn-qaqc-approve');
   const docBtn = $('#btn-qaqc-doc-export');
   if (!gateBox || !btn) return;
-  const result = checkApprovalGate(realPlots, cfg);
-  const s = result.summary;
+  const plotResult = checkApprovalGate(realPlots, cfg);
+  const treeResult = checkTreeApprovalGate(sampledTrees, cfg);
+  const ps = plotResult.summary;
+  const ts = treeResult.summary;
+  const canApprove = plotResult.canApprove && treeResult.canApprove;
+  const allReasons = [...plotResult.reasons, ...treeResult.reasons.map(r => `[立木層級] ${r}`)];
   const lines = [];
-  lines.push(`抽樣狀態：${s.sampled} / ${s.totalPlots}（target ≥${computeTargetSampleSize(s.totalPlots, cfg)}）`);
-  lines.push(`✅ 通過 <b>${s.passed}</b>　🟢 已處置 <b>${s.failedResolved}</b>　🟡 待重測 <b>${s.pending}</b>　❌ 待處置 <b>${s.failedUnresolved}</b>`);
-  if (!result.canApprove && result.reasons.length) {
+  lines.push(`<b>樣區層級</b>：抽樣 ${ps.sampled} / ${ps.totalPlots}（target ≥${computeTargetSampleSize(ps.totalPlots, cfg)}）`);
+  lines.push(`✅ 通過 <b>${ps.passed}</b>　🟢 已處置 <b>${ps.failedResolved}</b>　🟡 待重測 <b>${ps.pending}</b>　❌ 待處置 <b>${ps.failedUnresolved}</b>`);
+  if (cfg.enableTreeLevelQaqc) {
+    lines.push(`<b>🌳 立木層級</b>（v2.8.1）：抽樣 <b>${ts.sampled}</b>　✅ 通過 <b>${ts.passed}</b>　🟢 已處置 <b>${ts.failedResolved}</b>　🟡 待重測 <b>${ts.pending}</b>　❌ 待處置 <b>${ts.failedUnresolved}</b>`);
+  }
+  if (!canApprove && allReasons.length) {
     lines.push('<div class="mt-2 text-red-700 text-xs"><b>未滿足簽發條件：</b><ul class="list-disc list-inside">' +
-      result.reasons.map(r => `<li>${r}</li>`).join('') + '</ul></div>');
+      allReasons.map(r => `<li>${r}</li>`).join('') + '</ul></div>');
   }
   gateBox.innerHTML = lines.join('<br>');
-  btn.disabled = !result.canApprove;
-  btn.onclick = () => qaqcApprove(project, realPlots, cfg, result);
+  btn.disabled = !canApprove;
+  btn.onclick = () => qaqcApprove(project, realPlots, cfg, { plotResult, treeResult, sampledTrees });
   // v2.7.18：查證說明書 .doc 匯出（隨時可用）
   if (docBtn) docBtn.onclick = () => analytics.exportQaqcDocReport(project);
 }
@@ -1699,22 +1821,40 @@ function escapeXml(s) {
 }
 
 async function qaqcApprove(project, realPlots, cfg, gateResult) {
-  const s = gateResult.summary;
-  if (!confirm(`確認簽發 — 將完成本專案查證：\n\n· 抽樣 ${s.sampled} / ${s.totalPlots} plots\n· 通過 ${s.passed} / 已處置 ${s.failedResolved}\n· 全資料永久鎖定，不可再 markQA\n\n本動作會把專案 status: review → verified，並寫入 QAQC 摘要到 project.qaqcSummary。`)) return;
+  const ps = gateResult.plotResult.summary;
+  const ts = gateResult.treeResult.summary;
+  const sampledTrees = gateResult.sampledTrees || [];
+  const treeLine = cfg.enableTreeLevelQaqc
+    ? `\n· 立木抽樣 ${ts.sampled}（通過 ${ts.passed} / 已處置 ${ts.failedResolved}）`
+    : '';
+  if (!confirm(`確認簽發 — 將完成本專案查證：\n\n· plot 抽樣 ${ps.sampled} / ${ps.totalPlots} plots（通過 ${ps.passed} / 已處置 ${ps.failedResolved}）${treeLine}\n· 全資料永久鎖定，不可再 markQA\n\n本動作會把專案 status: review → verified，並寫入 QAQC 摘要到 project.qaqcSummary。`)) return;
   try {
     // v2.7.17：QAQC 摘要與 review→verified 同一筆 updateDoc 寫入
     //          （reviewer 在 verified 後就失去寫權限，必須在 transition 內合併）
+    // v2.8.1：擴充 qaqcSummary 加 tree-level 摘要
     const qaqcSummary = {
-      sampledCount: s.sampled,
-      totalPlots: s.totalPlots,
-      passedCount: s.passed,
-      failedResolvedCount: s.failedResolved,
+      sampledCount: ps.sampled,
+      totalPlots: ps.totalPlots,
+      passedCount: ps.passed,
+      failedResolvedCount: ps.failedResolved,
       slopeThreshold_deg: cfg.slopeThreshold_deg,
       areaThreshold_pct: cfg.areaThreshold_pct,
       samplingFraction: cfg.samplingFraction,
       verifiedAt: new Date(),
       verifiedBy: state.user.uid,
       errorStats: computeErrorStats(realPlots),
+      // tree-level
+      treeLevelEnabled: cfg.enableTreeLevelQaqc === true,
+      treeSampledCount: ts.sampled,
+      treePassedCount: ts.passed,
+      treeFailedResolvedCount: ts.failedResolved,
+      treeErrorStats: cfg.enableTreeLevelQaqc ? computeTreeErrorStats(sampledTrees) : null,
+      treeSamplingFraction: cfg.treeSamplingFraction,
+      dbhThreshold_cm: cfg.dbhThreshold_cm,
+      dbhThreshold_pct: cfg.dbhThreshold_pct,
+      heightThreshold_m: cfg.heightThreshold_m,
+      heightThreshold_pct: cfg.heightThreshold_pct,
+      positionThreshold_m: cfg.positionThreshold_m,
     };
     const result = await applyStatusAfterReviewerApprove(project, { qaqcSummary });
     state.project.qaqcSummary = qaqcSummary;

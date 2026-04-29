@@ -19,6 +19,17 @@ export const DEFAULT_QAQC_CONFIG = Object.freeze({
   areaThreshold_pct: 3,              // ±3% 內合格
   requireAllSampledPassed: true,     // 全部抽樣 plot 必須合格才能簽發
   requireResolutionForFailed: true,  // 超閾值必須有處置才能簽發
+
+  // v2.8.1：tree-level QAQC（每抽樣 plot 內再抽 ~10% 立木重測）
+  enableTreeLevelQaqc: false,         // 預設關閉（小專案 / PI 不想被嚴查時可省事；reviewer 在設定區開啟即可）
+  treeSamplingFraction: 0.10,         // 10%
+  minTreeSampleSize: 3,               // 每 plot 至少 3 棵
+  dbhThreshold_cm: 2.0,               // DBH 絕對閾值
+  dbhThreshold_pct: 5.0,              // DBH 相對閾值（取較鬆者通過）
+  heightThreshold_m: 1.5,             // 高度絕對閾值
+  heightThreshold_pct: 10.0,          // 高度相對閾值（取較鬆者通過）
+  positionThreshold_m: 1.0,           // 位置歐式距離閾值
+  requirePositionVerified: false,     // 位置重測是否必填（預設選填，因為位置最費工）
 });
 
 // ===== 樣本量目標（依 config 與總 plots 數）=====
@@ -222,4 +233,174 @@ export function defaultQaqc() {
     resolvedAt: null,
     resolvedBy: null,
   };
+}
+
+// ===== v2.8.1：tree-level QAQC =====
+//   抽樣 plots 內再抽 ~10% 立木重測 dbh / height / position
+//   工作流類似 plot-level：抽樣 → 重測 → 誤差計算 → 處置 → 簽發 gate
+
+// 預設 tree.qaqc（給新建 tree 用 / migration fallback）
+export function defaultTreeQaqc() {
+  return {
+    inSample: false,
+    sampledAt: null,
+    sampledBy: null,
+    sampleReason: null,
+    // 重測值（reviewer 填）
+    dbhVerified: null,
+    heightVerified: null,
+    localXVerified: null,
+    localYVerified: null,
+    verifiedAt: null,
+    verifiedBy: null,
+    // 誤差（auto-compute）
+    dbhError_cm: null,
+    dbhError_pct: null,
+    heightError_m: null,
+    heightError_pct: null,
+    positionError_m: null,
+    withinThreshold: null,
+    // 處置
+    resolution: null,
+    resolutionNote: null,
+    resolvedAt: null,
+    resolvedBy: null,
+  };
+}
+
+// 樹級樣本目標數（每抽樣 plot 內計算）
+export function computeTreeSampleSize(treeCount, qaqcConfig = DEFAULT_QAQC_CONFIG) {
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...qaqcConfig };
+  if (treeCount <= 0) return 0;
+  const fractional = Math.ceil(treeCount * (cfg.treeSamplingFraction ?? DEFAULT_QAQC_CONFIG.treeSamplingFraction));
+  return Math.min(treeCount, Math.max(fractional, cfg.minTreeSampleSize ?? DEFAULT_QAQC_CONFIG.minTreeSampleSize));
+}
+
+// 樹級隨機抽樣（重用 mulberry32；trees 為 [{id, ...}, ...]）
+export function pickRandomTreeSample(trees, targetSize, seed = null) {
+  return pickRandomSample(trees, targetSize, seed);
+}
+
+// 樹級誤差計算
+//   thresholds 用「絕對 OR 相對 取較鬆」(IPCC GPG 慣用，避免小樹被卡死)
+//   位置誤差：歐式距離（X 與 Y 兩軸）
+export function computeTreeQaqcErrors(tree, treeQaqcVerified, qaqcConfig = DEFAULT_QAQC_CONFIG) {
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...qaqcConfig };
+  const out = {};
+
+  // DBH
+  const dbhOrig = Number(tree?.dbh_cm);
+  const dbhNew = Number(treeQaqcVerified?.dbhVerified);
+  if (Number.isFinite(dbhOrig) && Number.isFinite(dbhNew)) {
+    out.dbhError_cm = Math.abs(dbhNew - dbhOrig);
+    out.dbhError_pct = dbhOrig > 0 ? (out.dbhError_cm / dbhOrig) * 100 : null;
+  } else {
+    out.dbhError_cm = null;
+    out.dbhError_pct = null;
+  }
+
+  // 高度
+  const hOrig = Number(tree?.height_m);
+  const hNew = Number(treeQaqcVerified?.heightVerified);
+  if (Number.isFinite(hOrig) && Number.isFinite(hNew)) {
+    out.heightError_m = Math.abs(hNew - hOrig);
+    out.heightError_pct = hOrig > 0 ? (out.heightError_m / hOrig) * 100 : null;
+  } else {
+    out.heightError_m = null;
+    out.heightError_pct = null;
+  }
+
+  // 位置（歐式距離；兩軸都填才算）
+  const xOrig = Number(tree?.localX_m), yOrig = Number(tree?.localY_m);
+  const xNew = Number(treeQaqcVerified?.localXVerified), yNew = Number(treeQaqcVerified?.localYVerified);
+  if (Number.isFinite(xOrig) && Number.isFinite(yOrig) && Number.isFinite(xNew) && Number.isFinite(yNew)) {
+    out.positionError_m = Math.sqrt((xNew - xOrig) ** 2 + (yNew - yOrig) ** 2);
+  } else {
+    out.positionError_m = null;
+  }
+
+  // 通過閾值（IPCC GPG 慣用：絕對 OR 相對 取較鬆者通過）
+  const dbhOk = (out.dbhError_cm == null)
+    ? null
+    : (out.dbhError_cm <= cfg.dbhThreshold_cm) || (out.dbhError_pct != null && out.dbhError_pct <= cfg.dbhThreshold_pct);
+  const heightOk = (out.heightError_m == null)
+    ? null
+    : (out.heightError_m <= cfg.heightThreshold_m) || (out.heightError_pct != null && out.heightError_pct <= cfg.heightThreshold_pct);
+  const positionOk = (out.positionError_m == null)
+    ? (cfg.requirePositionVerified ? null : true)  // 不要求 → 缺值算通過
+    : out.positionError_m <= cfg.positionThreshold_m;
+
+  if (dbhOk == null || heightOk == null || positionOk == null) {
+    out.withinThreshold = null;  // 待重測
+  } else {
+    out.withinThreshold = dbhOk && heightOk && positionOk;
+  }
+  return out;
+}
+
+// 樹級 QAQC 狀態（給 UI chip / 統計用）— mirror getPlotQaqcStatus
+export function getTreeQaqcStatus(tree) {
+  const q = tree?.qaqc || {};
+  if (!q.inSample) return 'not_sampled';
+  // 至少要填 DBH + 高度才算開始重測；位置選填
+  if (q.verifiedAt == null && q.dbhVerified == null && q.heightVerified == null) {
+    return 'pending';
+  }
+  if (q.withinThreshold === true) return 'passed';
+  if (q.withinThreshold === false) {
+    return q.resolution ? 'failed_resolved' : 'failed_unresolved';
+  }
+  return 'pending';
+}
+
+// 跨 plots × trees 收集樹級誤差統計（給 .doc 報告 / 簽發摘要用）
+export function computeTreeErrorStats(trees) {
+  const dbhErrs = [], heightErrs = [], posErrs = [];
+  for (const t of trees) {
+    const q = t.qaqc;
+    if (!q || !q.inSample) continue;
+    if (Number.isFinite(q.dbhError_cm))    dbhErrs.push(q.dbhError_cm);
+    if (Number.isFinite(q.heightError_m))  heightErrs.push(q.heightError_m);
+    if (Number.isFinite(q.positionError_m)) posErrs.push(q.positionError_m);
+  }
+  const desc = (arr, unit) => {
+    if (arr.length === 0) return { n: 0, mean: null, max: null, std: null, unit };
+    const n = arr.length;
+    const sum = arr.reduce((a, b) => a + b, 0);
+    const mean = sum / n;
+    const max = Math.max(...arr);
+    const sqDiff = arr.reduce((a, b) => a + (b - mean) ** 2, 0);
+    return { n, mean, max, std: Math.sqrt(sqDiff / n), unit };
+  };
+  return { dbh: desc(dbhErrs, 'cm'), height: desc(heightErrs, 'm'), position: desc(posErrs, 'm') };
+}
+
+// 簽發 gate 樹級檢查（plot-level gate 通過後再檢樹級；擋簽發若 enableTreeLevelQaqc=true 且未通過）
+//   trees: 抽樣 plots 內所有 trees（已 fetch；不限 inSample；本函式自篩）
+export function checkTreeApprovalGate(trees, qaqcConfig = DEFAULT_QAQC_CONFIG) {
+  const cfg = { ...DEFAULT_QAQC_CONFIG, ...qaqcConfig };
+  const summary = { sampled: 0, pending: 0, passed: 0, failedResolved: 0, failedUnresolved: 0 };
+  const reasons = [];
+
+  if (!cfg.enableTreeLevelQaqc) {
+    return { canApprove: true, reasons: [], summary };  // 未啟用 → 不擋
+  }
+  for (const t of trees) {
+    const q = t.qaqc;
+    if (!q || !q.inSample) continue;
+    summary.sampled++;
+    const s = getTreeQaqcStatus(t);
+    if (s === 'pending') summary.pending++;
+    else if (s === 'passed') summary.passed++;
+    else if (s === 'failed_resolved') summary.failedResolved++;
+    else if (s === 'failed_unresolved') summary.failedUnresolved++;
+  }
+
+  if (summary.pending > 0) {
+    reasons.push(`還有 ${summary.pending} 棵抽樣立木待重測`);
+  }
+  if (cfg.requireResolutionForFailed && summary.failedUnresolved > 0) {
+    reasons.push(`還有 ${summary.failedUnresolved} 棵抽樣立木超閾值且無處置`);
+  }
+  return { canApprove: reasons.length === 0, reasons, summary };
 }
