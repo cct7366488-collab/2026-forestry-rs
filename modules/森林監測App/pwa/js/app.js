@@ -15,15 +15,15 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=27130";
-import * as forms from "./forms.js?v=27130";
-import * as analytics from "./analytics.js?v=27130";
-import * as importWizard from "./import-wizard.js?v=27130";
-import { renderTreeDistribution } from "./distribution.js?v=27130";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27130";   // v2.7.10：admin 樹種字典管理
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27130";
+import { firebaseConfig } from "../firebase-config.js?v=27150";
+import * as forms from "./forms.js?v=27150";
+import * as analytics from "./analytics.js?v=27150";
+import * as importWizard from "./import-wizard.js?v=27150";
+import { renderTreeDistribution } from "./distribution.js?v=27150";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=27150";   // v2.7.10：admin 樹種字典管理
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=27150";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27130";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=27150";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -65,10 +65,16 @@ export function isLocked() { return state.project?.locked === true; }
 
 // 預設方法學（v1.5 新專案/無 methodology 的舊專案 fallback）
 // v2.0：擴展 understory（地被植物）/ soilCons（水土保持）兩模組可開關
+// v2.7.15：新增 dimensionType（沿坡距 / 水平投影），plotShape 擴充 'rectangle'（plot 層支援，methodology 仍可指定預設）
 export const DEFAULT_METHODOLOGY = {
   targetPlotCount: 50,
-  plotShape: 'circle',
+  plotShape: 'circle',                           // v2.7.15：'circle' | 'square' | 'rectangle'
   plotAreaOptions: [400, 500, 1000],
+  // v2.7.15：dimensionType 決定 plot.area_m2 / plotDimensions 的單位語意
+  //   'slope_distance'：野外實採（皮尺沿坡）→ 寫入時自動算 areaHorizontal_m2
+  //   'horizontal'：已是水平投影（DEM 推導 / 補登時換算過）→ 不再修正
+  //   舊資料無此欄位 → normalizePlotOnRead 預設 'horizontal'（最保守，避免錯誤套 cos）
+  dimensionType: 'slope_distance',
   // v2.5：plotOriginType 決定立木 X/Y 座標如何解釋
   //   'center'：plot.GPS = 樣區中心點，皮尺距中心 4 象限（X/Y 可正可負）— 林保署永久樣區常用
   //   'corner'：plot.GPS = 樣區左下角，皮尺從左下往右北（X/Y 恆為正）

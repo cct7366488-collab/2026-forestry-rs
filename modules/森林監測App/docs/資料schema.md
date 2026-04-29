@@ -1,5 +1,6 @@
 # 資料 Schema（Firestore）
 
+> v2.6（2026-04-29，app v2.7.15）：樣區幾何 schema 升級 — plotShape 加 'rectangle'、新增 dimensionType（沿坡距 / 水平投影）、slopeDegrees / slopeAspect / slopeSource、areaHorizontal_m2（cos 校正）、migrationPending（既有資料待補登 flag）
 > v2.5（2026-04-27）：立木個體座標（localX/Y + absolute TWD97/WGS84）+ methodology.plotOriginType
 > v1.5（2026-04-25）：5 角色 + 方法學 + Lock + QA 機制
 > 歷史：v1.0 簡易 schema（無 methodology / qa / lock）
@@ -55,8 +56,9 @@
 ```js
 {
   targetPlotCount: 50,             // 目標樣區數
-  plotShape: 'circle',             // 'circle' | 'square'
+  plotShape: 'circle',             // v2.6：'circle' | 'square' | 'rectangle'
   plotAreaOptions: [500, 1000],    // 允許的面積選項（surveyor 只能挑這些）
+  dimensionType: 'slope_distance', // v2.6：'slope_distance'（野外皮尺沿坡）| 'horizontal'（水平投影）— 預設 slope_distance；舊資料 normalize 預設 horizontal（最保守）
   plotOriginType: 'center',        // v2.5：'center'（plot.GPS=樣區中心，皮尺四象限） | 'corner'（plot.GPS=左下角，皮尺第一象限）
   required: {                      // 必填欄位開關
     photos: false,
@@ -85,8 +87,17 @@
 | locationTWD97 | map | ✅ | `{ x, y }` |
 | locationAccuracy_m | number | ⭕ | GPS 精度 |
 | insideBoundary | bool | ⭕ | |
-| shape | enum | ✅ | `circle` / `square`（從 methodology 帶） |
-| area_m2 | number | ✅ | （從 methodology 帶） |
+| shape | enum | ✅ | v2.6：`circle` / `square` / `rectangle`（從 methodology 帶） |
+| area_m2 | number | ✅ | 名目面積（單位由 dimensionType 決定，sloped or horizontal） |
+| **plotDimensions** | map | ⭕ | v2.6：rectangle/square `{ width, length }` 或 circle `{ radius }`；單位 m |
+| **dimensionType** | enum | ⭕ | v2.6：`slope_distance` \| `horizontal`；缺省 = methodology 帶；舊資料 normalize 預設 `horizontal` |
+| **slopeDegrees** | number | ⭕ | v2.6：樣區平均坡度（°，0–90）；舊資料缺省為 0（平地） |
+| **slopeAspect** | number | ⭕ | v2.6：坡向（°，0–360；0=北、順時針）；optional |
+| **slopeSource** | enum | ⭕ | v2.6：`field`（野外斜度計）\| `dem`（DEM20m 推導）\| `dem_field_avg`（兩者平均；要同時有 slopeFieldDegrees + slopeDemDegrees） |
+| **slopeFieldDegrees** | number | ⭕ | v2.6：野外斜度計值（slopeSource=`dem_field_avg` 時 reviewer 比對用） |
+| **slopeDemDegrees** | number | ⭕ | v2.6：DEM 推導值（同上） |
+| **areaHorizontal_m2** | number | ⭕ | v2.6：水平投影面積（m²）= `area_m2 × cos(slopeDegrees)`（dimensionType=`slope_distance` 時）；client 端寫入時自動算（見 `plot-geometry.js#computeAreaHorizontal`） |
+| **migrationPending** | bool | ⭕ | v2.6：true = 待補登 v2.6 新欄位；migration helper（`migration-v2715.js`）批次標 |
 | establishedAt | timestamp | ✅ | |
 | photos | array<string> | ⭕ | Storage 路徑 |
 | notes | string | ⭕ | |
@@ -135,7 +146,24 @@ absY = plot.locationTWD97.y + localY_m
 
 ## 肆、計算公式
 
-不變（同 v1.0）。
+不變（同 v1.0）。v2.6 新增坡度修正公式（見下節）。
+
+### v2.6 坡度修正（slope correction）
+
+```
+areaHorizontal_m2 = area_m2 × cos(slopeDegrees × π / 180)   // 當 dimensionType='slope_distance'
+areaHorizontal_m2 = area_m2                                  // 當 dimensionType='horizontal'
+```
+
+立木局部座標換算（沿等高線 X 不變、沿坡 Y 乘 cos）：
+```
+horizontalY_m = localY_m × cos(slopeDegrees × π / 180)        // dimensionType='slope_distance' 時
+horizontalY_m = localY_m                                       // dimensionType='horizontal' 時
+```
+
+**MRV 對齊**：IPCC LULUCF 與 TMS 方法學的單位面積（m²/ha）皆指水平投影。`areaHorizontal_m2` 為碳計算 / 密度推算的分母；`area_m2` 留給野外管理（樣區放樣、皮尺驗收）。
+
+實作見 `pwa/js/plot-geometry.js`。
 
 ---
 
@@ -163,3 +191,31 @@ absY = plot.locationTWD97.y + localY_m
 - 所有現有 plots/trees/regen：補 `qaStatus: 'pending'`
 
 `/users/{uid}` 的 `globalRole` → `systemRole`：rules 同時讀兩個欄位過渡，最終手動 rename。
+
+---
+
+## 柒、v2.5 → v2.6 Migration（樣區幾何升級）
+
+**策略（B 案）**：v2.7.15 schema 先落 db；migration helper 提供但**暫不在 prod 執行**（避免使用者看到一堆「待補登」黃 badge 卻沒地方填）。等 v2.7.16 UI 上線（樣區編輯加幾何欄位 + admin patch UI）後再批次標 `migrationPending=true`。
+
+**Migration helper**：`pwa/js/migration-v2715.js`
+- `await m.dryRun(projectId)` — 列出受影響樣區（不寫入）
+- `await m.markPending(projectId, { execute: true })` — 批次標 `migrationPending=true` + 預設值
+
+**預設值（最保守，避免錯誤套 cos）**：
+```js
+{
+  slopeDegrees: 0,           // 平地假設
+  slopeAspect: null,
+  slopeSource: null,
+  dimensionType: 'horizontal', // 假設既有 area_m2 已是水平投影（不再 cos 校正）
+  areaHorizontal_m2: area_m2,  // 當 dimensionType='horizontal' → 直接 = area_m2
+  migrationPending: true       // 提示需 reviewer / PI 補登真實坡度與 dimensions
+}
+```
+
+**Reviewer 補登工作流**（v2.7.17 規劃）：
+1. 樣區列表黃 badge「待補登幾何」→ 點開 patch UI
+2. 依野外紀錄 / DEM 抽樣補 `slopeDegrees`、`slopeAspect`、`plotDimensions`、`dimensionType`
+3. 補完後 `migrationPending: false`
+4. 紙漿廠 19 樣區進 reviewer 抽樣現場核對 → 填 `slopeFieldDegrees` / `slopeDemDegrees` 比對誤差

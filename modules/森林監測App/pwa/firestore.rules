@@ -32,6 +32,23 @@ service cloud.firestore {
     function isOwner()            { return resource.data.createdBy == request.auth.uid; }
     function willOwn()            { return request.resource.data.createdBy == request.auth.uid; }
 
+    // v2.7.15：樣區幾何 schema 升級的欄位驗證（plot create/update 用）
+    //   寬鬆策略：欄位若不存在或為 null → 跳過驗證（既有資料無欄位 = 待補登）
+    //   只在欄位實際存在時檢 enum / range；不檢 areaHorizontal_m2（client 端算，db 端不再演算驗證避免 floating point）
+    function validPlotGeomFields(d) {
+      return (!('shape' in d) || d.shape in ['circle', 'square', 'rectangle'])
+          && (!('dimensionType' in d) || d.dimensionType == null || d.dimensionType in ['slope_distance', 'horizontal'])
+          && (!('slopeSource' in d) || d.slopeSource == null || d.slopeSource in ['field', 'dem', 'dem_field_avg'])
+          && (!('slopeDegrees' in d) || d.slopeDegrees == null || (d.slopeDegrees is number && d.slopeDegrees >= 0 && d.slopeDegrees <= 90))
+          && (!('slopeAspect' in d) || d.slopeAspect == null || (d.slopeAspect is number && d.slopeAspect >= 0 && d.slopeAspect <= 360));
+    }
+    // 同樣的 enum 也套到 methodology（project doc 內）
+    function validMethodologyGeomFields(d) {
+      let m = d.get('methodology', {});
+      return (!('plotShape' in m) || m.plotShape in ['circle', 'square', 'rectangle'])
+          && (!('dimensionType' in m) || m.dimensionType in ['slope_distance', 'horizontal']);
+    }
+
     // ===== Users =====
     match /users/{uid} {
       allow read:  if isSignedIn() && (request.auth.uid == uid || isSystemAdmin());
@@ -48,15 +65,18 @@ service cloud.firestore {
       );
 
       // 只有 system admin 可建專案；建時必須含自己且 pi 必須在 members 中
+      // v2.7.15：methodology 含新欄位（plotShape='rectangle' / dimensionType）→ enum 驗證
       allow create: if isSignedIn() && isSystemAdmin() &&
         request.resource.data.memberUids is list &&
         request.auth.uid in request.resource.data.memberUids &&
-        request.resource.data.members[request.resource.data.pi] == 'pi';
+        request.resource.data.members[request.resource.data.pi] == 'pi' &&
+        validMethodologyGeomFields(request.resource.data);
 
       // v1.7.1.2：PI 或 system admin 可改（admin god view，不需自己是 PI 也能管理 members）
       // v2.7：reviewer 限定一條路 — review→verified 完成審查
       //   條件：cur status='review'、new status='verified'、僅改狀態機相關欄位（不可動 methodology/members 等）
-      allow update: if isSignedIn() && (
+      // v2.7.15：methodology enum 驗證套到所有 update path（reviewer 沒改 methodology → 既有值仍合法 → pass）
+      allow update: if isSignedIn() && validMethodologyGeomFields(request.resource.data) && (
         isPi(projectId) || isSystemAdmin() ||
         (isReviewer(projectId)
           && resource.data.get('status', 'active') == 'review'
@@ -78,10 +98,14 @@ service cloud.firestore {
 
         // create：建立時不強制 qaStatus（client 端會自動帶 'pending'）
         // v2.7.8：拿掉 || isSystemAdmin() — canCollect 已 include
-        allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId);
+        // v2.7.15：plot 幾何欄位 enum 驗證（shape / dimensionType / slopeSource / slopeDegrees / slopeAspect）
+        allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId)
+                      && validPlotGeomFields(request.resource.data);
 
         // v1.7.1.3：systemAdmin god view，跨任何專案角色限制
-        allow update: if isSignedIn() && !isLocked(projectId) && (
+        // v2.7.15：同 create 套 plot 幾何欄位 enum 驗證
+        allow update: if isSignedIn() && !isLocked(projectId)
+                      && validPlotGeomFields(request.resource.data) && (
           isSystemAdmin() ||
           isPi(projectId) ||
           (isSurveyor(projectId) && (isOwner() || resource.data.get('assignedTo', null) == request.auth.uid))
