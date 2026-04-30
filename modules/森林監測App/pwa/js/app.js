@@ -15,18 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=29000";
-import * as forms from "./forms.js?v=29000";
-import * as analytics from "./analytics.js?v=29000";
-import * as importWizard from "./import-wizard.js?v=29000";
-import { renderTreeDistribution } from "./distribution.js?v=29000";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=29000";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=29010";
+import * as forms from "./forms.js?v=29010";
+import * as analytics from "./analytics.js?v=29010";
+import * as importWizard from "./import-wizard.js?v=29010";
+import { renderTreeDistribution } from "./distribution.js?v=29010";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=29010";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=29000";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=29000";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=29010";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=29010";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=29000";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=29010";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -349,7 +349,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=29000');
+    const m = await import('./migration-v2715.js?v=29010');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -371,7 +371,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=29000');
+    const m = await import('./migration-v2715.js?v=29010');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -986,7 +986,11 @@ async function renderProjectHome(root, projectId) {
     a.classList.remove('border-transparent', 'text-stone-600');
     $$('[data-tab-content]').forEach(s => s.classList.add('hidden'));
     $(`[data-tab-content="${tab}"]`).classList.remove('hidden');
-    if (tab === 'dashboard') analytics.renderDashboard(state.project);
+    if (tab === 'dashboard') {
+      analytics.renderDashboard(state.project);
+      // v2.9.1：樹種組成矩陣 — 與 dashboard 並行載
+      analytics.renderSpeciesCompositionMatrix(state.project);
+    }
     if (tab === 'map') analytics.renderMap(state.project);
     if (tab === 'design') renderDesign();
     if (tab === 'pending') renderPending();
@@ -994,6 +998,10 @@ async function renderProjectHome(root, projectId) {
     if (tab === 'qaqc') renderQaqc(state.project);  // v2.7.17：reviewer QAQC
     if (tab === 'settings') renderSettings();
   }));
+
+  // v2.9.1：dashboard 內樹種組成矩陣 — dropdown 切換 metric / topN 時即時重畫
+  $('#species-matrix-metric')?.addEventListener('change', () => analytics.renderSpeciesCompositionMatrix(state.project));
+  $('#species-matrix-topn')?.addEventListener('change', () => analytics.renderSpeciesCompositionMatrix(state.project));
 
   // 樣區清單（即時）
   $('#btn-new-plot').addEventListener('click', () => {

@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.9.0';  // v2.9.0：dashboard / 統計分析升級 — (A) plot detail 新增「📊 樣區概況」分頁（per-plot KPI 8 cards + DBH 直方圖 + 樹種 IV + 活力 doughnut；隨 tree onSnapshot 即時更新；變成新預設分頁）；(B) QAQC 「📈 誤差統計」加 3 個誤差分布直方圖（坡度誤差 / 面積誤差 / 立木 DBH 誤差；自動 binning + 過閾值 bin 紅色；reviewer 視覺化抽樣品質）
+const CACHE = 'forest-monitor-v2.9.1';  // v2.9.1：dashboard 後續升級 — (B) 樹種組成矩陣（plot × species 大表，cell=株數/BA/材積/碳，4 dropdown 切換 metric + topN；尾欄合「其他」、最後 2 列為平均/總計；exportXlsx 加 4 sheet「組成矩陣-株數/斷面積/材積/碳蓄積」）；(E) 空間密度 heat map（map 加 layer toggle radio：QA 狀態 / 立木密度 株/ha / 斷面積密度 m²/ha；後兩者用 5-quintile 色階 + 圖例；popup 補密度資訊）
 const SHELL = [
   './',
   './index.html',

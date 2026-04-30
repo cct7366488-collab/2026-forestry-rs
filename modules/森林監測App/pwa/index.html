@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=29000">
+  <link rel="stylesheet" href="style.css?v=29010">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.9.0</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.9.1</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -343,10 +343,42 @@
         <h3 class="font-semibold mb-2">健康狀態</h3>
         <canvas id="chart-vitality"></canvas>
       </div>
+      <!-- v2.9.1：樹種組成矩陣（plot × species → BA / 株數 / V / C 切換）-->
+      <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h3 class="font-semibold">🗂️ 樹種組成矩陣（per-plot）</h3>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-stone-500">指標：</span>
+            <select id="species-matrix-metric" class="border rounded px-2 py-1 text-xs">
+              <option value="count">株數</option>
+              <option value="ba">斷面積 (m²)</option>
+              <option value="volume">材積 (m³)</option>
+              <option value="carbon">碳蓄積 (kg-C)</option>
+            </select>
+            <span class="text-stone-500 ml-2">前 N 樹種：</span>
+            <select id="species-matrix-topn" class="border rounded px-2 py-1 text-xs">
+              <option value="8">8</option>
+              <option value="12" selected>12</option>
+              <option value="20">20</option>
+              <option value="999">全部</option>
+            </select>
+          </div>
+        </div>
+        <p class="text-xs text-stone-500 mb-2">列 = 樣區、欄 = 樹種；最後 1 欄 = 「其他」彙整尾部、最後 2 列 = 平均 / 總計。可橫向捲動。</p>
+        <div id="species-matrix" class="overflow-x-auto text-xs"></div>
+      </div>
     </section>
 
     <section data-tab-content="map" class="hidden">
+      <!-- v2.9.1：圖層切換（QA 狀態 / stems ha 密度 / BA 密度）-->
+      <div id="map-layer-toggle" class="bg-white rounded-lg shadow p-2 mb-2 flex items-center gap-3 text-xs flex-wrap">
+        <span class="text-stone-500">著色依據：</span>
+        <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="qa" checked> QA 狀態（pending / verified / flagged / rejected）</label>
+        <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="density"> 立木密度（株/ha）</label>
+        <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="ba"> 斷面積密度（m²/ha）</label>
+      </div>
       <div id="map" class="h-[500px] rounded-lg shadow"></div>
+      <div id="map-legend" class="bg-white rounded-lg shadow p-2 mt-2 text-xs hidden"></div>
     </section>
 
     <section data-tab-content="export" class="hidden space-y-3">
@@ -563,6 +595,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=29000"></script>
+<script type="module" src="js/app.js?v=29010"></script>
 </body>
 </html>

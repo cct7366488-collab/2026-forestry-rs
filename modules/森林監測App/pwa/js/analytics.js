@@ -2,10 +2,10 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=29000';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=29010';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=29000';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=29010';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -445,8 +445,9 @@ export function renderQaqcErrorHistograms(realPlots, sampledTrees = [], cfg = DE
 // ===== Map =====
 let _map = null;
 let _layerGroup = null;
+let _mapData = null;  // v2.9.1：cache 給 layer toggle 用，避免每次切著色都重抓 Firestore
+
 export async function renderMap(project) {
-  const mapEl = $('#map');
   if (_map) { _map.remove(); _map = null; }
   _map = L.map('map').setView([23.9176, 120.8838], 13);  // 預設蓮華池
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -457,33 +458,224 @@ export async function renderMap(project) {
   const { plots, trees } = await fetchAllData(project);
   if (plots.length === 0) { toast('還沒有樣區可顯示'); return; }
 
-  const points = [];
-  plots.forEach(p => {
-    if (!p.location) return;
+  // v2.9.1：每 plot 預算 stems/ha + BA/ha（layer toggle 用）
+  const plotData = plots.map(p => {
+    if (!p.location) return null;
     const lat = p.location.latitude || p.location._lat;
     const lng = p.location.longitude || p.location._long;
-    points.push([lat, lng]);
-    const tCount = trees.filter(t => t.plotId === p.id).length;
-    // QA 狀態決定顏色
+    const plotTrees = trees.filter(t => t.plotId === p.id);
+    const tCount = plotTrees.length;
+    const ba = plotTrees.reduce((s, t) => s + (t.basalArea_m2 || 0), 0);
+    const areaH = Number.isFinite(p.areaHorizontal_m2) ? p.areaHorizontal_m2
+                : Number.isFinite(p.area_m2) ? p.area_m2 : 0;
+    const stemsHa = areaH > 0 ? tCount / areaH * 10000 : 0;
+    const baHa = areaH > 0 ? ba / areaH * 10000 : 0;
+    return { p, lat, lng, tCount, ba, stemsHa, baHa };
+  }).filter(Boolean);
+
+  _mapData = { project, plotData };
+
+  // 初始 layer mode + 綁 radio change（用 .onchange 避免重複 attach 於多次切回 map tab）
+  const initMode = $('input[name="map-layer"]:checked')?.value || 'qa';
+  renderMapLayer(initMode);
+  $$('input[name="map-layer"]').forEach(r => {
+    r.onchange = (e) => renderMapLayer(e.target.value);
+  });
+}
+
+// v2.9.1：依 mode 重畫 markers + legend（不重抓 data）
+function renderMapLayer(mode) {
+  if (!_mapData || !_layerGroup || !_map) return;
+  _layerGroup.clearLayers();
+  const { project, plotData } = _mapData;
+
+  // 決定著色函式 + legend HTML
+  let getColor, legend = '';
+  if (mode === 'qa') {
     const qaColor = { pending: '#a8a29e', verified: '#15803d', flagged: '#eab308', rejected: '#dc2626' };
-    const dotColor = qaColor[p.qaStatus] || '#15803d';
-    const surveyorLabel = isReviewer() ? anonName(p.createdBy) : userLabel(p.createdBy, '—');
-    const marker = L.circleMarker([lat, lng], {
+    getColor = (d) => qaColor[d.p.qaStatus] || '#15803d';
+    legend = '';  // QA 狀態直觀，不顯示 legend
+  } else if (mode === 'density' || mode === 'ba') {
+    // 5-quintile 色階（依該 mode 的 distribution）
+    const valueFn = mode === 'density' ? (d) => d.stemsHa : (d) => d.baHa;
+    const values = plotData.map(valueFn).filter(v => v > 0).sort((a, b) => a - b);
+    const q = (frac) => values.length > 0 ? values[Math.min(values.length - 1, Math.floor(values.length * frac))] : 0;
+    const breaks = [q(0.2), q(0.4), q(0.6), q(0.8)];
+    const colors = mode === 'density'
+      ? ['#fef3c7', '#fde68a', '#fbbf24', '#f59e0b', '#b45309']  // amber 系
+      : ['#dcfce7', '#bbf7d0', '#86efac', '#22c55e', '#15803d']; // green 系
+    getColor = (d) => {
+      const v = valueFn(d);
+      if (v === 0) return '#a8a29e';  // 0 = 灰
+      for (let i = 0; i < breaks.length; i++) if (v <= breaks[i]) return colors[i];
+      return colors[colors.length - 1];
+    };
+    const unit = mode === 'density' ? '株/ha' : 'm²/ha';
+    const fmtBreak = (b) => mode === 'density' ? Math.round(b) : b.toFixed(1);
+    const titleText = mode === 'density' ? '立木密度' : '斷面積密度';
+    legend = `<b>${titleText}（${unit}）</b>　` +
+      colors.map((c, i) => {
+        const lo = i === 0 ? '0' : fmtBreak(breaks[i - 1]);
+        const hi = i === colors.length - 1 ? '∞' : fmtBreak(breaks[i]);
+        return `<span style="display:inline-block;width:12px;height:12px;background:${c};border:1px solid #999;vertical-align:middle"></span> ${lo}–${hi}`;
+      }).join('　') +
+      `　<span style="color:#a8a29e">⬤</span> 無資料`;
+  }
+
+  const points = [];
+  plotData.forEach(d => {
+    points.push([d.lat, d.lng]);
+    const dotColor = getColor(d);
+    const surveyorLabel = isReviewer() ? anonName(d.p.createdBy) : userLabel(d.p.createdBy, '—');
+    const shapeLabel = ({ circle: '圓', square: '方', rectangle: '矩', irregular: '不規則' })[d.p.shape] || '方';
+    const irregLabel = d.p.shape === 'irregular' && Array.isArray(d.p.plotDimensions?.vertices)
+      ? ' · ' + d.p.plotDimensions.vertices.length + '頂點' : '';
+    const slopeLabel = Number.isFinite(d.p.slopeDegrees) && d.p.slopeDegrees > 0
+      ? ` · 坡 ${d.p.slopeDegrees.toFixed(0)}°` : '';
+    const marker = L.circleMarker([d.lat, d.lng], {
       radius: 8,
-      color: p.insideBoundary === false ? '#dc2626' : dotColor,
+      color: d.p.insideBoundary === false ? '#dc2626' : dotColor,
       fillColor: dotColor,
-      fillOpacity: 0.7,
+      fillOpacity: 0.75,
       weight: 2
     }).bindPopup(`
-      <strong>${p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${p.qaStatus || 'pending'}</span><br>
-      ${p.forestUnit || ''} · ${({ circle: '圓', square: '方', rectangle: '矩', irregular: '不規則' })[p.shape] || '方'} ${p.area_m2 ? Math.round(p.area_m2) : '?'}m²${p.shape === 'irregular' && Array.isArray(p.plotDimensions?.vertices) ? ' · ' + p.plotDimensions.vertices.length + '頂點' : ''}${Number.isFinite(p.slopeDegrees) && p.slopeDegrees > 0 ? ` · 坡 ${p.slopeDegrees.toFixed(0)}°` : ''}<br>
-      立木 ${tCount} 株<br>
+      <strong>${d.p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${d.p.qaStatus || 'pending'}</span><br>
+      ${d.p.forestUnit || ''} · ${shapeLabel} ${d.p.area_m2 ? Math.round(d.p.area_m2) : '?'}m²${irregLabel}${slopeLabel}<br>
+      立木 <b>${d.tCount}</b> 株 · 密度 <b>${d.stemsHa.toFixed(0)}</b> 株/ha · BA <b>${d.baHa.toFixed(1)}</b> m²/ha<br>
       調查者：${surveyorLabel}<br>
-      <a href="#/p/${project.id}/plot/${p.id}">→ 開啟樣區</a>
+      <a href="#/p/${project.id}/plot/${d.p.id}">→ 開啟樣區</a>
     `);
     _layerGroup.addLayer(marker);
   });
   if (points.length > 0) _map.fitBounds(points, { padding: [40, 40] });
+
+  // 更新 legend
+  const legendBox = $('#map-legend');
+  if (legendBox) {
+    if (legend) {
+      legendBox.classList.remove('hidden');
+      legendBox.innerHTML = legend;
+    } else {
+      legendBox.classList.add('hidden');
+      legendBox.innerHTML = '';
+    }
+  }
+}
+
+// ===== v2.9.1：樹種組成矩陣（Feature B） =====
+//   plot × species 大表，cell = stems/BA/volume/carbon（toggleable）
+//   尾部彙整為「其他」欄；最後 2 列 = 平均 / 總計
+//   給 dashboard 「🗂️ 樹種組成矩陣」section 用 + exportXlsx 也寫入 sheet
+//
+//   公開：buildSpeciesMatrix(plots, trees, metric, topN) — 給 export 用
+//        renderSpeciesCompositionMatrix(project, opts) — 給 UI 用
+const METRIC_META = {
+  count:   { label: '株數',           unit: '株',    fmt: (v) => v === 0 ? '—' : Math.round(v).toString() },
+  ba:      { label: '斷面積',         unit: 'm²',    fmt: (v) => v === 0 ? '—' : v.toFixed(2) },
+  volume:  { label: '材積',           unit: 'm³',    fmt: (v) => v === 0 ? '—' : v.toFixed(3) },
+  carbon:  { label: '碳蓄積',         unit: 'kg-C',  fmt: (v) => v === 0 ? '—' : v.toFixed(1) }
+};
+
+function aggTreeValue(t, metric) {
+  if (metric === 'count')  return 1;
+  if (metric === 'ba')     return t.basalArea_m2 || 0;
+  if (metric === 'volume') return t.volume_m3 || 0;
+  if (metric === 'carbon') return t.carbon_kg || 0;
+  return 0;
+}
+
+export function buildSpeciesMatrix(plots, trees, metric = 'count', topN = 12) {
+  const realPlots = plots.filter(p => p.qaStatus !== 'shell');
+  // 1. 樹種總計 — 排序取前 N
+  const speciesAgg = {};
+  trees.forEach(t => {
+    if (!t.speciesZh) return;
+    speciesAgg[t.speciesZh] = (speciesAgg[t.speciesZh] || 0) + aggTreeValue(t, metric);
+  });
+  const sorted = Object.keys(speciesAgg).sort((a, b) => speciesAgg[b] - speciesAgg[a]);
+  const topSpecies = sorted.slice(0, topN);
+  const otherSpecies = sorted.slice(topN);
+  const cols = otherSpecies.length > 0 ? [...topSpecies, '其他'] : [...topSpecies];
+
+  // 2. per-plot per-species 計算
+  const rows = realPlots.map(p => {
+    const plotTrees = trees.filter(t => t.plotId === p.id);
+    const values = {};
+    let total = 0;
+    topSpecies.forEach(s => {
+      values[s] = plotTrees.filter(t => t.speciesZh === s).reduce((sum, t) => sum + aggTreeValue(t, metric), 0);
+      total += values[s];
+    });
+    if (otherSpecies.length > 0) {
+      values['其他'] = plotTrees.filter(t => otherSpecies.includes(t.speciesZh)).reduce((sum, t) => sum + aggTreeValue(t, metric), 0);
+      total += values['其他'];
+    }
+    return { plotCode: p.code, plotId: p.id, values, total };
+  });
+
+  // 3. 總計 / 平均
+  const totals = {}, averages = {};
+  cols.forEach(c => {
+    totals[c] = rows.reduce((s, r) => s + (r.values[c] || 0), 0);
+    averages[c] = rows.length > 0 ? totals[c] / rows.length : 0;
+  });
+  const grandTotal = Object.values(totals).reduce((s, v) => s + v, 0);
+  const grandAvg = rows.length > 0 ? grandTotal / rows.length : 0;
+
+  return { rows, cols, totals, averages, grandTotal, grandAvg, topSpecies, otherSpecies, metric };
+}
+
+export async function renderSpeciesCompositionMatrix(project) {
+  const root = $('#species-matrix');
+  if (!root) return;
+  const metricSel = $('#species-matrix-metric');
+  const topNSel = $('#species-matrix-topn');
+  const metric = metricSel?.value || 'count';
+  const topN = parseInt(topNSel?.value || '12', 10);
+
+  const { plots, trees } = await fetchAllData(project);
+  if (plots.length === 0) {
+    root.innerHTML = '<div class="text-stone-500 p-2">尚無樣區資料。</div>';
+    return;
+  }
+
+  const m = buildSpeciesMatrix(plots, trees, metric, topN);
+  const meta = METRIC_META[metric];
+  if (m.cols.length === 0) {
+    root.innerHTML = '<div class="text-stone-500 p-2">尚無立木樹種資料。請先新增立木並指定樹種。</div>';
+    return;
+  }
+
+  // HTML table（sticky 第一欄）
+  const html = [
+    '<table class="border-collapse min-w-full">',
+    '<thead><tr class="bg-stone-100">',
+    `<th class="border p-1 text-left sticky left-0 bg-stone-100 z-10 font-semibold">樣區 \\ 樹種<br><span class="text-[10px] text-stone-500 font-normal">(${meta.unit})</span></th>`,
+    m.cols.map(c => `<th class="border p-1 text-right" style="min-width:64px">${c}</th>`).join(''),
+    '<th class="border p-1 text-right bg-stone-200">小計</th>',
+    '</tr></thead><tbody>',
+    m.rows.map(r =>
+      `<tr><td class="border p-1 font-mono text-stone-600 sticky left-0 bg-white z-10">${r.plotCode}</td>` +
+      m.cols.map(c => {
+        const v = r.values[c] || 0;
+        return `<td class="border p-1 text-right ${v > 0 ? '' : 'text-stone-300'}">${meta.fmt(v)}</td>`;
+      }).join('') +
+      `<td class="border p-1 text-right font-medium bg-stone-50">${meta.fmt(r.total)}</td></tr>`
+    ).join(''),
+    '</tbody><tfoot>',
+    '<tr class="bg-emerald-50 font-medium">',
+    '<td class="border p-1 sticky left-0 bg-emerald-50 z-10">平均</td>',
+    m.cols.map(c => `<td class="border p-1 text-right">${meta.fmt(m.averages[c])}</td>`).join(''),
+    `<td class="border p-1 text-right bg-emerald-100">${meta.fmt(m.grandAvg)}</td>`,
+    '</tr>',
+    '<tr class="bg-amber-50 font-medium">',
+    '<td class="border p-1 sticky left-0 bg-amber-50 z-10">總計</td>',
+    m.cols.map(c => `<td class="border p-1 text-right">${meta.fmt(m.totals[c])}</td>`).join(''),
+    `<td class="border p-1 text-right bg-amber-100">${meta.fmt(m.grandTotal)}</td>`,
+    '</tr>',
+    '</tfoot></table>'
+  ].join('');
+  root.innerHTML = html;
 }
 
 // ===== 匯出 =====
@@ -561,6 +753,31 @@ export async function exportXlsx(project) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(plotsRows), '樣區');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(treesRows), '立木');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(regenRows), '更新');
+
+  // v2.9.1：樹種組成矩陣（4 個指標各 1 sheet — 株數 / 斷面積 / 材積 / 碳蓄積）
+  //   給計畫書撰寫直接 copy-paste 用；尾部彙整為「其他」欄；最後 2 列 = 平均 / 總計
+  ['count', 'ba', 'volume', 'carbon'].forEach(metric => {
+    const m = buildSpeciesMatrix(plots, trees, metric, 12);
+    if (m.cols.length === 0) return;
+    const meta = METRIC_META[metric];
+    const matrixRows = m.rows.map(r => {
+      const row = { 樣區編號: r.plotCode };
+      m.cols.forEach(c => { row[c] = r.values[c] || 0; });
+      row['小計'] = r.total;
+      return row;
+    });
+    // 平均行
+    const avgRow = { 樣區編號: '平均' };
+    m.cols.forEach(c => { avgRow[c] = +m.averages[c].toFixed(metric === 'count' ? 1 : 3); });
+    avgRow['小計'] = +m.grandAvg.toFixed(metric === 'count' ? 1 : 3);
+    matrixRows.push(avgRow);
+    // 總計行
+    const totalRow = { 樣區編號: '總計' };
+    m.cols.forEach(c => { totalRow[c] = +m.totals[c].toFixed(metric === 'count' ? 0 : 3); });
+    totalRow['小計'] = +m.grandTotal.toFixed(metric === 'count' ? 0 : 3);
+    matrixRows.push(totalRow);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matrixRows), `組成矩陣-${meta.label}(${meta.unit})`);
+  });
 
   // v2.7.17：QAQC 抽樣查證表（reviewer 抽樣 → 重測 → 誤差 → 處置）+ 面積換算說明
   const qaqcRows = plots
