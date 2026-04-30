@@ -1,5 +1,5 @@
 // v2.8.0：irregular plot 多邊形繪製 + 點對多邊形判斷
-import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=28040';
+import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=28050';
 
 // ===== distribution.js — 立木分布散布圖（v2.6.2 / v2.5.1 backlog 🅲 落地）=====
 //
@@ -86,9 +86,11 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   if (shape === 'circle') {
     const r = Number.isFinite(dims.radius) ? dims.radius : Math.sqrt(area / Math.PI);
     xExtentStored = r; yExtentStored = r;
-  } else if (shape === 'rectangle') {
-    const w = Number.isFinite(dims.width)  ? dims.width  : Math.sqrt(area);
-    const l = Number.isFinite(dims.length) ? dims.length : Math.sqrt(area);
+  } else if (shape === 'rectangle' || shape === 'square') {
+    // v2.8.5：square 也走 rectangle 路徑 — 雙軸坡度後寬/長可能不等（沿坡距）
+    //         舊 square 資料 width=length=side，與此邏輯一致
+    const w = Number.isFinite(dims.width)  ? dims.width  : (Number.isFinite(dims.side) ? dims.side : Math.sqrt(area));
+    const l = Number.isFinite(dims.length) ? dims.length : (Number.isFinite(dims.side) ? dims.side : Math.sqrt(area));
     xExtentStored = w / 2; yExtentStored = l / 2;
   } else if (shape === 'irregular') {
     irregularVertsStored = vertsToArrays(dims.vertices || []);
@@ -107,8 +109,8 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
       xExtentStored = Math.sqrt(area) / 2;  // fallback
       yExtentStored = xExtentStored;
     }
-  } else {  // square
-    const s = Number.isFinite(dims.side) ? dims.side : Math.sqrt(area);
+  } else {  // unknown shape fallback
+    const s = Math.sqrt(area);
     xExtentStored = s / 2; yExtentStored = s / 2;
   }
 
@@ -249,12 +251,16 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   const shapeLabel = { circle: '圓形', square: '方形', rectangle: '矩形', irregular: '不規則多邊形' }[shape] || shape;
   let dimDesc;
   if (shape === 'circle') dimDesc = `半徑 ≈ ${xExtentStored.toFixed(1)} m`;
-  else if (shape === 'rectangle') dimDesc = `寬×長 ≈ ${(xExtentStored * 2).toFixed(1)}×${(yExtentStored * 2).toFixed(1)} m`;
+  else if (shape === 'rectangle' || shape === 'square') {
+    // v2.8.5：square 雙軸坡度後寬/長可能不等
+    const w = (xExtentStored * 2).toFixed(1), l = (yExtentStored * 2).toFixed(1);
+    dimDesc = (shape === 'square' && w === l) ? `邊長 ≈ ${w} m` : `寬×長 ≈ ${w}×${l} m`;
+  }
   else if (shape === 'irregular') dimDesc = `${irregularVertsStored?.length || 0} 頂點 / bbox ${(xExtentStored * 2).toFixed(1)}×${(yExtentStored * 2).toFixed(1)} m`;
   else dimDesc = `邊長 ≈ ${(xExtentStored * 2).toFixed(1)} m`;
   const viewLabel = viewMode === 'slope_distance' ? '沿坡距' : '水平投影';
-  // v2.8.4：rectangle + 雙軸坡度差異 → 顯示寬邊/長邊；其他形狀或單一坡度 → 顯示主坡度
-  const isDualSlope = shape === 'rectangle' && Math.abs(slopeWidth - slopeLength) > 0.05;
+  // v2.8.4 / v2.8.5：rectangle/square 雙軸坡度差異 → 顯示寬邊/長邊；圓/不規則 → 顯示主坡度
+  const isDualSlope = (shape === 'rectangle' || shape === 'square') && Math.abs(slopeWidth - slopeLength) > 0.05;
   const slopeText = isDualSlope
     ? `寬邊 ${slopeWidth.toFixed(1)}° / 長邊 ${slopeLength.toFixed(1)}°`
     : `${slope.toFixed(1)}°`;
