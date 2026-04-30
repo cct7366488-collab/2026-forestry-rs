@@ -15,18 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=28060";
-import * as forms from "./forms.js?v=28060";
-import * as analytics from "./analytics.js?v=28060";
-import * as importWizard from "./import-wizard.js?v=28060";
-import { renderTreeDistribution } from "./distribution.js?v=28060";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=28060";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=29000";
+import * as forms from "./forms.js?v=29000";
+import * as analytics from "./analytics.js?v=29000";
+import * as importWizard from "./import-wizard.js?v=29000";
+import { renderTreeDistribution } from "./distribution.js?v=29000";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=29000";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=28060";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=28060";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=29000";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl } from "./species-equations.js?v=29000";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=28060";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=29000";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -349,7 +349,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=28060');
+    const m = await import('./migration-v2715.js?v=29000');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -371,7 +371,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=28060');
+    const m = await import('./migration-v2715.js?v=29000');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1725,6 +1725,8 @@ function renderQaqcErrorStats(realPlots, sampledTrees = [], cfg = DEFAULT_QAQC_C
       ${treeBlock}
     </div>
   `;
+  // v2.9.0：渲染誤差分布直方圖（樣本不足時各 chart 顯示「尚無資料」placeholder）
+  try { analytics.renderQaqcErrorHistograms(realPlots, sampledTrees, cfg); } catch (e) { console.warn('[qaqc-histograms]', e); }
 }
 
 function renderQaqcApproveGate(project, realPlots, cfg, sampledTrees = []) {
@@ -2299,11 +2301,12 @@ async function renderPlotDetail(root, projectId, plotId) {
     if (t === 'distribution') rerenderDistribution();
   }));
 
-  // v2.3.4：reroute 後恢復原 sub-tab（避免每次 markQA 跳回「立木調查」預設）
+  // v2.3.4：reroute 後恢復原 sub-tab（避免每次 markQA 跳回預設）
+  // v2.9.0：預設 sub-tab 從 'trees' 改為 'overview'（樣區概況優先）
   // 必須在 methodology 顯示控制（toggle hidden）之後才呼叫，否則點到 hidden tab
   setTimeout(() => {
     const restore = consumePendingSubtab();
-    if (!restore || restore === 'trees') return;
+    if (!restore || restore === 'overview') return;
     const tab = $(`.subtab-link[data-subtab="${restore}"]`);
     if (tab && !tab.classList.contains('hidden')) tab.click();
   }, 0);
@@ -2523,6 +2526,9 @@ function renderTreeList(snap, projectId, plotId) {
   _lastTreeSnap = snap;   // v2.6.2：留給 distribution 用
   const list = $('#tree-list');
   $('#tree-count').textContent = `（${snap.size} 株）`;
+  // v2.9.0：每次 trees 更新都同步重畫 plot 概況 dashboard
+  const treesArr = snap.docs.map(d => d.data());
+  try { analytics.renderPlotOverview(state.plot, treesArr); } catch (e) { console.warn('[plot-overview]', e); }
   if (snap.empty) {
     list.innerHTML = '<p class="p-4 text-stone-500 text-sm">尚無立木記錄。</p>';
     $('#tree-summary').innerHTML = '';

@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.8.6';  // v2.8.6：auto-fill 解除 dimType gate — 兩種 methodology 都自動填寬/長；preview 雙向顯示（dimType='slope_distance' 顯示水平投影；dimType='horizontal' 顯示沿坡距現場拉皮尺距離）；rectangle/square dimType='horizontal' + 坡度 → 額外顯示「現場拉皮尺：寬 X m / 長 Y m」單邊長度；irregular preview 也支援雙向
+const CACHE = 'forest-monitor-v2.9.0';  // v2.9.0：dashboard / 統計分析升級 — (A) plot detail 新增「📊 樣區概況」分頁（per-plot KPI 8 cards + DBH 直方圖 + 樹種 IV + 活力 doughnut；隨 tree onSnapshot 即時更新；變成新預設分頁）；(B) QAQC 「📈 誤差統計」加 3 個誤差分布直方圖（坡度誤差 / 面積誤差 / 立木 DBH 誤差；自動 binning + 過閾值 bin 紅色；reviewer 視覺化抽樣品質）
 const SHELL = [
   './',
   './index.html',

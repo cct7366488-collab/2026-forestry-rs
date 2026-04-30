@@ -2,10 +2,10 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=28060';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=29000';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=28060';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=29000';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -232,6 +232,214 @@ export async function renderDashboard(project) {
     );
     cBox.appendChild(qaCard);
   }
+}
+
+// ===== v2.9.0：Per-plot 概況 dashboard（Feature A） =====
+//   給 plot detail 「📊 樣區概況」分頁用 — 隨 tree onSnapshot 即時更新
+//   trees 從 renderTreeList 收到的 snap.docs.map(d => d.data()) 形式傳入
+export function renderPlotOverview(plot, trees) {
+  const kpisBox = $('#plot-overview-kpis');
+  if (!kpisBox) return;  // 不在 plot detail 視圖
+
+  // KPI 計算
+  const totalTrees = trees.length;
+  const liveTrees = trees.filter(t => t.vitality === 'healthy' || t.vitality === 'weak').length;
+  const totalBA = trees.reduce((s, t) => s + (t.basalArea_m2 || 0), 0);
+  const totalV  = trees.reduce((s, t) => s + (t.volume_m3 || 0), 0);
+  const totalC  = trees.reduce((s, t) => s + (t.carbon_kg || 0), 0);
+  const totalCO2 = trees.reduce((s, t) => s + (t.co2_kg || 0), 0);
+  const meanDbh = totalTrees > 0 ? trees.reduce((s, t) => s + (t.dbh_cm || 0), 0) / totalTrees : 0;
+  const meanH   = totalTrees > 0 ? trees.reduce((s, t) => s + (t.height_m || 0), 0) / totalTrees : 0;
+  // 立木密度（株/ha）— 用水平投影面積（碳計算用）
+  const areaH_m2 = Number.isFinite(plot?.areaHorizontal_m2) ? plot.areaHorizontal_m2
+                 : Number.isFinite(plot?.area_m2) ? plot.area_m2 : 0;
+  const stemsPerHa = areaH_m2 > 0 ? Math.round(totalTrees / areaH_m2 * 10000) : 0;
+  const ba_m2_ha = areaH_m2 > 0 ? totalBA / areaH_m2 * 10000 : 0;
+
+  kpisBox.innerHTML = '';
+  const kpis = [
+    ['立木總數', `${totalTrees} 株${liveTrees < totalTrees ? `（活 ${liveTrees}）` : ''}`],
+    ['立木密度', `${stemsPerHa.toLocaleString()} 株/ha`],
+    ['總斷面積', `${totalBA.toFixed(2)} m² (${ba_m2_ha.toFixed(1)}/ha)`],
+    ['總材積', `${totalV.toFixed(2)} m³`],
+    ['總碳蓄積', totalC < 1000 ? `${totalC.toFixed(0)} kg-C` : `${(totalC/1000).toFixed(2)} t-C`],
+    ['CO₂ 當量', totalCO2 < 1000 ? `${totalCO2.toFixed(0)} kg` : `${(totalCO2/1000).toFixed(2)} t`],
+    ['平均 DBH', `${meanDbh.toFixed(1)} cm`],
+    ['平均樹高', `${meanH.toFixed(1)} m`],
+  ];
+  kpis.forEach(([k, v]) => kpisBox.appendChild(
+    el('div', { class: 'bg-white rounded-lg shadow p-2' },
+      el('div', { class: 'text-[10px] text-stone-500' }, k),
+      el('div', { class: 'text-base font-bold' }, String(v))
+    )
+  ));
+
+  // ----- DBH 直方圖（5 cm 一級）-----
+  killChart('plot-dbh');
+  const dbhCanvas = $('#plot-chart-dbh');
+  if (dbhCanvas) {
+    const bins = {};
+    trees.forEach(t => {
+      if (!Number.isFinite(t.dbh_cm)) return;
+      const b = Math.floor(t.dbh_cm / 5) * 5;
+      bins[b] = (bins[b] || 0) + 1;
+    });
+    const labels = Object.keys(bins).map(Number).sort((a, b) => a - b);
+    if (labels.length > 0) {
+      _charts['plot-dbh'] = new Chart(dbhCanvas, {
+        type: 'bar',
+        data: {
+          labels: labels.map(l => `${l}-${l + 5}`),
+          datasets: [{ label: '株數', data: labels.map(l => bins[l]), backgroundColor: '#15803d' }]
+        },
+        options: { plugins: { legend: { display: false } }, scales: { x: { title: { display: true, text: 'DBH (cm)' } }, y: { title: { display: true, text: '株數' }, ticks: { precision: 0 } } } }
+      });
+    } else {
+      const ctx = dbhCanvas.getContext('2d');
+      ctx.clearRect(0, 0, dbhCanvas.width, dbhCanvas.height);
+      ctx.fillStyle = '#a8a29e'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('（尚無 DBH 資料）', dbhCanvas.width / 2, dbhCanvas.height / 2);
+    }
+  }
+
+  // ----- 樹種 IV（前 10）-----
+  killChart('plot-iv');
+  const ivCanvas = $('#plot-chart-iv');
+  if (ivCanvas) {
+    const sp = {};
+    trees.forEach(t => {
+      if (!t.speciesZh) return;
+      sp[t.speciesZh] = sp[t.speciesZh] || { count: 0, ba: 0 };
+      sp[t.speciesZh].count++;
+      sp[t.speciesZh].ba += t.basalArea_m2 || 0;
+    });
+    const totalBAall = Object.values(sp).reduce((s, x) => s + x.ba, 0) || 1;
+    const totalCount = trees.length || 1;
+    const ivList = Object.entries(sp).map(([name, v]) => ({
+      name,
+      iv: 100 * (v.count / totalCount + v.ba / totalBAall) / 2
+    })).sort((a, b) => b.iv - a.iv).slice(0, 10);
+    if (ivList.length > 0) {
+      _charts['plot-iv'] = new Chart(ivCanvas, {
+        type: 'bar',
+        data: {
+          labels: ivList.map(x => x.name),
+          datasets: [{ label: 'IV (%)', data: ivList.map(x => +x.iv.toFixed(1)), backgroundColor: '#65a30d' }]
+        },
+        options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { title: { display: true, text: '重要值 IV (%)' } } } }
+      });
+    } else {
+      const ctx = ivCanvas.getContext('2d');
+      ctx.clearRect(0, 0, ivCanvas.width, ivCanvas.height);
+      ctx.fillStyle = '#a8a29e'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('（尚無樹種資料）', ivCanvas.width / 2, ivCanvas.height / 2);
+    }
+  }
+
+  // ----- 活力 doughnut -----
+  killChart('plot-vitality');
+  const vitCanvas = $('#plot-chart-vitality');
+  if (vitCanvas) {
+    const vCount = { healthy: 0, weak: 0, 'standing-dead': 0, fallen: 0 };
+    trees.forEach(t => { if (t.vitality && vCount[t.vitality] != null) vCount[t.vitality]++; });
+    const totalV = Object.values(vCount).reduce((a, b) => a + b, 0);
+    if (totalV > 0) {
+      _charts['plot-vitality'] = new Chart(vitCanvas, {
+        type: 'doughnut',
+        data: {
+          labels: ['健康', '衰弱', '枯立', '倒伏'],
+          datasets: [{
+            data: [vCount.healthy, vCount.weak, vCount['standing-dead'], vCount.fallen],
+            backgroundColor: ['#16a34a', '#eab308', '#a8a29e', '#dc2626']
+          }]
+        }
+      });
+    } else {
+      const ctx = vitCanvas.getContext('2d');
+      ctx.clearRect(0, 0, vitCanvas.width, vitCanvas.height);
+      ctx.fillStyle = '#a8a29e'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('（尚無活力資料）', vitCanvas.width / 2, vitCanvas.height / 2);
+    }
+  }
+}
+
+// ===== v2.9.0：QAQC 誤差分布直方圖（Feature D） =====
+//   給 QAQC tab 「📈 誤差統計」區塊用 — 在文字摘要下方加 3 個 histogram
+//   plots / sampledTrees 必須是「已完成 QAQC 重測」的子集（有 errorXxx 欄位）
+//   threshold（cfg.slopeThreshold_deg / areaThreshold_pct / treeXxxThreshold）會畫成紅虛線
+export function renderQaqcErrorHistograms(realPlots, sampledTrees = [], cfg = DEFAULT_QAQC_CONFIG) {
+  const root = $('#qaqc-error-histograms');
+  if (!root) return;
+
+  // 收集誤差資料
+  const slopeErrs = realPlots.map(p => Number(p.qaqc?.slopeError_deg)).filter(Number.isFinite);
+  const areaErrs  = realPlots.map(p => Number(p.qaqc?.areaError_pct)).filter(Number.isFinite);
+  const dbhErrs   = sampledTrees.map(t => Number(t.qaqc?.dbhError_cm)).filter(Number.isFinite);
+
+  // 容器：3 (or 2 若 tree 未啟用) 個 canvas card
+  const treeEnabled = cfg.enableTreeLevelQaqc === true;
+  const cards = [
+    { id: 'qaqc-hist-slope', title: '坡度誤差分布 (°)', errs: slopeErrs, threshold: cfg.slopeThreshold_deg, unit: '°', color: '#0891b2', binWidth: null },
+    { id: 'qaqc-hist-area',  title: '面積誤差分布 (%)', errs: areaErrs,  threshold: cfg.areaThreshold_pct, unit: '%', color: '#a855f7', binWidth: null },
+  ];
+  if (treeEnabled) cards.push({ id: 'qaqc-hist-dbh', title: '立木 DBH 誤差分布 (cm)', errs: dbhErrs, threshold: cfg.dbhThreshold_cm, unit: ' cm', color: '#16a34a', binWidth: null });
+
+  // 重建容器（清空避免 stale canvas）
+  root.innerHTML = '';
+  cards.forEach(c => {
+    const card = el('div', { class: 'bg-stone-50 rounded p-2' },
+      el('div', { class: 'text-xs font-semibold text-stone-700 mb-1' }, c.title),
+      el('canvas', { id: c.id, height: '140' })
+    );
+    root.appendChild(card);
+  });
+
+  // 渲染各 histogram
+  cards.forEach(c => {
+    killChart(c.id);
+    const canvas = $('#' + c.id);
+    if (!canvas) return;
+    if (c.errs.length === 0) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#a8a29e'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('（尚無誤差資料 — 等 reviewer 完成抽樣重測）', canvas.width / 2, canvas.height / 2);
+      return;
+    }
+    // 自動 bin 寬度：max-min / 8 bins，floor 到合理單位
+    const maxErr = Math.max(...c.errs, c.threshold || 0);
+    const niceBin = (m) => {
+      const step = m / 8;
+      const pow = Math.pow(10, Math.floor(Math.log10(step || 0.1)));
+      return Math.max(pow, Math.round(step / pow) * pow);
+    };
+    const binW = niceBin(maxErr);
+    const bins = {};
+    c.errs.forEach(e => {
+      const b = Math.floor(e / binW) * binW;
+      bins[b] = (bins[b] || 0) + 1;
+    });
+    const sortedBins = Object.keys(bins).map(Number).sort((a, b) => a - b);
+    const labels = sortedBins.map(b => `${b.toFixed(b < 1 ? 2 : 1)}-${(b + binW).toFixed(b < 1 ? 2 : 1)}`);
+    const data = sortedBins.map(b => bins[b]);
+    // 閾值線（標示哪些 bin 過閾值）→ 用顏色區分
+    const colors = sortedBins.map(b => (c.threshold != null && b + binW > c.threshold) ? '#dc2626' : c.color);
+    _charts[c.id] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0 }] },
+      options: {
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { title: (items) => `誤差 ${items[0].label}${c.unit}`, label: (item) => `${item.parsed.y} 樣本` } },
+          subtitle: c.threshold != null ? { display: true, text: `閾值 ${c.threshold}${c.unit}（過閾值 = 紅）`, font: { size: 10 }, color: '#dc2626', position: 'top', align: 'end' } : { display: false }
+        },
+        scales: {
+          x: { title: { display: true, text: `誤差 (${c.unit.trim()})` } },
+          y: { title: { display: true, text: '樣本數' }, ticks: { precision: 0 } }
+        }
+      }
+    });
+  });
 }
 
 // ===== Map =====

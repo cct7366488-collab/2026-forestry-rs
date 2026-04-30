@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=28060">
+  <link rel="stylesheet" href="style.css?v=29000">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.8.6</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.9.0</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -288,6 +288,8 @@
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="font-semibold mb-3">📈 誤差統計</h3>
         <div id="qaqc-error-stats" class="text-sm"></div>
+        <!-- v2.9.0：誤差分布直方圖（reviewer 可視覺化抽樣品質）-->
+        <div id="qaqc-error-histograms" class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3"></div>
       </div>
 
       <!-- 合格簽發 -->
@@ -425,7 +427,8 @@
     </div>
 
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
-      <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">🌳 立木調查</a>
+      <a href="#" data-subtab="overview" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">📊 樣區概況</a>
+      <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌳 立木調查</a>
       <a href="#" data-subtab="distribution" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">📍 立木分布</a>
       <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌱 自然更新</a>
       <a href="#" data-subtab="understory" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌿 地被植物</a>
@@ -435,7 +438,36 @@
       <a href="#" data-subtab="info" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">📋 樣區資訊</a>
     </nav>
 
-    <section data-subtab-content="trees">
+    <!-- v2.9.0：樣區概況 — per-plot KPI / DBH 分布 / 樹種 IV / 活力 -->
+    <section data-subtab-content="overview">
+      <h2 class="text-lg font-semibold mb-3">📊 樣區概況</h2>
+      <p class="text-xs text-stone-500 mb-3">本樣區的 KPI 摘要 + 立木統計圖（DBH 分布 / 樹種 IV / 活力）。資料隨立木調查更新即時更新。</p>
+      <div id="plot-overview-kpis" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-4"></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="bg-white rounded-lg shadow p-3">
+          <h3 class="font-medium text-sm mb-2">📊 DBH 直徑分布（5 cm 一級）</h3>
+          <canvas id="plot-chart-dbh" height="180"></canvas>
+        </div>
+        <div class="bg-white rounded-lg shadow p-3">
+          <h3 class="font-medium text-sm mb-2">🌳 樹種重要值 IV（前 10）</h3>
+          <canvas id="plot-chart-iv" height="180"></canvas>
+        </div>
+        <div class="bg-white rounded-lg shadow p-3">
+          <h3 class="font-medium text-sm mb-2">🩺 立木活力分布</h3>
+          <canvas id="plot-chart-vitality" height="180"></canvas>
+        </div>
+        <div class="bg-stone-50 rounded-lg p-3 text-xs text-stone-600">
+          <h3 class="font-medium text-sm mb-2 text-stone-700">📌 圖表說明</h3>
+          <ul class="list-disc list-inside space-y-1">
+            <li><b>DBH 直徑分布</b>：胸高直徑（cm）落在各 5 cm 級的株數，看樣區徑級結構（稚樹 / 中林 / 大徑）</li>
+            <li><b>樹種重要值 IV</b>：(相對密度 + 相對優勢度) ÷ 2 × 100%，前 10 大樹種；IPCC + 林業教科書標準算法</li>
+            <li><b>活力分布</b>：健康 / 衰弱 / 枯立 / 倒伏 比例 — 衰弱 + 枯立 比例高 = 林分健康警示</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section data-subtab-content="trees" class="hidden">
       <div class="flex justify-between items-center mb-3">
         <h2 class="text-lg font-semibold">立木列表 <span id="tree-count" class="text-sm text-stone-500"></span></h2>
         <button id="btn-new-tree" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新立木</button>
@@ -531,6 +563,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=28060"></script>
+<script type="module" src="js/app.js?v=29000"></script>
 </body>
 </html>
