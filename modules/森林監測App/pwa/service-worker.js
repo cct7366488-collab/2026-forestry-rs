@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.8.3';  // v2.8.3：rectangle 升為台灣永久樣區預設（20×25 m）+ admin 一鍵 square→rectangle 批次轉換（含 QAQC area 欄位重置；slope + 抽樣狀態保留；tree QAQC 不受影響）
+const CACHE = 'forest-monitor-v2.8.4';  // v2.8.4：樣區雙軸坡度（寬邊 / 長邊）+ 沿坡距自動換算 — rectangle 表單兩坡度必填、寬/長自動算；立木座標 X/Y 雙軸 cos 校正；plot-geometry 加 *2D 系列函式；schema 新增 slopeWidthDeg / slopeLengthDeg（向後相容 slopeDegrees=長邊主坡度）
 const SHELL = [
   './',
   './index.html',

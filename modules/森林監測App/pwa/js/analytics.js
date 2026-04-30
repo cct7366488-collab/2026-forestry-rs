@@ -2,10 +2,10 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=28030';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=28040';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=28030';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=28040';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -747,12 +747,12 @@ export async function exportQaqcDocReport(project) {
 </table>
 
 <h2>貳、樣區幾何 schema 與面積換算</h2>
-<p>本系統樣區幾何依 schema v2.6（app v2.7.15 落地）：plotShape 支援 circle / square / rectangle 三種；plotDimensions 結構依形狀（circle = {radius}、square = {side, width, length}、rectangle = {width, length}）。每個樣區可設坡度（slopeDegrees）與量測單位（dimensionType）。</p>
+<p>本系統樣區幾何依 schema v2.6（app v2.7.15 落地）：plotShape 支援 circle / square / rectangle / irregular 四種；plotDimensions 結構依形狀（circle = {radius}、square = {side, width, length}、rectangle = {width, length}、irregular = {vertices,bbox}）。v2.8.4 起每個樣區可設「寬邊坡度（slopeWidthDeg）」與「長邊坡度（slopeLengthDeg）」雙軸坡度（rectangle）— 反映野外寬/長兩方向坡度可能不同的實務（圓形/方形/不規則仍用單一坡度）；slopeDegrees 保留為主坡度（= slopeLengthDeg），向後相容碳計算/QAQC 下游邏輯。</p>
 
 <h3>水平投影面積公式（碳計算 / 密度推算分母）</h3>
 <div class="formula">
-areaHorizontal_m2 = area_m2 × cos(slopeDegrees × π / 180)　　當 dimensionType = 'slope_distance'<br>
-areaHorizontal_m2 = area_m2　　　　　　　　　　　　　　　　　當 dimensionType = 'horizontal'
+areaHorizontal_m2 = area_m2 × cos(slopeWidthDeg × π/180) × cos(slopeLengthDeg × π/180)　　當 dimensionType = 'slope_distance'（v2.8.4 雙軸）<br>
+areaHorizontal_m2 = area_m2　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　當 dimensionType = 'horizontal'
 </div>
 
 <h3>不規則多邊形面積（Shoelace 公式，v2.8.0）</h3>
@@ -761,10 +761,11 @@ Area = |Σᵢ (xᵢ × yᵢ₊₁ − xᵢ₊₁ × yᵢ)| / 2　　vertices 以
 邊界驗證：3–50 頂點、CCW 順序、簡單多邊形（無自交）、面積 ≥ 1 m²
 </div>
 
-<h3>立木座標換算（沿坡距 ↔ 水平投影）</h3>
+<h3>立木座標換算（沿坡距 ↔ 水平投影，v2.8.4 雙軸）</h3>
 <div class="formula">
-horizontalY_m = localY_m × cos(slopeDegrees × π / 180)　　X 沿等高線不變<br>
-立木分布圖切換鈕（v2.7.16）即據此換算 — 圓形樣區 + 坡度 + 水平視圖 → 視覺呈現橢圓
+horizontalX_m = localX_m × cos(slopeWidthDeg × π/180)　　X 沿寬邊（通常沿等高線）<br>
+horizontalY_m = localY_m × cos(slopeLengthDeg × π/180)　　Y 沿長邊（通常沿坡）<br>
+立木分布圖切換鈕（v2.7.16）即據此換算 — 雙軸坡度時水平視圖會在 X/Y 各自壓縮
 </div>
 
 <h3>MRV 對齊</h3>

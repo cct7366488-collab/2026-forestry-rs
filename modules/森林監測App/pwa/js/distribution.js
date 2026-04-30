@@ -1,5 +1,5 @@
 // v2.8.0：irregular plot 多邊形繪製 + 點對多邊形判斷
-import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=28030';
+import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=28040';
 
 // ===== distribution.js — 立木分布散布圖（v2.6.2 / v2.5.1 backlog 🅲 落地）=====
 //
@@ -70,7 +70,12 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   const shape = plot.shape || 'square';
   const area  = Number.isFinite(plot.area_m2) ? plot.area_m2 : 500;
   const dims  = plot.plotDimensions || {};
-  const slope = Number.isFinite(plot.slopeDegrees) ? plot.slopeDegrees : 0;
+  // v2.8.4：雙軸坡度 — 寬邊（X 沿等高線）/ 長邊（Y 沿坡）各自 cos 校正
+  //         舊資料 fallback：slopeWidthDeg/slopeLengthDeg = slopeDegrees（normalizePlotOnRead 已處理；此處再保險一次）
+  const slopeMain = Number.isFinite(plot.slopeDegrees) ? plot.slopeDegrees : 0;
+  const slopeWidth  = Number.isFinite(plot.slopeWidthDeg)  ? plot.slopeWidthDeg  : slopeMain;
+  const slopeLength = Number.isFinite(plot.slopeLengthDeg) ? plot.slopeLengthDeg : slopeMain;
+  const slope = slopeMain;  // 向後相容：保留 slope 變數（下面 yMult 邏輯仍用，但現在配合雙軸 toggle）
   const dimType = plot.dimensionType || 'horizontal';  // 舊資料缺欄位 → 視為已水平投影
   const originType = methodology?.plotOriginType || 'center';
 
@@ -108,19 +113,27 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   }
 
   // viewMode：'slope_distance' | 'horizontal'。預設 = dimType（資料原生視圖）
-  // 切換條件：slope > 0 AND dimType='slope_distance'（否則無內容可切）
-  const canToggle = slope > 0 && dimType === 'slope_distance';
+  // 切換條件：任一坡度 > 0 AND dimType='slope_distance'（否則無內容可切）
+  // v2.8.4：雙軸 — X 用 slopeWidth、Y 用 slopeLength；任一非零即可切換
+  const canToggle = (slopeWidth > 0 || slopeLength > 0) && dimType === 'slope_distance';
   const viewMode = opts.viewMode || (canToggle ? 'slope_distance' : dimType);
-  const cos = Math.cos(slope * Math.PI / 180);
+  const cosWidth  = Math.cos(slopeWidth  * Math.PI / 180);
+  const cosLength = Math.cos(slopeLength * Math.PI / 180);
+  const xMult = (() => {
+    if (slopeWidth === 0 || viewMode === dimType) return 1;
+    if (viewMode === 'horizontal' && dimType === 'slope_distance') return cosWidth;
+    if (viewMode === 'slope_distance' && dimType === 'horizontal') return cosWidth > 1e-6 ? 1 / cosWidth : 1;
+    return 1;
+  })();
   const yMult = (() => {
-    if (slope === 0 || viewMode === dimType) return 1;
-    if (viewMode === 'horizontal' && dimType === 'slope_distance') return cos;
-    if (viewMode === 'slope_distance' && dimType === 'horizontal') return cos > 1e-6 ? 1 / cos : 1;
+    if (slopeLength === 0 || viewMode === dimType) return 1;
+    if (viewMode === 'horizontal' && dimType === 'slope_distance') return cosLength;
+    if (viewMode === 'slope_distance' && dimType === 'horizontal') return cosLength > 1e-6 ? 1 / cosLength : 1;
     return 1;
   })();
 
-  // 顯示空間的半 extent（已乘 yMult）
-  const xExtent = xExtentStored;
+  // 顯示空間的半 extent（已乘 xMult / yMult）
+  const xExtent = xExtentStored * xMult;
   const yExtent = yExtentStored * yMult;
 
   // 3. 座標範圍（用樣區幾何 + 立木 X/Y 兩者取 union 加 5% 緩衝，立木超出邊界仍可見）
@@ -132,13 +145,15 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
     xMin = 0; xMax = 2 * xExtent;
     yMin = 0; yMax = 2 * yExtent;
   }
-  // 把樣區外的立木納入範圍（立木 Y 也套 yMult，與邊界一致）
+  // 把樣區外的立木納入範圍（立木 X/Y 都套 xMult/yMult，與邊界一致）
+  // v2.8.4：雙軸 — X 也套 xMult
   withXY.forEach(t => {
+    const txDisplay = t.localX_m * xMult;
     const tyDisplay = t.localY_m * yMult;
-    if (t.localX_m < xMin) xMin = t.localX_m;
-    if (t.localX_m > xMax) xMax = t.localX_m;
-    if (tyDisplay < yMin)  yMin = tyDisplay;
-    if (tyDisplay > yMax)  yMax = tyDisplay;
+    if (txDisplay < xMin) xMin = txDisplay;
+    if (txDisplay > xMax) xMax = txDisplay;
+    if (tyDisplay < yMin) yMin = tyDisplay;
+    if (tyDisplay > yMax) yMax = tyDisplay;
   });
   // 5% buffer
   const xRange = xMax - xMin, yRange = yMax - yMin;
@@ -188,16 +203,18 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   // 7. 畫底圖
   drawAxes(ctx, cssSize, originType, xMin, xMax, yMin, yMax, mxToPx, myToPy);
   // v2.8.0：irregular 把 vertices 套 yMult（顯示空間）後傳給 boundary 函式
+  // v2.8.4：雙軸 — vertices 也套 xMult（與 X 立木一致）
   const irregularVertsDisplay = irregularVertsStored
-    ? irregularVertsStored.map(([x, y]) => [x, y * yMult])
+    ? irregularVertsStored.map(([x, y]) => [x * xMult, y * yMult])
     : null;
   drawPlotBoundary(ctx, shape, originType, xExtent, yExtent, mxToPx, myToPy, irregularVertsDisplay);
 
   // 8. 點集（先把資料整理好，方便 hover lookup）
   //    v2.7.16：localY 套 yMult 切換 沿坡距 ↔ 水平投影；inside 用顯示空間判斷
   //    v2.8.0：irregular 用 point-in-polygon 判斷
+  //    v2.8.4：雙軸 — X 也套 xMult
   const points = withXY.map(t => {
-    const xd = t.localX_m;
+    const xd = t.localX_m * xMult;
     const yd = t.localY_m * yMult;
     const px = mxToPx(xd);
     const py = myToPy(yd);
@@ -236,7 +253,12 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
   else if (shape === 'irregular') dimDesc = `${irregularVertsStored?.length || 0} 頂點 / bbox ${(xExtentStored * 2).toFixed(1)}×${(yExtentStored * 2).toFixed(1)} m`;
   else dimDesc = `邊長 ≈ ${(xExtentStored * 2).toFixed(1)} m`;
   const viewLabel = viewMode === 'slope_distance' ? '沿坡距' : '水平投影';
-  const slopeNote = slope > 0 ? `　│　坡度 ${slope.toFixed(1)}°　│　視圖 <b>${viewLabel}</b>` : '';
+  // v2.8.4：rectangle + 雙軸坡度差異 → 顯示寬邊/長邊；其他形狀或單一坡度 → 顯示主坡度
+  const isDualSlope = shape === 'rectangle' && Math.abs(slopeWidth - slopeLength) > 0.05;
+  const slopeText = isDualSlope
+    ? `寬邊 ${slopeWidth.toFixed(1)}° / 長邊 ${slopeLength.toFixed(1)}°`
+    : `${slope.toFixed(1)}°`;
+  const slopeNote = (slopeWidth > 0 || slopeLength > 0) ? `　│　坡度 ${slopeText}　│　視圖 <b>${viewLabel}</b>` : '';
   lines.push(`<b>樣區規格</b>：${shapeLabel} / ${area} m²` +
              ` / 原點=<b>${originType === 'center' ? '中心點' : '左下角'}</b>` +
              ` / ${dimDesc}${slopeNote}`);
@@ -324,14 +346,17 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
     const p = findPointAt(mx, my);
     if (p) {
       tooltip.classList.remove('hidden');
-      // v2.7.16：tooltip 顯示原始 X/Y（野外實測），yMult ≠ 1 時加註當前視圖換算後的 Y
+      // v2.7.16 / v2.8.4：tooltip 顯示原始 X/Y（野外實測），xMult/yMult ≠ 1 時加註當前視圖換算後的 X/Y
+      const xViewNote = (xMult !== 1)
+        ? `<br><span style="color:#fcd34d">▸ ${viewMode === 'horizontal' ? '水平投影' : '沿坡距'} X'=${(p.localX_m * xMult).toFixed(2)} m (× ${xMult.toFixed(3)})</span>`
+        : '';
       const yViewNote = (yMult !== 1)
         ? `<br><span style="color:#fcd34d">▸ ${viewMode === 'horizontal' ? '水平投影' : '沿坡距'} Y'=${p._displayY.toFixed(2)} m (× ${yMult.toFixed(3)})</span>`
         : '';
       tooltip.innerHTML = `<b>${p.treeCode || '#' + (p.treeNum || '?')}</b>　${p.speciesZh || '?'}` +
         `<br>DBH ${(p.dbh_cm || 0).toFixed(1)} cm　H ${(p.height_m || 0).toFixed(1)} m` +
         `<br>X=${p.localX_m.toFixed(2)} Y=${p.localY_m.toFixed(2)} m （資料原值）` +
-        yViewNote +
+        xViewNote + yViewNote +
         `　<span style="color:${VITALITY_COLOR[p.vitality]}">${VITALITY_LABEL[p.vitality] || p.vitality || '?'}</span>` +
         (p.inside ? '' : '<br><span style="color:#fca5a5">⚠ 超出樣區邊界</span>');
       tooltip.style.left = (p.px + 12) + 'px';

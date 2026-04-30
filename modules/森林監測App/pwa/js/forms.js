@@ -3,17 +3,17 @@
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, dimensionsToArea } from './plot-geometry.js?v=28030';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=28040';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=28030';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=28040';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28030';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28040';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28030';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28040';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -1016,6 +1016,8 @@ export async function openBatchPlotsForm(project) {
           // v2.7.16：新 schema 欄位
           plotDimensions: shellPlotDimensions,
           slopeDegrees: 0,                 // 空殼預設平地，surveyor 編輯時改
+          slopeWidthDeg: 0,                // v2.8.4：雙軸坡度，預設平地
+          slopeLengthDeg: 0,
           slopeAspect: null,
           slopeSource: null,
           dimensionType: dimType,
@@ -1755,27 +1757,43 @@ export async function openPlotForm(project, existing = null) {
       return opt;
     })
   );
-  const widthInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'widthM', placeholder: '20',
+  // v2.8.4：寬/長改成「自動填」— 不再 required；user 可手改（dirty flag 後不再被覆蓋）
+  const widthInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'widthM', placeholder: '20（自動算）',
     value: existing?.plotDimensions?.width ?? '' });
-  const lengthInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'lengthM', placeholder: '25',
+  const lengthInput = el('input', { type: 'number', step: '0.1', min: '0.1', name: 'lengthM', placeholder: '25（自動算）',
     value: existing?.plotDimensions?.length ?? '' });
-  const slopeInput = el('input', { type: 'number', step: '0.1', min: '0', max: '90', name: 'slopeDegrees',
-    placeholder: '0', value: existing?.slopeDegrees ?? '' });
-  const aspectInput = el('input', { type: 'number', step: '1', min: '0', max: '360', name: 'slopeAspect',
-    placeholder: '可空（°，0=北）', value: existing?.slopeAspect ?? '' });
+  // v2.8.4：dirty flag — user 手動改寬/長後不再被坡度 onChange 自動覆蓋
+  let widthDirty = existing != null;   // 編輯既有 plot：寬/長已是過往值，視為 dirty
+  let lengthDirty = existing != null;
+  widthInput.addEventListener('input', () => { widthDirty = true; });
+  lengthInput.addEventListener('input', () => { lengthDirty = true; });
+
+  // v2.8.4：移除 slopeAspect（坡向）；slopeInput 改為雙軸 — 寬邊坡度 / 長邊坡度
+  //         非 rectangle 形狀（circle/square/irregular）只顯示 width 一欄，標示為「坡度」
+  //         讀取舊資料：fallback slopeWidthDeg/slopeLengthDeg = slopeDegrees
+  const fallbackSlope = existing?.slopeDegrees ?? '';
+  const initSlopeWidth  = existing?.slopeWidthDeg  ?? fallbackSlope;
+  const initSlopeLength = existing?.slopeLengthDeg ?? fallbackSlope;
+  const slopeWidthInput = el('input', { type: 'number', step: '0.1', min: '0', max: '90', name: 'slopeWidthDeg',
+    placeholder: '0', value: initSlopeWidth, required: 'true' });
+  const slopeLengthInput = el('input', { type: 'number', step: '0.1', min: '0', max: '90', name: 'slopeLengthDeg',
+    placeholder: '0', value: initSlopeLength, required: 'true' });
   const previewBox = el('div', { class: 'bg-stone-50 rounded p-2 text-xs text-stone-700 my-1' });
 
   const areaSelField = el('div', { class: 'field' },
     el('label', { for: 'f-area_m2' }, `面積 (m², ${dimTypeLabel})`, el('span', { class: 'req' }, ' *')),
     areaSel
   );
+  // v2.8.4：寬/長不再紅星（自動由坡度換算），標籤加「自動」hint
   const rectFields = el('div', { class: 'field-row', style: 'display:none' },
     el('div', { class: 'field' },
-      el('label', { for: 'f-widthM' }, `寬 (m, ${dimTypeLabel})`, el('span', { class: 'req' }, ' *')),
+      el('label', { for: 'f-widthM' }, `寬 (m, ${dimTypeLabel})`,
+        el('span', { style: 'font-size:10px;color:#0369a1;margin-left:4px' }, '✨ 自動')),
       widthInput
     ),
     el('div', { class: 'field' },
-      el('label', { for: 'f-lengthM' }, `長 (m, ${dimTypeLabel})`, el('span', { class: 'req' }, ' *')),
+      el('label', { for: 'f-lengthM' }, `長 (m, ${dimTypeLabel})`,
+        el('span', { style: 'font-size:10px;color:#0369a1;margin-left:4px' }, '✨ 自動')),
       lengthInput
     )
   );
@@ -1848,7 +1866,8 @@ export async function openPlotForm(project, existing = null) {
       return;
     }
     const area = v.area;
-    const slope = parseFloat(slopeInput.value) || 0;
+    // v2.8.4：irregular 用單一坡度（slopeWidthInput；非 rectangle 形狀的雙軸都當同值）
+    const slope = parseFloat(slopeWidthInput.value) || 0;
     const areaH = computeAreaHorizontal(area, slope, dimType);
     const slopeNote = (slope > 0 && dimType === 'slope_distance')
       ? `　│　水平投影面積：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(× cos ${slope.toFixed(1)}°)</span>`
@@ -1921,20 +1940,58 @@ export async function openPlotForm(project, existing = null) {
     ))
   );
 
+  // v2.8.4：方法學名目尺寸（水平）— 目前 hardcode 20×25（rectangle 台灣永久樣區）；
+  //         未來 methodology.plotDimensions 加入後可改讀 meth.plotDimensions
+  const NOMINAL_W_HORIZ = 20;
+  const NOMINAL_L_HORIZ = 25;
+
+  // v2.8.4：雙軸坡度 row — rectangle 顯示「寬邊坡度 / 長邊坡度」雙欄；其他形狀隱藏 length 欄並改 width label 為「坡度」
+  //         label 用 createTextNode 以便 recompute 動態切換文案
+  //         注意：宣告必須在 recompute 之前（雖然 JS 函式 hoisting 讓引用安全，但靜態可讀性差）
+  const slopeWidthLabel = document.createTextNode('寬邊坡度 (°)');
+  const slopeWidthField = el('div', { class: 'field' },
+    el('label', { for: 'f-slopeWidthDeg' }, slopeWidthLabel,
+      el('span', { class: 'req' }, ' *'),
+      el('span', { style: 'font-size:11px;color:#57534e' }, '　0–90')),
+    slopeWidthInput
+  );
+  const slopeLengthField = el('div', { class: 'field' },
+    el('label', { for: 'f-slopeLengthDeg' }, '長邊坡度 (°)',
+      el('span', { class: 'req' }, ' *'),
+      el('span', { style: 'font-size:11px;color:#57534e' }, '　0–90')),
+    slopeLengthInput
+  );
+
   function recompute() {
     const shape = shapeSel.value;
     rectFields.style.display = shape === 'rectangle' ? '' : 'none';
     irregularFields.style.display = shape === 'irregular' ? '' : 'none';
     areaSelField.style.display = (shape === 'rectangle' || shape === 'irregular') ? 'none' : '';
-    // v2.8.3：切到 rectangle 且 width/length 都空 → auto-fill 台灣 20×25 預設
-    if (shape === 'rectangle' && !widthInput.value && !lengthInput.value) {
-      widthInput.value = '20';
-      lengthInput.value = '25';
-    }
+    // v2.8.4：rectangle 顯示雙坡度（寬邊+長邊）；其他形狀只顯示寬邊（label 改「坡度」）
+    slopeLengthField.style.display = shape === 'rectangle' ? '' : 'none';
+    slopeWidthLabel.textContent = shape === 'rectangle' ? '寬邊坡度 (°)' : '坡度 (°)';
+
     if (shape === 'irregular') {
       validateAndPreviewIrregular();
       return;
     }
+
+    // v2.8.4：rectangle 自動換算 — 寬/長從名目水平 + 坡度 反推沿坡距
+    //         dirty flag：user 手改寬/長後就不再自動覆蓋
+    if (shape === 'rectangle' && dimType === 'slope_distance') {
+      const sW = parseFloat(slopeWidthInput.value);
+      const sL = parseFloat(slopeLengthInput.value);
+      if (Number.isFinite(sW) && Number.isFinite(sL)) {
+        const slopeDist = nominalToSlopeDistance(NOMINAL_W_HORIZ, NOMINAL_L_HORIZ, sW, sL);
+        if (!widthDirty)  widthInput.value  = slopeDist.widthSlope.toFixed(2);
+        if (!lengthDirty) lengthInput.value = slopeDist.lengthSlope.toFixed(2);
+      } else if (!widthDirty && !lengthDirty && !widthInput.value && !lengthInput.value) {
+        // 沒坡度且寬長都空 → 沿用 v2.8.3 行為填預設 20×25
+        widthInput.value = String(NOMINAL_W_HORIZ);
+        lengthInput.value = String(NOMINAL_L_HORIZ);
+      }
+    }
+
     let area = NaN;
     if (shape === 'rectangle') {
       const w = parseFloat(widthInput.value);
@@ -1943,25 +2000,52 @@ export async function openPlotForm(project, existing = null) {
     } else {
       area = parseInt(areaSel.value, 10);
     }
-    const slope = parseFloat(slopeInput.value) || 0;
-    const areaH = computeAreaHorizontal(area, slope, dimType);
+    // v2.8.4：雙軸 cos 校正 — 只有兩坡度都填齊才顯示完整 slope/驗算 註記，避免半填狀態誤導
+    const sWraw = parseFloat(slopeWidthInput.value);
+    const sLraw = parseFloat(slopeLengthInput.value);
+    const sW = Number.isFinite(sWraw) ? sWraw : 0;
+    const sL = shape === 'rectangle'
+      ? (Number.isFinite(sLraw) ? sLraw : 0)
+      : sW;
+    const allSlopesEntered = shape === 'rectangle'
+      ? (Number.isFinite(sWraw) && Number.isFinite(sLraw))
+      : Number.isFinite(sWraw);
+    const areaH = computeAreaHorizontal2D(area, sW, sL, dimType);
+
     if (Number.isFinite(area) && area > 0) {
-      const slopeNote = (slope > 0 && dimType === 'slope_distance')
-        ? `　│　水平投影面積（碳計算用）：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(× cos ${slope.toFixed(1)}° = ${Math.cos(slope * Math.PI / 180).toFixed(3)})</span>`
-        : '';
-      previewBox.innerHTML = `名目面積（${dimTypeLabel}）：<b>${area.toFixed(1)} m²</b>` + slopeNote;
+      let slopeNote = '';
+      if (dimType === 'slope_distance' && allSlopesEntered && (sW > 0 || sL > 0)) {
+        const formula = shape === 'rectangle'
+          ? `× cos ${sW.toFixed(1)}° × cos ${sL.toFixed(1)}° = ${(Math.cos(sW * Math.PI/180) * Math.cos(sL * Math.PI/180)).toFixed(3)}`
+          : `× cos ${sW.toFixed(1)}° = ${Math.cos(sW * Math.PI/180).toFixed(3)}`;
+        slopeNote = `　│　水平投影面積（碳計算用）：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(${formula})</span>`;
+      }
+      let nominalNote = '';
+      if (shape === 'rectangle' && dimType === 'slope_distance' && allSlopesEntered && areaH > 0) {
+        const okDelta = Math.abs(areaH - NOMINAL_W_HORIZ * NOMINAL_L_HORIZ);
+        const checkmark = okDelta < 1 ? ' ✓' : '';
+        nominalNote = `<br><span class="text-emerald-700">驗算：水平 ${NOMINAL_W_HORIZ}×${NOMINAL_L_HORIZ} = ${NOMINAL_W_HORIZ * NOMINAL_L_HORIZ} m² 名目${checkmark}</span>`;
+      }
+      previewBox.innerHTML = `名目面積（${dimTypeLabel}）：<b>${area.toFixed(1)} m²</b>` + slopeNote + nominalNote;
     } else {
       previewBox.innerHTML = '<span class="text-stone-400">填完幾何 / 坡度後，下方會即時顯示水平投影面積</span>';
     }
   }
-  [shapeSel, areaSel, widthInput, lengthInput, slopeInput].forEach(i => {
+  [shapeSel, areaSel, widthInput, lengthInput, slopeWidthInput, slopeLengthInput].forEach(i => {
     i.addEventListener('input', recompute);
     i.addEventListener('change', recompute);
+  });
+  // shape 切換時重置 dirty flag — 切到 rectangle 重新走自動換算
+  shapeSel.addEventListener('change', () => {
+    if (shapeSel.value === 'rectangle' && existing == null) {
+      widthDirty = false;
+      lengthDirty = false;
+    }
   });
 
   const geomBlock = el('div', { class: 'field', style: 'background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:10px' },
     el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:6px' },
-      `🗺️ 樣區幾何 + 坡度（v2.7.16）　`,
+      `🗺️ 樣區幾何 + 雙軸坡度（v2.8.4）　`,
       el('span', { style: 'font-size:11px;color:#166534;font-weight:400' }, `量測單位 = ${dimTypeLabel}（方法學設定）`)
     ),
     el('div', { class: 'field' },
@@ -1972,14 +2056,11 @@ export async function openPlotForm(project, existing = null) {
     rectFields,
     irregularFields,
     el('div', { class: 'field-row' },
-      el('div', { class: 'field' },
-        el('label', { for: 'f-slopeDegrees' }, '坡度 (°)', el('span', { style: 'font-size:11px;color:#57534e' }, '　0–90，平地填 0')),
-        slopeInput
-      ),
-      el('div', { class: 'field' },
-        el('label', { for: 'f-slopeAspect' }, '坡向 (°)'),
-        aspectInput
-      )
+      slopeWidthField,
+      slopeLengthField
+    ),
+    el('div', { style: 'font-size:11px;color:#0369a1;margin:-4px 0 4px' },
+      '✨ 輸入兩邊坡度 → 自動換算寬/長（沿坡距）。若需手動覆蓋，直接編輯寬/長欄位即可。'
     ),
     el('div', { class: 'field' },
       el('label', {}, '坡度來源'),
@@ -2047,11 +2128,22 @@ export async function openPlotForm(project, existing = null) {
       const side = Math.sqrt(area_m2);
       plotDimensions = { side, width: side, length: side };
     }
-    const slopeDegrees = parseFloat(fd.get('slopeDegrees'));
-    const slopeAspectRaw = parseFloat(fd.get('slopeAspect'));
+    // v2.8.4：雙軸坡度 — rectangle 取兩個 input；非 rectangle 只取 width 並複製給 length
+    const slopeWidthRaw  = parseFloat(fd.get('slopeWidthDeg'));
+    const slopeLengthRaw = parseFloat(fd.get('slopeLengthDeg'));
+    if (!Number.isFinite(slopeWidthRaw)) {
+      toast(shape === 'rectangle' ? '請填寬邊坡度' : '請填坡度');
+      return;
+    }
+    if (shape === 'rectangle' && !Number.isFinite(slopeLengthRaw)) {
+      toast('請填長邊坡度'); return;
+    }
+    const slopeWidthDeg  = slopeWidthRaw;
+    const slopeLengthDeg = shape === 'rectangle' ? slopeLengthRaw : slopeWidthRaw;
+    // 主坡度（向後相容下游：QAQC error / analytics / 碳計算）= 長邊坡度
+    const slopeFinal = slopeLengthDeg;
     const slopeSourceRaw = fd.get('slopeSource');
-    const slopeFinal = Number.isFinite(slopeDegrees) ? slopeDegrees : 0;
-    const areaHorizontal_m2 = computeAreaHorizontal(area_m2, slopeFinal, dimType);
+    const areaHorizontal_m2 = computeAreaHorizontal2D(area_m2, slopeWidthDeg, slopeLengthDeg, dimType);
     const data = {
       code: fd.get('code').trim(),
       forestUnit: fd.get('forestUnit').trim() || null,
@@ -2060,14 +2152,16 @@ export async function openPlotForm(project, existing = null) {
       locationAccuracy_m: parseFloat(fd.get('accuracy')) || null,
       shape,
       area_m2,
-      // v2.7.16：新欄位
+      // v2.7.16 / v2.8.4：新欄位
       plotDimensions,
       slopeDegrees: slopeFinal,
-      slopeAspect: Number.isFinite(slopeAspectRaw) ? slopeAspectRaw : null,
+      slopeWidthDeg,                  // v2.8.4：寬邊坡度
+      slopeLengthDeg,                 // v2.8.4：長邊坡度
+      slopeAspect: null,              // v2.8.4：坡向欄位淘汰，新表單不寫入
       slopeSource: slopeSourceRaw || null,
       areaHorizontal_m2,
       dimensionType: dimType,
-      migrationPending: false,  // 走過 v2.7.16 表單 → 不再 pending
+      migrationPending: false,  // 走過 v2.7.16+ 表單 → 不再 pending
       establishedAt: new Date(fd.get('establishedAt')),
       notes: fd.get('notes').trim() || null,
       updatedAt: fb.serverTimestamp(),
@@ -3430,9 +3524,11 @@ export async function seedDemoData(project) {
         locationTWD97: { x: t97.x, y: t97.y },
         shape: p.shape,
         area_m2: p.area_m2,
-        // v2.7.16
+        // v2.7.16 / v2.8.4
         plotDimensions: dims,
         slopeDegrees: 0,
+        slopeWidthDeg: 0,
+        slopeLengthDeg: 0,
         slopeAspect: null,
         slopeSource: null,
         dimensionType: dimType,
