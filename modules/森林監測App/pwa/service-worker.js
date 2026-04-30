@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.8.5';  // v2.8.5：方形樣區也走雙軸坡度（mirror rectangle）— 寬/長 inputs auto-fill 自 √(area)/cos；submit/distribution 把 square 與 rectangle 同路徑處理；修 v2.8.4 bug（圓/不規則公式顯示單 cos 但計算曾誤套雙 cos）— 圓/不規則改回單 cos 與顯示一致
+const CACHE = 'forest-monitor-v2.8.6';  // v2.8.6：auto-fill 解除 dimType gate — 兩種 methodology 都自動填寬/長；preview 雙向顯示（dimType='slope_distance' 顯示水平投影；dimType='horizontal' 顯示沿坡距現場拉皮尺距離）；rectangle/square dimType='horizontal' + 坡度 → 額外顯示「現場拉皮尺：寬 X m / 長 Y m」單邊長度；irregular preview 也支援雙向
 const SHELL = [
   './',
   './index.html',

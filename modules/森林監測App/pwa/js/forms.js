@@ -3,17 +3,17 @@
 
 import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=28050';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=28060';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=28050';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=28060';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28050';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=28060';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28050';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=28060';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -1867,11 +1867,19 @@ export async function openPlotForm(project, existing = null) {
     }
     const area = v.area;
     // v2.8.4：irregular 用單一坡度（slopeWidthInput；非 rectangle 形狀的雙軸都當同值）
+    // v2.8.6：雙向 preview — dimType 決定顯示「水平投影」（碳計算）或「沿坡距」（現場拉皮尺）
     const slope = parseFloat(slopeWidthInput.value) || 0;
-    const areaH = computeAreaHorizontal(area, slope, dimType);
-    const slopeNote = (slope > 0 && dimType === 'slope_distance')
-      ? `　│　水平投影面積：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(× cos ${slope.toFixed(1)}°)</span>`
-      : '';
+    let slopeNote = '';
+    if (slope > 0) {
+      const cosV = Math.cos(slope * Math.PI / 180);
+      if (dimType === 'slope_distance') {
+        const areaH = area * cosV;
+        slopeNote = `　│　水平投影面積（碳計算用）：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(× cos ${slope.toFixed(1)}° = ${cosV.toFixed(3)})</span>`;
+      } else {  // dimType='horizontal' — 顯示沿坡距給 surveyor 拉皮尺參考
+        const areaS = cosV > 1e-6 ? area / cosV : area;
+        slopeNote = `　│　<span class="text-amber-700">沿坡距面積（現場拉皮尺）：<b>${areaS.toFixed(1)} m²</b></span> <span class="text-stone-500">(÷ cos ${slope.toFixed(1)}° = ÷${cosV.toFixed(3)})</span>`;
+      }
+    }
     irregularValidation.innerHTML = `<span class="text-green-700">✅ ${v.vertices.length} 頂點 / 簡單多邊形 / CCW 已校正</span>`;
     previewBox.innerHTML = `不規則多邊形（${dimTypeLabel}）：頂點 <b>${v.vertices.length}</b>　│　Shoelace 面積 <b>${area.toFixed(1)} m²</b>` + slopeNote;
   }
@@ -1984,23 +1992,28 @@ export async function openPlotForm(project, existing = null) {
       return;
     }
 
-    // v2.8.4 / v2.8.5：rectangle / square 自動換算 — 寬/長從水平名目 + 坡度 反推沿坡距
-    //         dirty flag：user 手改寬/長後就不再自動覆蓋
-    //         square 名目 = sqrt(areaSel.value)（水平），rectangle 名目 = 20×25 hardcode
-    if (isDualSlopeShape && dimType === 'slope_distance') {
+    // v2.8.6：auto-fill 解除 dimType gate — 兩種 methodology 都自動填
+    //   dimType='slope_distance': storage = 沿坡距 = nominal / cos(slope)；填值依坡度而變
+    //   dimType='horizontal':     storage = 水平 = nominal 直接；填值不受坡度影響
+    //   dirty flag：user 手改寬/長後就不再自動覆蓋
+    if (isDualSlopeShape) {
       const nominalW = shape === 'rectangle' ? NOMINAL_W_HORIZ : Math.sqrt(parseInt(areaSel.value, 10) || 500);
       const nominalL = shape === 'rectangle' ? NOMINAL_L_HORIZ : nominalW;  // square: 水平名目寬=長
-      const sW = parseFloat(slopeWidthInput.value);
-      const sL = parseFloat(slopeLengthInput.value);
-      if (Number.isFinite(sW) && Number.isFinite(sL)) {
-        const slopeDist = nominalToSlopeDistance(nominalW, nominalL, sW, sL);
-        if (!widthDirty)  widthInput.value  = slopeDist.widthSlope.toFixed(2);
-        if (!lengthDirty) lengthInput.value = slopeDist.lengthSlope.toFixed(2);
-      } else if (!widthDirty && !lengthDirty && !widthInput.value && !lengthInput.value) {
-        // 沒坡度且寬長都空 → 填名目（rectangle: 20/25；square: √area×√area）
-        widthInput.value = nominalW.toFixed(shape === 'rectangle' ? 0 : 2);
-        lengthInput.value = nominalL.toFixed(shape === 'rectangle' ? 0 : 2);
+      const sW_in = parseFloat(slopeWidthInput.value);
+      const sL_in = parseFloat(slopeLengthInput.value);
+      const bothSlopesIn = Number.isFinite(sW_in) && Number.isFinite(sL_in);
+      let targetW, targetL;
+      if (dimType === 'slope_distance' && bothSlopesIn) {
+        const sd = nominalToSlopeDistance(nominalW, nominalL, sW_in, sL_in);
+        targetW = sd.widthSlope;
+        targetL = sd.lengthSlope;
+      } else {
+        // dimType='horizontal' OR 沒填齊坡度 → 填水平名目（slope-independent）
+        targetW = nominalW;
+        targetL = nominalL;
       }
+      if (!widthDirty)  widthInput.value  = targetW.toFixed(2);
+      if (!lengthDirty) lengthInput.value = targetL.toFixed(2);
     }
 
     let area = NaN;
@@ -2012,7 +2025,6 @@ export async function openPlotForm(project, existing = null) {
       area = parseInt(areaSel.value, 10);
     }
     // v2.8.4 / v2.8.5：cos 校正 — rectangle/square 雙軸；circle/irregular 單軸
-    //         避免 v2.8.4 bug：非雙軸形狀曾被誤套雙 cos（顯示單 cos 但計算雙 cos）
     const sWraw = parseFloat(slopeWidthInput.value);
     const sLraw = parseFloat(slopeLengthInput.value);
     const sW = Number.isFinite(sWraw) ? sWraw : 0;
@@ -2022,20 +2034,43 @@ export async function openPlotForm(project, existing = null) {
     const allSlopesEntered = isDualSlopeShape
       ? (Number.isFinite(sWraw) && Number.isFinite(sLraw))
       : Number.isFinite(sWraw);
-    const areaH = isDualSlopeShape
-      ? computeAreaHorizontal2D(area, sW, sL, dimType)
-      : computeAreaHorizontal(area, sW, dimType);  // 單軸 cos（圓 / 不規則）
+    // v2.8.6：雙向 area 換算（依 dimType）— 給 preview 顯示「另一邊」資訊
+    let areaH, areaSlope;
+    if (dimType === 'slope_distance') {
+      areaH = isDualSlopeShape
+        ? computeAreaHorizontal2D(area, sW, sL, dimType)
+        : computeAreaHorizontal(area, sW, dimType);
+      areaSlope = area;  // storage 已是沿坡距
+    } else {  // dimType='horizontal'
+      areaH = area;  // storage 已是水平
+      areaSlope = isDualSlopeShape
+        ? computeAreaSlope2D(area, sW, sL)
+        : computeAreaSlope(area, sW);
+    }
 
     if (Number.isFinite(area) && area > 0) {
-      let slopeNote = '';
-      if (dimType === 'slope_distance' && allSlopesEntered && (sW > 0 || sL > 0)) {
-        const formula = isDualSlopeShape
-          ? `× cos ${sW.toFixed(1)}° × cos ${sL.toFixed(1)}° = ${(Math.cos(sW * Math.PI/180) * Math.cos(sL * Math.PI/180)).toFixed(3)}`
-          : `× cos ${sW.toFixed(1)}° = ${Math.cos(sW * Math.PI/180).toFixed(3)}`;
-        slopeNote = `　│　水平投影面積（碳計算用）：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(${formula})</span>`;
+      const lines = [`名目面積（${dimTypeLabel}）：<b>${area.toFixed(1)} m²</b>`];
+      // v2.8.6：依 dimType 顯示「另一邊」 — slope_distance 顯示水平投影、horizontal 顯示沿坡距
+      if (allSlopesEntered && (sW > 0 || sL > 0)) {
+        const cosFormula = isDualSlopeShape
+          ? `cos ${sW.toFixed(1)}° × cos ${sL.toFixed(1)}° = ${(Math.cos(sW * Math.PI/180) * Math.cos(sL * Math.PI/180)).toFixed(3)}`
+          : `cos ${sW.toFixed(1)}° = ${Math.cos(sW * Math.PI/180).toFixed(3)}`;
+        if (dimType === 'slope_distance') {
+          lines.push(`水平投影面積（碳計算用）：<b>${areaH.toFixed(1)} m²</b> <span class="text-stone-500">(× ${cosFormula})</span>`);
+        } else {
+          lines.push(`<span class="text-amber-700">沿坡距面積（現場拉皮尺）：<b>${areaSlope.toFixed(1)} m²</b></span> <span class="text-stone-500">(÷ ${cosFormula})</span>`);
+        }
       }
-      let nominalNote = '';
-      if (isDualSlopeShape && dimType === 'slope_distance' && allSlopesEntered && areaH > 0) {
+      // v2.8.6：rectangle/square + dimType='horizontal' + 坡度齊 → 額外顯示「現場拉皮尺」單邊長度
+      if (isDualSlopeShape && dimType === 'horizontal' && allSlopesEntered && (sW > 0 || sL > 0)) {
+        const wH = parseFloat(widthInput.value) || 0;
+        const lH = parseFloat(lengthInput.value) || 0;
+        const wSlope = sW > 0 ? wH / Math.cos(sW * Math.PI / 180) : wH;
+        const lSlope = sL > 0 ? lH / Math.cos(sL * Math.PI / 180) : lH;
+        lines.push(`<span class="text-amber-700">現場拉皮尺：寬 <b>${wSlope.toFixed(2)}</b> m / 長 <b>${lSlope.toFixed(2)}</b> m（surveyor 沿坡實際拉的長度）</span>`);
+      }
+      // 驗算（rectangle/square）
+      if (isDualSlopeShape && allSlopesEntered && areaH > 0) {
         const nominalW = shape === 'rectangle' ? NOMINAL_W_HORIZ : Math.sqrt(parseInt(areaSel.value, 10) || 500);
         const nominalL = shape === 'rectangle' ? NOMINAL_L_HORIZ : nominalW;
         const nominalArea = nominalW * nominalL;
@@ -2044,11 +2079,11 @@ export async function openPlotForm(project, existing = null) {
         const dimLabel = shape === 'rectangle'
           ? `${NOMINAL_W_HORIZ}×${NOMINAL_L_HORIZ}`
           : `${nominalW.toFixed(2)}×${nominalL.toFixed(2)}`;
-        nominalNote = `<br><span class="text-emerald-700">驗算：水平 ${dimLabel} = ${nominalArea.toFixed(0)} m² 名目${checkmark}</span>`;
+        lines.push(`<span class="text-emerald-700">驗算：水平 ${dimLabel} = ${nominalArea.toFixed(0)} m² 名目${checkmark}</span>`);
       }
-      previewBox.innerHTML = `名目面積（${dimTypeLabel}）：<b>${area.toFixed(1)} m²</b>` + slopeNote + nominalNote;
+      previewBox.innerHTML = lines.join('<br>');
     } else {
-      previewBox.innerHTML = '<span class="text-stone-400">填完幾何 / 坡度後，下方會即時顯示水平投影面積</span>';
+      previewBox.innerHTML = '<span class="text-stone-400">填完幾何 / 坡度後，下方會即時顯示換算結果</span>';
     }
   }
   // v2.8.5：shape 切換時 reset dirty + 清寬/長 — 必須在 recompute listener 之前註冊
@@ -2068,7 +2103,7 @@ export async function openPlotForm(project, existing = null) {
 
   const geomBlock = el('div', { class: 'field', style: 'background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:10px' },
     el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:6px' },
-      `🗺️ 樣區幾何 + 雙軸坡度（v2.8.5）　`,
+      `🗺️ 樣區幾何 + 雙軸坡度（v2.8.6）　`,
       el('span', { style: 'font-size:11px;color:#166534;font-weight:400' }, `量測單位 = ${dimTypeLabel}（方法學設定）`)
     ),
     el('div', { class: 'field' },
