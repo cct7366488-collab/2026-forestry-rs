@@ -12,7 +12,7 @@
 //   form.appendChild(picker.root);
 //   picker.input.addEventListener('input', () => { ... picker.getMatched() ... });
 
-import { fb, el } from './app.js?v=21005';
+import { fb, el } from './app.js?v=21006';
 import { TREES } from './species-dict.js?v=2000';
 
 // ===== Module-level cache（一次 fetch / session）=====
@@ -80,6 +80,21 @@ function eqBadge(equationSource) {
          equationSource === 'type-default-ipcc' ? '🟠' : '⚪';
 }
 
+// ===== v2.10.6：海拔分層 =====
+// 台灣氣候帶：低 < 500m / 中 500-1500m / 高 > 1500m
+// 物種屬於某 band：物種海拔範圍 與 band 範圍 overlap（端點相觸算 overlap）
+// 物種無 elevationMin/Max 視為「分布不明」→ 任何 band 都不排除
+const ELEV_BANDS = {
+  all:  { label: '全部',         match: () => true },
+  low:  { label: '低 <500m',     match: s => (s.elevationMin_m == null) || s.elevationMin_m <= 500 },
+  mid:  { label: '中 500-1500m', match: s =>
+            (s.elevationMin_m == null || s.elevationMin_m <= 1500) &&
+            (s.elevationMax_m == null || s.elevationMax_m >= 500) },
+  high: { label: '高 >1500m',    match: s => (s.elevationMax_m == null) || s.elevationMax_m >= 1500 },
+};
+const BAND_KEYS = ['all', 'low', 'mid', 'high'];
+const LS_BAND_KEY = 'speciesPicker.elevBand';
+
 // HTML 跳脫 — species 資料 user-controlled，避免 XSS
 function escHtml(s) {
   if (s == null) return '';
@@ -94,6 +109,7 @@ export function createSpeciesPicker({
   value = '',
   required = false,
   placeholder = '搜尋中文 / 學名 / 別名（自由輸入也可）',
+  elevationBand = null,        // 'all' | 'low' | 'mid' | 'high' | null（用 localStorage）
 } = {}) {
   // 主 input — 給 form FormData 抓 value
   const inputAttrs = {
@@ -121,6 +137,16 @@ export function createSpeciesPicker({
   let _filtered = [];
   let _highlight = -1;
   let _open = false;
+  // v2.10.6：海拔 band 狀態（caller 傳入 > localStorage > 'all'）
+  let _band = 'all';
+  if (elevationBand && BAND_KEYS.includes(elevationBand)) {
+    _band = elevationBand;
+  } else {
+    try {
+      const saved = localStorage.getItem(LS_BAND_KEY);
+      if (saved && BAND_KEYS.includes(saved)) _band = saved;
+    } catch {}
+  }
 
   // 啟動載入 cache（async）
   loadSpeciesCache().then(arr => {
@@ -132,8 +158,10 @@ export function createSpeciesPicker({
 
   function refresh() {
     const q = input.value.toLowerCase().trim();
+    const bandFilter = ELEV_BANDS[_band].match;
     if (q) {
       _filtered = _all
+        .filter(bandFilter)
         .map(s => ({ s, score: scoreSpecies(s, q) }))
         .filter(x => x.score > 0)
         .sort((a, b) => b.score - a.score
@@ -141,29 +169,56 @@ export function createSpeciesPicker({
         .slice(0, 30)
         .map(x => x.s);
     } else {
-      _filtered = _all.slice(0, 30); // 空 query 顯示 top-30 popular
+      // 空 query → 該 band top-30 popular
+      _filtered = _all.filter(bandFilter).slice(0, 30);
     }
     _highlight = _filtered.length > 0 ? 0 : -1;
     renderPanel();
   }
 
+  // v2.10.6：海拔 band pill bar（sticky 於 panel 頂）
+  function renderBandPills() {
+    const bar = el('div', { class: 'flex gap-1 px-2 py-1 border-b bg-stone-50 sticky top-0 z-10' });
+    BAND_KEYS.forEach(key => {
+      const meta = ELEV_BANDS[key];
+      const active = key === _band;
+      const pill = el('button', {
+        type: 'button',
+        class: `text-xs px-2 py-0.5 rounded transition ${
+          active ? 'bg-forest-700 text-white font-medium'
+                 : 'bg-white border border-stone-300 text-stone-700 hover:bg-stone-100'}`,
+      }, meta.label);
+      pill.addEventListener('mousedown', (e) => {
+        e.preventDefault();    // 不讓 input blur
+        _band = key;
+        try { localStorage.setItem(LS_BAND_KEY, _band); } catch {}
+        refresh();
+      });
+      bar.appendChild(pill);
+    });
+    return bar;
+  }
+
   function renderPanel() {
     panel.innerHTML = '';
+    panel.appendChild(renderBandPills());      // v2.10.6：永遠在最上面（不論有無資料）
     const q = input.value.trim();
     if (_all.length === 0) {
       panel.appendChild(el('div', { class: 'p-3 text-sm text-stone-500' }, '⏳ 載入樹種字典...'));
       return;
     }
+    const bandLabel = _band === 'all' ? '' : ` · ${ELEV_BANDS[_band].label}`;
+    const totalInBand = _all.filter(ELEV_BANDS[_band].match).length;
     if (_filtered.length === 0) {
       panel.appendChild(el('div', { class: 'p-3 text-sm text-stone-500' },
-        '查無符合樹種；可直接在輸入框打字（自由輸入新物種）'));
+        `查無符合樹種${bandLabel}；可直接在輸入框打字（自由輸入新物種）`));
       return;
     }
     const headerText = q
-      ? `符合 ${_filtered.length} 種（按相關度排序；最多顯示 30）`
-      : `常用 top-30（共 ${_all.length} 種；輸入過濾）`;
+      ? `符合 ${_filtered.length} 種${bandLabel}（按相關度排序；最多 30）`
+      : `常用 top-30${bandLabel}（${_band === 'all' ? `共 ${_all.length} 種` : `本 band ${totalInBand} 種`}；輸入過濾）`;
     panel.appendChild(el('div', {
-      class: 'sticky top-0 bg-stone-100 px-2 py-1 text-[10px] text-stone-600 border-b'
+      class: 'bg-stone-100 px-2 py-1 text-[10px] text-stone-600 border-b'
     }, headerText));
     _filtered.forEach((s, i) => panel.appendChild(renderRow(s, i)));
   }
@@ -262,5 +317,13 @@ export function createSpeciesPicker({
     setValue: (v) => { input.value = v || ''; },
     getMatched,                       // 回傳 species object 或 null（自由輸入時）
     cache: () => _all,                // 整份 cache（caller 想批次用）
+    // v2.10.6：海拔 band 控制（將來 DEM auto-detect 接這個）
+    getBand: () => _band,
+    setBand: (b) => {
+      if (!BAND_KEYS.includes(b)) return;
+      _band = b;
+      try { localStorage.setItem(LS_BAND_KEY, _band); } catch {}
+      if (_open) refresh();
+    },
   };
 }
