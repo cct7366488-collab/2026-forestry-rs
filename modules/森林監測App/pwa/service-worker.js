@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.10.3';  // v2.10.3：v2.10.2 還沒解（live inspect 發現 perfLoadedUrls 仍有 v=21000 / no-qs / v=21002 三種 app.js 同時存在）— root cause 二段式：(1) ESM URL identity（v2.10.2 已修 imports 加版號）；(2) SW SHELL 預快取 ./js/*.js（無 qs），讓任何「歷史殘留」的 no-qs import 命中舊內容並 cascade 載入舊版整個鏈。本版把 SHELL 拿掉所有 .js，只保留 ./ + index.html + style.css + manifest + firebase-config.js。.js 改全靠 fetch handler 動態快取（按 ?v= URL 區分），徹底消除 module duplication。bump 全部 ?v=21002→?v=21003
+const CACHE = 'forest-monitor-v2.10.4';  // v2.10.4：GPS UX 升級 — 桌機常遇到「📍 抓取 GPS」失敗（toast 一閃即逝、user 不知問題、無 fallback）。修：(1) gpsStatus 顯示 persistent 紅字錯誤 + code 1/2/3 對應解法說明；(2) 高精度失敗 (code 2/3) 自動 retry 一次低精度 (enableHighAccuracy:false, timeout:30s, maximumAge:60s)；(3) 加 manualEntry collapsible UI — lat/lng 數字輸入 + 「套用」按鈕，含台灣範圍 21-26°N/119-123°E sanity 警告，失敗時自動展開引導；plot 與 wildlife 兩個 form 都套用
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、

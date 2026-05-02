@@ -12,7 +12,7 @@
 //   🆔d CSV bulk import：上傳 CSV → 預覽 → setDoc(merge:true) 平行寫入
 //   🆔e 變更歷史：每次儲存寫一筆到 species/{id}/history sub-collection + modal 檢視
 
-import { fb, $, $$, el, toast, state } from './app.js?v=21003';
+import { fb, $, $$, el, toast, state } from './app.js?v=21004';
 
 const CONS_GRADES = ['', 'I', 'II', 'III'];  // '' = 無保育級
 const BATCH_OP_LIMIT = 450;  // Firestore writeBatch 上限 500，預留 buffer

@@ -1,19 +1,19 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21003';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21004';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21003';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21004';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21003';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21004';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21003';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21004';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21003';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21004';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -23,7 +23,12 @@ const PEST_OPTIONS = ['葉斑', '潰瘍', '蟲孔', '空洞', '菌害', '枯梢'
 
 // ===== v2.3.6：共用 GPS button helper =====
 // plot 表單與 wildlife 表單共用，避免 drift；行為 100% 一致
-// 用法：const { gpsBtn, gpsStatus, lngInput, latInput, accInput } = createGpsButton({...});
+// 用法：const { gpsBtn, gpsStatus, manualEntry, lngInput, latInput, accInput } = createGpsButton({...});
+// v2.10.4 升級：
+//   1. 失敗訊息留在 form 內（不只 toast）— gpsStatus 顯示紅字 + code 對應解法
+//   2. 高精度失敗 (code 2/3) 自動 retry 一次低精度（IP 定位，timeout 30s）
+//   3. 加 manualEntry collapsible UI — 桌機無 GPS / 權限被拒可手動輸入座標
+//      失敗時自動展開引導 user
 function createGpsButton({
   initialLat = null,        // 已存的緯度（編輯既有資料用）
   initialLng = null,        // 已存的經度
@@ -51,61 +56,127 @@ function createGpsButton({
     }
   }
   const gpsStatus = el('span', { class: 'text-xs text-stone-600 ml-2' }, initText);
-
-  // 先創建 button（給 click handler 引用）
   const gpsBtn = el('button', { type: 'button', class: 'gps-btn' }, '📍 抓取 GPS');
 
-  gpsBtn.addEventListener('click', () => {
-    console.log('[createGpsButton] click triggered');
-    if (!navigator.geolocation) { toast('此裝置不支援 GPS'); return; }
-    gpsBtn.disabled = true;
-    gpsBtn.textContent = '⏳ 定位中...';
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        try {
-          const { longitude, latitude, accuracy } = pos.coords;
-          lngInput.value = longitude;
-          latInput.value = latitude;
-          if (accInput) accInput.value = accuracy;
-
-          // 距 plot 中心訊息（wildlife 用）
-          let extraMsg = '';
-          if (plotForDistance) {
-            const plotLoc = plotForDistance.location;
-            const plotLat = plotLoc?.latitude ?? plotLoc?._lat ?? null;
-            const plotLng = plotLoc?.longitude ?? plotLoc?._long ?? null;
-            if (plotLat != null && plotLng != null) {
-              const d = haversine(latitude, longitude, plotLat, plotLng);
-              extraMsg = `<br>距 plot 中心 ${Math.round(d)} m${d > 100 ? ' ⚠ 超過 100 m 邊界' : ''}`;
-            }
-          }
-
-          // TWD97 顯示（plot 用）
-          if (showTwd97) {
-            const t = wgs84ToTwd97(longitude, latitude);
-            gpsStatus.innerHTML = `WGS84: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>TWD97: (${t.x}, ${t.y}) ｜ ±${Math.round(accuracy)}m${extraMsg}`;
-          } else {
-            gpsStatus.innerHTML = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} ±${Math.round(accuracy)}m${extraMsg}`;
-          }
-        } catch (e) {
-          console.error('[createGpsButton] success callback error', e);
-          toast('GPS 處理錯誤：' + e.message);
-        } finally {
-          gpsBtn.disabled = false;
-          gpsBtn.textContent = '📍 重新定位';
-        }
-      },
-      (err) => {
-        console.warn('[createGpsButton] error', err);
-        toast('GPS 失敗：' + (err.message || '權限被拒或超時'));
-        gpsBtn.disabled = false;
-        gpsBtn.textContent = '📍 抓取 GPS';
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+  // ===== v2.10.4：手動輸入 fallback =====
+  const manualLatInput = el('input', { type: 'number', step: '0.000001', placeholder: '緯度 lat', class: 'border rounded px-2 py-1 text-sm w-32' });
+  const manualLngInput = el('input', { type: 'number', step: '0.000001', placeholder: '經度 lng', class: 'border rounded px-2 py-1 text-sm w-32' });
+  const applyManualBtn = el('button', { type: 'button', class: 'bg-stone-200 hover:bg-stone-300 text-stone-800 px-3 py-1 rounded text-sm font-medium' }, '套用');
+  const manualHint = el('div', { class: 'text-xs text-stone-500 mt-1' },
+    '小技巧：Google Maps 找位置 → 右鍵 → 點座標複製。lat 在前 lng 在後。');
+  const manualEntry = el('details', { class: 'text-xs mt-1' },
+    el('summary', { class: 'cursor-pointer text-blue-700 hover:text-blue-900' },
+      '✏️ 或手動輸入座標（GPS 失敗 / 桌機無 GPS 用）'),
+    el('div', { class: 'flex flex-wrap gap-2 items-center mt-2' },
+      el('label', { class: 'text-xs' }, 'lat:'), manualLatInput,
+      el('label', { class: 'text-xs' }, 'lng:'), manualLngInput,
+      applyManualBtn),
+    manualHint
+  );
+  applyManualBtn.addEventListener('click', () => {
+    const lat = parseFloat(manualLatInput.value);
+    const lng = parseFloat(manualLngInput.value);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      gpsStatus.innerHTML = '<span class="text-red-700">❌ 緯度/經度必填且為數字</span>';
+      return;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      gpsStatus.innerHTML = '<span class="text-red-700">❌ 座標超出範圍（lat -90~90 / lng -180~180）</span>';
+      return;
+    }
+    if (lat < 21 || lat > 26 || lng < 119 || lng > 123) {
+      gpsStatus.innerHTML = '<span class="text-amber-700">⚠ 座標看起來不在台灣範圍（21-26°N / 119-123°E），仍套用</span><br>'
+        + (showTwd97 ? `WGS84: ${lat.toFixed(6)}, ${lng.toFixed(6)} ｜ <span class="text-amber-700">手動輸入</span>` : `${lat.toFixed(6)}, ${lng.toFixed(6)} <span class="text-amber-700">手動輸入</span>`);
+    } else {
+      if (showTwd97) {
+        const t = wgs84ToTwd97(lng, lat);
+        gpsStatus.innerHTML = `WGS84: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>TWD97: (${t.x}, ${t.y}) ｜ <span class="text-amber-700">手動輸入</span>`;
+      } else {
+        gpsStatus.innerHTML = `${lat.toFixed(6)}, ${lng.toFixed(6)} <span class="text-amber-700">手動輸入</span>`;
+      }
+    }
+    lngInput.value = lng;
+    latInput.value = lat;
+    if (accInput) accInput.value = '';     // 手動沒 accuracy
+    gpsBtn.textContent = '📍 重新定位';
+    manualEntry.removeAttribute('open');
   });
 
-  return { gpsBtn, gpsStatus, lngInput, latInput, accInput };
+  // ===== v2.10.4：高精度失敗 → 自動降精度 retry =====
+  const ERR_CODE_HINTS = {
+    1: '權限被拒 — 網址列左邊 🔒/🛡 點開→把「位置」改為「允許」→重整',
+    2: '無法定位 — Win11 設定→隱私權→位置 是否關閉？或無網路？',
+    3: '逾時 — 網路定位太慢 / 訊號不佳'
+  };
+
+  function trySuccess(pos) {
+    try {
+      const { longitude, latitude, accuracy } = pos.coords;
+      lngInput.value = longitude;
+      latInput.value = latitude;
+      if (accInput) accInput.value = accuracy;
+      let extraMsg = '';
+      if (plotForDistance) {
+        const plotLoc = plotForDistance.location;
+        const plotLat = plotLoc?.latitude ?? plotLoc?._lat ?? null;
+        const plotLng = plotLoc?.longitude ?? plotLoc?._long ?? null;
+        if (plotLat != null && plotLng != null) {
+          const d = haversine(latitude, longitude, plotLat, plotLng);
+          extraMsg = `<br>距 plot 中心 ${Math.round(d)} m${d > 100 ? ' ⚠ 超過 100 m 邊界' : ''}`;
+        }
+      }
+      if (showTwd97) {
+        const t = wgs84ToTwd97(longitude, latitude);
+        gpsStatus.innerHTML = `WGS84: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>TWD97: (${t.x}, ${t.y}) ｜ ±${Math.round(accuracy)}m${extraMsg}`;
+      } else {
+        gpsStatus.innerHTML = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} ±${Math.round(accuracy)}m${extraMsg}`;
+      }
+    } catch (e) {
+      console.error('[createGpsButton] success callback error', e);
+      gpsStatus.innerHTML = `<span class="text-red-700">❌ GPS 處理錯誤：${e.message}</span>`;
+    } finally {
+      gpsBtn.disabled = false;
+      gpsBtn.textContent = '📍 重新定位';
+    }
+  }
+
+  function tryFail(err, isRetry) {
+    console.warn('[createGpsButton] error', err.code, err.message, 'isRetry=', isRetry);
+    const hint = ERR_CODE_HINTS[err.code] || (err.message || '未知錯誤');
+    if (!isRetry && (err.code === 2 || err.code === 3)) {
+      // 自動降精度 retry 一次
+      gpsStatus.innerHTML = `<span class="text-amber-700">⚠ 高精度失敗 (code ${err.code})，自動重試低精度...</span>`;
+      tryGetLocation(false, true);
+      return;
+    }
+    gpsStatus.innerHTML = `<span class="text-red-700">❌ GPS 失敗 (code ${err.code})：${hint}</span><br><span class="text-stone-600">→ 用下方「✏️ 手動輸入座標」</span>`;
+    manualEntry.setAttribute('open', '');     // 自動展開手動輸入
+    gpsBtn.disabled = false;
+    gpsBtn.textContent = '📍 重新定位';
+  }
+
+  function tryGetLocation(highAccuracy, isRetry) {
+    gpsBtn.disabled = true;
+    gpsBtn.textContent = isRetry ? '⏳ 重試低精度...' : '⏳ 定位中...';
+    navigator.geolocation.getCurrentPosition(
+      trySuccess,
+      (err) => tryFail(err, isRetry),
+      highAccuracy
+        ? { enableHighAccuracy: true,  timeout: 15000, maximumAge: 0 }
+        : { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
+    );
+  }
+
+  gpsBtn.addEventListener('click', () => {
+    if (!navigator.geolocation) {
+      gpsStatus.innerHTML = '<span class="text-red-700">❌ 此裝置不支援 Geolocation API</span>';
+      manualEntry.setAttribute('open', '');
+      return;
+    }
+    tryGetLocation(true, false);
+  });
+
+  return { gpsBtn, gpsStatus, manualEntry, lngInput, latInput, accInput };
 }
 
 // ===== 共用：欄位工廠 =====
@@ -1711,7 +1782,8 @@ export async function openPlotForm(project, existing = null) {
   }
 
   // v2.3.6：plot GPS 用共用 helper（顯示 TWD97 + accuracy）
-  const { gpsBtn, gpsStatus, lngInput, latInput, accInput } = createGpsButton({
+  // v2.10.4：destructure 多接 manualEntry（手動輸入 fallback UI）
+  const { gpsBtn, gpsStatus, manualEntry: gpsManualEntry, lngInput, latInput, accInput } = createGpsButton({
     initialLat: loc?.latitude ?? null,
     initialLng: loc?.longitude ?? null,
     initialAccuracy: existing?.locationAccuracy_m ?? null,
@@ -2131,6 +2203,7 @@ export async function openPlotForm(project, existing = null) {
     el('div', { class: 'field' },
       el('label', {}, 'GPS 座標 ', el('span', { class: 'req' }, '*')),
       el('div', { class: 'flex items-center flex-wrap gap-2' }, gpsBtn, gpsStatus),
+      gpsManualEntry,                   // v2.10.4：手動輸入 fallback
       lngInput, latInput, accInput
     ),
     geomBlock,
@@ -3159,7 +3232,8 @@ export function openWildlifeForm(project, plot, existing = null) {
   // v2.3.6：wildlife GPS 用共用 helper（與 plot 表單同款行為，加距 plot 中心顯示）
   const wlInitLat = existing?.location?.latitude ?? existing?.location?._lat ?? null;
   const wlInitLng = existing?.location?.longitude ?? existing?.location?._long ?? null;
-  const { gpsBtn, gpsStatus, lngInput, latInput } = createGpsButton({
+  // v2.10.4：destructure 多接 manualEntry
+  const { gpsBtn, gpsStatus, manualEntry: wlManualEntry, lngInput, latInput } = createGpsButton({
     initialLat: wlInitLat,
     initialLng: wlInitLng,
     showInitialAsExisting: true,
@@ -3225,6 +3299,7 @@ export function openWildlifeForm(project, plot, existing = null) {
       el('label', {}, '觀察點 GPS ',
         el('span', { class: 'text-xs text-stone-500' }, '（容許 plot 邊界外，會顯示距離）')),
       el('div', { class: 'flex items-center flex-wrap gap-2' }, gpsBtn, gpsStatus),
+      wlManualEntry,                    // v2.10.4：手動輸入 fallback
       lngInput, latInput
     ),
     el('div', { class: 'field' }, photoLabel, photoUp.element),
