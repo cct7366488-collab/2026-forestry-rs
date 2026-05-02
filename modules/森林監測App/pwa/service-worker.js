@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.9.3';  // v2.9.3：手機 PWA 友善「新版可用」橫幅 — install 拿掉 self.skipWaiting（改 client 觸發），加 message handler 收 SKIP_WAITING；app.js 加 updatefound 監聽 → showUpdateBanner（topbar 下藍色橫幅 + 「立即套用」按鈕）→ postMessage SKIP_WAITING → controllerchange → location.reload。長期 PWA session 每 30 min reg.update() 主動戳一次。手機不用記「下拉重整 2 次」，且 user 控制更新時機（避免表單填一半被打斷）
+const CACHE = 'forest-monitor-v2.10.0';  // v2.10.0：Phase 1 樹種 DB 擴充 — species CSV importer 升級到 v2.10 enriched schema（19 欄：rank/aliases/family/genus/treeType/elevationMin/Max_m/forestTypePreference/woodDensity/woodDensitySource/equationSource/equationConfidence/equationCitation/notes/_confidence + 既有 zh/sci/conservationGrade/verified）；parseSpeciesCSV 改為動態欄位偵測（缺欄不寫，merge 不誤清）+ enum 驗證 + semicolon-array 解析 + 數值型轉換 + quote-aware row parser；preview UI 加 # 排名 / treeType / family / 公式徽章（🟢 species-specific / 🟡 genus-default / 🟠 type-default-ipcc）；舊 4 欄 CSV 仍向後相容；Firestore species doc 新增 popularityRank / aliases / treeType / forestTypePreference 等欄位（schemaVersion='v2.10'）；附 196 物種草稿 CSV 在 modules/森林監測App/data/species-final.csv（admin 手動批次匯入觸發）
 const SHELL = [
   './',
   './index.html',

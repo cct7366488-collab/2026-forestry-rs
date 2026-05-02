@@ -437,27 +437,42 @@ function openCsvImportModal() {
       const updateCount = parsedRows.length - newCount;
       previewBox.classList.remove('hidden');
       previewBox.innerHTML = '';
+      // v2.10：preview 顯示新欄位（rank / treeType / family / equationSource）
+      const hasV210 = parsedRows.some(r => 'treeType' in r || 'rank' in r);
+      const verifiedCount = parsedRows.filter(r => r.verified).length;
       previewBox.appendChild(el('div', { class: 'mb-1 font-medium' },
-        `共 ${parsedRows.length} 筆 — 新增 ${newCount}、合併更新 ${updateCount}`));
+        `共 ${parsedRows.length} 筆 — 新增 ${newCount}、合併更新 ${updateCount}` +
+        (hasV210 ? ` · ✅ verified ${verifiedCount} / ⏳ 待覆核 ${parsedRows.length - verifiedCount}` : '')));
       const tbl = el('table', { class: 'w-full text-xs' },
         el('thead', { class: 'bg-stone-200' },
           el('tr', {},
+            hasV210 ? el('th', { class: 'px-1 py-1 text-left' }, '#') : null,
             el('th', { class: 'px-2 py-1 text-left' }, 'zh'),
             el('th', { class: 'px-2 py-1 text-left' }, 'sci'),
-            el('th', { class: 'px-2 py-1 text-left' }, 'cons'),
-            el('th', { class: 'px-2 py-1 text-left' }, 'verified'),
+            hasV210 ? el('th', { class: 'px-1 py-1 text-left' }, '型') : null,
+            hasV210 ? el('th', { class: 'px-1 py-1 text-left' }, '科') : null,
+            el('th', { class: 'px-1 py-1 text-left' }, '保育'),
+            hasV210 ? el('th', { class: 'px-1 py-1 text-left' }, '公式') : null,
+            el('th', { class: 'px-1 py-1 text-left' }, 'verified'),
             el('th', { class: 'px-2 py-1 text-left' }, '狀態')
           )
         ),
         el('tbody', {},
           ...parsedRows.slice(0, 50).map(r => {
             const exists = _state.docs.some(d => d.id === r.zh);
+            const eqBadge = r.equationSource === 'species-specific' ? '🟢' :
+                            r.equationSource === 'genus-default' ? '🟡' :
+                            r.equationSource === 'type-default-ipcc' ? '🟠' : '—';
             return el('tr', { class: 'border-t' },
+              hasV210 ? el('td', { class: 'px-1 py-1 text-stone-500' }, r.rank ?? '—') : null,
               el('td', { class: 'px-2 py-1' }, r.zh),
               el('td', { class: 'px-2 py-1 italic' }, r.sci || '—'),
-              el('td', { class: 'px-2 py-1' }, r.conservationGrade || '無'),
-              el('td', { class: 'px-2 py-1' }, r.verified ? '✓' : '⏳'),
-              el('td', { class: 'px-2 py-1 text-xs' }, exists ? '🔄 合併更新' : '➕ 新增')
+              hasV210 ? el('td', { class: 'px-1 py-1 text-stone-600' }, r.treeType || '—') : null,
+              hasV210 ? el('td', { class: 'px-1 py-1 text-stone-600' }, r.family || '—') : null,
+              el('td', { class: 'px-1 py-1' }, r.conservationGrade || '無'),
+              hasV210 ? el('td', { class: 'px-1 py-1', title: r.equationSource || '' }, eqBadge) : null,
+              el('td', { class: 'px-1 py-1' }, r.verified ? '✓' : '⏳'),
+              el('td', { class: 'px-2 py-1 text-xs' }, exists ? '🔄 合併' : '➕ 新增')
             );
           })
         )
@@ -480,18 +495,32 @@ function openCsvImportModal() {
     try {
       confirmBtn.disabled = true;
       confirmBtn.textContent = '⏳ 匯入中…';
-      // 用 setDoc(merge:true) 平行寫入；同時寫 history
+      // v2.10：用 setDoc(merge:true) 平行寫入；payload 只含 CSV 實際提供的欄位 → 缺的欄位 merge 不會清
       await runInBatches(parsedRows.map((_, i) => i), (batch, idx) => {
         const r = parsedRows[idx];
         const docRef = fb.doc(fb.db, 'species', r.zh);
         const exists = _state.docs.some(d => d.id === r.zh);
         const payload = {
           zh: r.zh,
-          sci: r.sci || null,
-          conservationGrade: r.conservationGrade || null,
           verified: r.verified,
-          reviewedAt: fb.serverTimestamp(), reviewedBy: state.user.uid,
+          reviewedAt: fb.serverTimestamp(),
+          reviewedBy: state.user.uid,
+          schemaVersion: 'v2.10',
         };
+        // v2.10 optional fields — 只寫 CSV 實際有的欄位
+        const OPT = ['sci', 'aliases', 'family', 'genus', 'treeType',
+                     'elevationMin_m', 'elevationMax_m', 'forestTypePreference',
+                     'conservationGrade', 'woodDensity_g_cm3', 'woodDensitySource',
+                     'equationSource', 'equationConfidence', 'equationCitation', 'notes'];
+        OPT.forEach(f => {
+          if (f in r) {
+            const v = r[f];
+            payload[f] = (v === '' || v === undefined) ? null : v;
+          }
+        });
+        if ('rank' in r) payload.popularityRank = r.rank;     // rename → popularityRank（避免與 plot rank 命名衝突）
+        if ('_confidence' in r) payload.draftConfidence = r._confidence || null;
+
         if (!exists) {
           payload.addedFrom = 'csv-bulk-import';
           payload.addedAt = fb.serverTimestamp();
@@ -502,9 +531,17 @@ function openCsvImportModal() {
           payload.verifiedBy = state.user.uid;
         }
         batch.set(docRef, payload, { merge: true });
+        // history 紀錄 after 摘要（只取核心欄位避免 doc 過大）
+        const afterSummary = {
+          sci: payload.sci ?? null,
+          conservationGrade: payload.conservationGrade ?? null,
+          verified: payload.verified,
+        };
+        if ('treeType' in payload) afterSummary.treeType = payload.treeType;
+        if ('equationSource' in payload) afterSummary.equationSource = payload.equationSource;
         batch.set(fb.doc(fb.collection(fb.db, 'species', r.zh, 'history')), {
           action: exists ? 'csv-merge' : 'csv-create',
-          after: { sci: payload.sci, conservationGrade: payload.conservationGrade, verified: payload.verified },
+          after: afterSummary,
           at: fb.serverTimestamp(), by: state.user.uid, byEmail: state.user.email || null,
         });
       }, 2);
@@ -518,37 +555,116 @@ function openCsvImportModal() {
   };
 }
 
-// CSV 解析（最簡實作 — 假設沒有引號內逗號這種邊角；admin 自己負責格式）
+// v2.10：CSV 解析升級 — 支援 19 欄 enriched schema，向後相容舊 4 欄格式
+//   舊 (zh, sci, conservationGrade, verified)：仍可用
+//   新 v2.10 完整 schema：rank, zh, sci, aliases, family, genus, treeType,
+//                         elevationMin_m, elevationMax_m, forestTypePreference,
+//                         conservationGrade, woodDensity_g_cm3, woodDensitySource,
+//                         equationSource, equationConfidence, equationCitation,
+//                         notes, _confidence, verified
+//   設計：依 header 動態決定哪些欄位讀入；merge:true 寫入 → 缺的欄位不會清掉現有值
+const SPECIES_ENUMS = {
+  treeType: ['broadleaf', 'conifer', 'bamboo', 'palm', 'mangrove'],
+  conservationGrade: ['I', 'II', 'III'],
+  woodDensitySource: ['taiwan-tfri', 'ipcc-tier2', 'ipcc-tier1-global', 'genus-default'],
+  equationSource: ['species-specific', 'genus-default', 'type-default-ipcc'],
+  equationConfidence: ['high', 'medium', 'low'],
+  _confidence: ['high', 'medium', 'low'],
+};
+
+// Quote-aware CSV row parser — 支援 "..." 內含逗號（標準 RFC 4180 子集）
+// 本案 CSV 用 ; 分隔陣列、不含引號逗號，但保留此 parser 以防 admin 手 edit 時加引號
+function parseCsvLine(line) {
+  const cells = [];
+  let cur = '';
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuote) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }   // escaped ""
+      else if (c === '"') inQuote = false;
+      else cur += c;
+    } else {
+      if (c === '"') inQuote = true;
+      else if (c === ',') { cells.push(cur); cur = ''; }
+      else cur += c;
+    }
+  }
+  cells.push(cur);
+  return cells;
+}
+
 function parseSpeciesCSV(text) {
   // 去 BOM
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) throw new Error('CSV 至少要有標題列 + 1 筆資料');
   const headers = lines[0].split(',').map(h => h.trim());
-  const required = ['zh'];
-  for (const r of required) if (!headers.includes(r)) throw new Error(`缺必填欄位「${r}」`);
-  const idxZh = headers.indexOf('zh');
-  const idxSci = headers.indexOf('sci');
-  const idxCons = headers.indexOf('conservationGrade');
-  const idxVerified = headers.indexOf('verified');
+  if (!headers.includes('zh')) throw new Error('缺必填欄位「zh」');
+
+  // 動態建索引表 — 缺的欄位是 -1
+  const idx = {};
+  headers.forEach((h, i) => { idx[h] = i; });
+
+  // 欄位分類
+  const STR_FIELDS = ['sci', 'family', 'genus', 'equationCitation', 'notes', '_confidence'];
+  const ENUM_FIELDS = ['treeType', 'conservationGrade', 'woodDensitySource', 'equationSource', 'equationConfidence'];
+  const ARR_FIELDS = ['aliases', 'forestTypePreference'];           // semicolon-separated
+  const NUM_FIELDS = ['rank', 'elevationMin_m', 'elevationMax_m', 'woodDensity_g_cm3'];
+
   const rows = [];
   const seen = new Set();
+
   for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split(',').map(c => c.trim());
-    const zh = cells[idxZh];
+    const cells = parseCsvLine(lines[i]);
+    const zh = (cells[idx.zh] || '').trim();
     if (!zh) continue;
-    if (seen.has(zh)) continue;  // 跳過 CSV 內重複
+    if (seen.has(zh)) continue;     // 跳過 CSV 內重複
     seen.add(zh);
-    const cons = idxCons >= 0 ? cells[idxCons] : '';
-    if (cons && !['I', 'II', 'III'].includes(cons)) {
-      throw new Error(`第 ${i + 1} 列 conservationGrade「${cons}」不是 I/II/III/空白`);
-    }
-    rows.push({
-      zh,
-      sci: idxSci >= 0 ? cells[idxSci] : '',
-      conservationGrade: cons,
-      verified: idxVerified >= 0 && (cells[idxVerified] || '').toLowerCase() === 'true',
+
+    const row = { zh };
+
+    STR_FIELDS.forEach(f => {
+      if (idx[f] >= 0) row[f] = (cells[idx[f]] || '').trim();
     });
+
+    ENUM_FIELDS.forEach(f => {
+      if (idx[f] >= 0) {
+        const v = (cells[idx[f]] || '').trim();
+        if (v && SPECIES_ENUMS[f] && !SPECIES_ENUMS[f].includes(v)) {
+          throw new Error(`第 ${i + 1} 列「${f}」值「${v}」不合法 — 允許 ${SPECIES_ENUMS[f].join(' / ')} / 空白`);
+        }
+        row[f] = v;
+      }
+    });
+
+    ARR_FIELDS.forEach(f => {
+      if (idx[f] >= 0) {
+        const v = (cells[idx[f]] || '').trim();
+        row[f] = v ? v.split(';').map(s => s.trim()).filter(Boolean) : [];
+      }
+    });
+
+    NUM_FIELDS.forEach(f => {
+      if (idx[f] >= 0) {
+        const v = (cells[idx[f]] || '').trim();
+        if (v === '') row[f] = null;
+        else {
+          const n = Number(v);
+          if (!Number.isFinite(n)) throw new Error(`第 ${i + 1} 列「${f}」值「${v}」不是數字`);
+          row[f] = n;
+        }
+      }
+    });
+
+    if (idx.verified >= 0) {
+      const v = (cells[idx.verified] || '').trim().toLowerCase();
+      row.verified = v === 'true' || v === '1' || v === 'yes';
+    } else {
+      row.verified = false;
+    }
+
+    rows.push(row);
   }
   return rows;
 }

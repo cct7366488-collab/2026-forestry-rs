@@ -1,0 +1,197 @@
+rank,zh,sci,aliases,family,genus,treeType,elevationMin_m,elevationMax_m,forestTypePreference,conservationGrade,woodDensity_g_cm3,woodDensitySource,equationSource,equationConfidence,equationCitation,notes,_confidence,verified
+1,紅檜,Chamaecyparis formosensis,扁柏;檜木;台灣紅檜,Cupressaceae,Chamaecyparis,conifer,1000,2900,montane-coniferous,,0.40,taiwan-tfri,species-specific,high,陳朝圳 1985 大雪山 power V=aD^bH^c,台灣特有種;雲霧帶針葉林優勢,high,true
+2,台灣杉,Taiwania cryptomerioides,巒大杉,Cupressaceae,Taiwania,conifer,1500,2500,montane-coniferous,,0.36,taiwan-tfri,species-specific,high,林務局 1973 全省 power,台灣特有種;造林與天然林優勢,high,true
+3,台灣扁柏,Chamaecyparis obtusa var. formosana,黃檜,Cupressaceae,Chamaecyparis,conifer,1300,2900,montane-coniferous,,0.42,taiwan-tfri,genus-default,medium,genus-fallback from 紅檜,台灣特有變種;檜木林帶共同優勢,high,true
+4,柳杉,Cryptomeria japonica,日本柳杉,Cupressaceae,Cryptomeria,conifer,500,2200,plantation;mid-elevation-mixed,,0.34,taiwan-tfri,species-specific,high,楊榮啟 1972 臺大實驗林 logV=a+blogD²H,日治期主要造林樹種,high,true
+5,樟樹,Cinnamomum camphora,本樟;烏樟,Lauraceae,Cinnamomum,broadleaf,100,1800,lowland-broadleaf;foothills-broadleaf,,0.50,taiwan-tfri,species-specific,high,羅紹麟 馮豐隆 1986 全省 power,低海拔常見;碳匯案常選樹種,high,true
+6,相思樹,Acacia confusa,台灣相思,Fabaceae,Acacia,broadleaf,0,1500,plantation;secondary-pioneer;foothills-broadleaf,,0.65,taiwan-tfri,species-specific,high,羅紹麟 馮豐隆 1986 全省 power,薪炭材;固氮先驅;低海拔造林主力,high,true
+7,楓香,Liquidambar formosana,楓樹,Altingiaceae,Liquidambar,broadleaf,100,2000,foothills-broadleaf;mid-elevation-broadleaf,,0.50,taiwan-tfri,species-specific,high,羅紹麟 馮豐隆 1986 闊葉式,落葉性;次生與造林皆常見,high,true
+8,青剛櫟,Cyclobalanopsis glauca,九欑;鐵椆,Fagaceae,Cyclobalanopsis,broadleaf,100,2000,foothills-broadleaf;mid-elevation-broadleaf,,0.75,taiwan-tfri,species-specific,high,林子玉 1975 櫧櫟類 log_dh n=928,常綠殼斗;樟櫧林帶優勢,high,true
+9,九芎,Lagerstroemia subcostata,拘那花,Lythraceae,Lagerstroemia,broadleaf,100,1500,foothills-broadleaf;riparian,,0.66,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 LULUCF Vol.4 Ch.4 表 4.7,溪流側常見;先驅與次生,high,true
+10,烏心石,Michelia compressa,台灣烏心石,Magnoliaceae,Michelia,broadleaf,200,2200,mid-elevation-broadleaf,,0.65,taiwan-tfri,species-specific,high,羅紹麟 馮豐隆 1986 楠木類式 (alias 解析),闊葉五木之一;高經濟價值用材,high,true
+11,大葉楠,Machilus japonica var. kusanoi,楠木,Lauraceae,Machilus,broadleaf,100,1500,lowland-broadleaf;foothills-broadleaf,,0.50,taiwan-tfri,species-specific,high,樟樹式共用 (Lauraceae),低海拔楠木林帶常見,high,true
+12,紅楠,Machilus thunbergii,豬腳楠,Lauraceae,Machilus,broadleaf,100,2000,foothills-broadleaf;mid-elevation-broadleaf,,0.50,taiwan-tfri,species-specific,high,樟樹式共用 (Lauraceae),楠儲林帶優勢之一,high,true
+13,香楠,Machilus zuihoensis,瑞芳楠,Lauraceae,Machilus,broadleaf,200,1800,mid-elevation-broadleaf,,0.50,taiwan-tfri,species-specific,high,樟樹式共用 (Lauraceae),台灣特有種;線香原料,high,true
+14,台灣二葉松,Pinus taiwanensis,黑松;台灣松,Pinaceae,Pinus,conifer,750,3000,montane-coniferous,,0.48,taiwan-tfri,species-specific,high,羅紹麟 馮豐隆 1986 全省 power,陽性樹種;火後更新,high,true
+15,台灣五葉松,Pinus morrisonicola,五葉松,Pinaceae,Pinus,conifer,300,2300,mid-elevation-mixed;montane-coniferous,,0.46,taiwan-tfri,genus-default,medium,genus-fallback from 二葉松,台灣特有種;盆栽常用,high,true
+16,山黃麻,Trema orientalis,麻布樹,Cannabaceae,Trema,broadleaf,0,1500,secondary-pioneer,,0.40,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,次生先驅;崩塌地快速回復,high,true
+17,構樹,Broussonetia papyrifera,鹿仔樹,Moraceae,Broussonetia,broadleaf,0,1500,secondary-pioneer,,0.36,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,先驅;原住民與南島語族標誌種,high,true
+18,茄苳,Bischofia javanica,重陽木,Phyllanthaceae,Bischofia,broadleaf,0,1800,lowland-broadleaf;riparian,,0.62,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;受保護老樹眾,high,true
+19,苦楝,Melia azedarach,楝樹;苦苓,Meliaceae,Melia,broadleaf,0,1200,lowland-broadleaf;secondary-pioneer,,0.58,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;低海拔開闊地常見,high,true
+20,台灣赤楊,Alnus formosana,赤楊;台北赤楊,Betulaceae,Alnus,broadleaf,500,3000,secondary-pioneer;riparian,,0.45,taiwan-tfri,species-specific,high,羅紹麟 馮豐隆 1986 闊葉式 (借用),固氮先驅;崩塌地造林優先,high,true
+21,長尾尖葉櫧,Castanopsis cuspidata var. carlesii,長尾栲,Fagaceae,Castanopsis,broadleaf,200,2000,mid-elevation-broadleaf,,0.65,taiwan-tfri,species-specific,high,櫧櫟類式 林子玉 1975,樟櫧林帶優勢喬木,high,true
+22,印度栲,Castanopsis indica,印度苦櫧,Fagaceae,Castanopsis,broadleaf,200,1800,foothills-broadleaf;mid-elevation-broadleaf,,0.65,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,低中海拔殼斗科,medium,true
+23,赤皮,Cyclobalanopsis gilva,赤皮椆,Fagaceae,Cyclobalanopsis,broadleaf,200,2000,mid-elevation-broadleaf,,0.78,taiwan-tfri,species-specific,high,櫧櫟類式 林子玉 1975,闊葉五木;優質家具材,high,true
+24,黃連木,Pistacia chinensis,楷木,Anacardiaceae,Pistacia,broadleaf,0,1500,foothills-broadleaf,,0.60,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;蜜源植物,high,true
+25,光蠟樹,Fraxinus formosana,白雞油;光腊樹,Oleaceae,Fraxinus,broadleaf,100,1500,foothills-broadleaf,,0.62,taiwan-tfri,species-specific,high,羅紹麟 馮豐隆 1986 東部南部 power,獨角仙寄主;經濟用材,high,true
+26,櫸木,Zelkova serrata,台灣櫸;雞油,Ulmaceae,Zelkova,broadleaf,100,1800,foothills-broadleaf;mid-elevation-broadleaf,,0.66,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,闊葉五木;優質家具材,high,true
+27,桂竹,Phyllostachys makinoi,台灣桂竹,Poaceae,Phyllostachys,bamboo,100,1500,plantation;foothills-broadleaf,,0.60,taiwan-tfri,species-specific,high,黃崑崗 1972 中南部 power (單位特殊),台灣最廣泛人工竹林之一,high,true
+28,孟宗竹,Phyllostachys edulis,毛竹;江南竹,Poaceae,Phyllostachys,bamboo,300,1600,plantation,,0.65,taiwan-tfri,genus-default,medium,genus-fallback from 桂竹,筍材兼用;南投竹山主產,high,true
+29,麻竹,Dendrocalamus latiflorus,甜竹,Poaceae,Dendrocalamus,bamboo,0,1000,plantation,,0.55,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 bamboo 0.40 (上修),叢生竹;經濟筍材,high,true
+30,刺竹,Bambusa stenostachya,長枝竹,Poaceae,Bambusa,bamboo,0,800,plantation;coastal,,0.60,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 bamboo,南部常見叢生竹;海岸防風,high,true
+31,香杉,Cunninghamia konishii,巒大杉(舊稱);Konishi 杉,Cupressaceae,Cunninghamia,conifer,1300,2500,montane-coniferous,,0.38,taiwan-tfri,species-specific,high,劉宣誠 鄭宗元 陳麗琴 1974 蓮華池 V=a+bD²,台灣特有種;與紅檜同林,high,true
+32,杉木,Cunninghamia lanceolata,福州杉;中國杉,Cupressaceae,Cunninghamia,conifer,500,2000,plantation,,0.34,ipcc-tier2,species-specific,medium,v2.3.2 借用台灣杉式 (劉慎孝 1969 原參數疑單位錯),早期造林種;材質類柳杉,high,true
+33,台灣肖楠,Calocedrus macrolepis var. formosana,肖楠,Cupressaceae,Calocedrus,conifer,300,1900,mid-elevation-mixed,,0.45,taiwan-tfri,genus-default,medium,genus-fallback from 香杉,台灣特有變種;高價香材,high,true
+34,玉山圓柏,Juniperus squamata,玉山香柏,Cupressaceae,Juniperus,conifer,3000,3950,subalpine-shrub,,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,高山矮盤灌叢;台灣最高海拔木本,high,true
+35,台灣鐵杉,Tsuga chinensis var. formosana,鐵杉,Pinaceae,Tsuga,conifer,2000,3000,montane-coniferous,,0.46,taiwan-tfri,species-specific,high,林務局 1973 全省 power,鐵杉雲杉林帶優勢,high,true
+36,台灣冷杉,Abies kawakamii,冷杉,Pinaceae,Abies,conifer,2400,3600,subalpine-coniferous,,0.40,taiwan-tfri,species-specific,high,楊寶霖 石子材 1963 北部 V=a+bD+cD²,亞高山冷杉林帶優勢,high,true
+37,台灣雲杉,Picea morrisonicola,雲杉,Pinaceae,Picea,conifer,2000,3000,montane-coniferous,,0.40,taiwan-tfri,species-specific,high,楊寶霖 石子材 1963 中部 V=a+bD+cD²,台灣特有種;雲杉混生林,high,true
+38,濕地松,Pinus elliottii,美國濕地松,Pinaceae,Pinus,conifer,0,1000,plantation;coastal,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 二葉松 / 松類,外來造林種;海岸防風,high,true
+39,琉球松,Pinus luchuensis,琉球赤松,Pinaceae,Pinus,conifer,0,800,coastal;plantation,,0.50,taiwan-tfri,species-specific,high,劉慎孝 林子玉 1970 北部 log_dh,沿海防風造林,high,true
+40,台灣油杉,Keteleeria davidiana var. formosana,油杉,Pinaceae,Keteleeria,conifer,300,1900,mid-elevation-mixed,I,0.48,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,保育類 I 級;殘存族群極少,high,true
+41,台灣穗花杉,Amentotaxus formosana,穗花杉,Taxaceae,Amentotaxus,conifer,500,1500,mid-elevation-broadleaf,I,0.55,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical conifer,保育類 I 級;台灣特有種,medium,true
+42,台灣紅豆杉,Taxus mairei,紅豆杉,Taxaceae,Taxus,conifer,1000,2700,mid-elevation-mixed;montane-coniferous,II,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,保育類 II 級;紫杉醇藥用,high,true
+43,蘭嶼羅漢松,Podocarpus costalis,蘭嶼竹柏,Podocarpaceae,Podocarpus,conifer,0,300,coastal,II,0.60,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical conifer,保育類 II 級;蘭嶼海岸特有,medium,true
+44,牛樟,Cinnamomum kanehirae,牛樟仔,Lauraceae,Cinnamomum,broadleaf,200,2000,mid-elevation-broadleaf,II,0.55,taiwan-tfri,species-specific,high,樟樹式共用 (Lauraceae),保育類 II 級;牛樟芝寄主,high,true
+45,土肉桂,Cinnamomum osmophloeum,本土肉桂,Lauraceae,Cinnamomum,broadleaf,200,1500,foothills-broadleaf;mid-elevation-broadleaf,,0.50,taiwan-tfri,species-specific,medium,樟樹式共用 (Lauraceae),台灣特有種;桂皮醛精油,high,true
+46,香桂,Cinnamomum subavenium,少脈樟,Lauraceae,Cinnamomum,broadleaf,300,2000,mid-elevation-broadleaf,,0.50,ipcc-tier2,species-specific,medium,樟樹式共用 (Lauraceae),中海拔樟科常見,high,true
+47,陰香,Cinnamomum burmannii,印尼肉桂,Lauraceae,Cinnamomum,broadleaf,100,1000,plantation;lowland-broadleaf,,0.50,ipcc-tier2,species-specific,medium,樟樹式共用 (Lauraceae),栽培種;勿與本土樟混,high,true
+48,小西氏石櫟,Lithocarpus konishii,小西氏石柯,Fagaceae,Lithocarpus,broadleaf,300,1800,foothills-broadleaf;mid-elevation-broadleaf,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,南部低中海拔殼斗科,high,true
+49,油葉石櫟,Lithocarpus konishii var. lanceolatus,油葉石柯,Fagaceae,Lithocarpus,broadleaf,300,1500,foothills-broadleaf,,0.78,ipcc-tier2,genus-default,low,櫧櫟類式 林子玉 1975,分類地位有爭議,low,false
+50,三斗石櫟,Pasania hancei,三斗柯,Fagaceae,Pasania,broadleaf,100,1500,lowland-broadleaf;foothills-broadleaf,,0.70,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,低海拔殼斗科,medium,true
+51,槲櫟,Quercus aliena,槲樹,Fagaceae,Quercus,broadleaf,500,2000,mid-elevation-broadleaf,,0.70,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,落葉櫟;乾季顯著,medium,true
+52,雀榕,Ficus superba var. japonica,赤榕;鳥榕,Moraceae,Ficus,broadleaf,0,1500,lowland-broadleaf,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉性熱帶榕屬;附生起步,high,true
+53,榕樹,Ficus microcarpa,正榕;細葉榕,Moraceae,Ficus,broadleaf,0,1000,lowland-broadleaf;coastal,,0.45,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,常綠;最常見行道樹,high,true
+54,大葉雀榕,Ficus caulocarpa,幹花榕,Moraceae,Ficus,broadleaf,0,1200,lowland-broadleaf,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;東南亞低地榕屬,medium,true
+55,稜果榕,Ficus septica,大冇榕,Moraceae,Ficus,broadleaf,0,1500,lowland-broadleaf;secondary-pioneer,,0.40,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,次生先驅;果為動物食源,high,true
+56,牛奶榕,Ficus erecta var. beecheyana,天仙果,Moraceae,Ficus,broadleaf,100,2000,foothills-broadleaf,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,藥用;果可食,high,true
+57,大葉桃花心木,Swietenia macrophylla,洪都拉斯桃花心木,Meliaceae,Swietenia,broadleaf,0,800,plantation,,0.55,taiwan-tfri,species-specific,high,劉宣誠 林銘輝 曲俊麒 1981 中埔造林地,外來造林種;高經濟價值,high,true
+58,桃花心木,Swietenia mahagoni,古巴桃花心木,Meliaceae,Swietenia,broadleaf,0,600,plantation,,0.65,ipcc-tier2,genus-default,medium,genus-fallback from 大葉桃花心木,早期外來造林;南部少量,high,true
+59,紅椿,Toona sureni,蘇門答臘椿,Meliaceae,Toona,broadleaf,100,1500,plantation;foothills-broadleaf,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,造林試驗種,medium,true
+60,香椿,Toona sinensis,香椿芽,Meliaceae,Toona,broadleaf,100,1500,foothills-broadleaf;plantation,,0.48,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,嫩芽食用;經濟林木,high,true
+61,烏桕,Sapium sebiferum,瓊仔,Euphorbiaceae,Sapium,broadleaf,0,1200,lowland-broadleaf;foothills-broadleaf,,0.45,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;秋紅葉;蜜源,high,true
+62,血桐,Macaranga tanarius,面頭果,Euphorbiaceae,Macaranga,broadleaf,0,1000,secondary-pioneer,,0.35,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,次生先驅;蟻共生,high,true
+63,蟲屎,Melanolepis multiglandulosa,假紗紙樹,Euphorbiaceae,Melanolepis,broadleaf,0,800,secondary-pioneer,,0.32,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,次生先驅;短命陽性樹,high,true
+64,羅氏鹽膚木,Rhus chinensis var. roxburghii,鹽膚木,Anacardiaceae,Rhus,broadleaf,0,2000,secondary-pioneer;foothills-broadleaf,,0.42,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉先驅;果鹹,high,true
+65,山漆,Rhus succedanea,木蠟樹,Anacardiaceae,Rhus,broadleaf,100,1500,foothills-broadleaf,,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,汁液致敏;紅葉觀賞,high,true
+66,青楓,Acer serrulatum,中原氏掌葉槭,Sapindaceae,Acer,broadleaf,100,2500,mid-elevation-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,台灣特有種;秋紅,high,true
+67,樟葉楓,Acer albopurpurascens,樟葉槭,Sapindaceae,Acer,broadleaf,200,2000,mid-elevation-broadleaf,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 青楓,常綠槭;台灣特有,medium,true
+68,尖葉槭,Acer kawakamii,川上氏槭,Sapindaceae,Acer,broadleaf,1500,3000,montane-coniferous;mid-elevation-broadleaf,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 青楓,中高海拔落葉槭,medium,true
+69,台灣三角楓,Acer buergerianum var. formosanum,三角楓,Sapindaceae,Acer,broadleaf,200,1500,foothills-broadleaf,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 青楓,落葉;低海拔,medium,true
+70,台灣櫸,Zelkova serrata var. tarokoensis,太魯閣櫸,Ulmaceae,Zelkova,broadleaf,500,1500,foothills-broadleaf;mid-elevation-broadleaf,,0.66,ipcc-tier2,genus-default,medium,genus-fallback from 櫸木,東部峽谷地形優勢,medium,true
+71,朴樹,Celtis sinensis,朴仔,Cannabaceae,Celtis,broadleaf,0,1500,lowland-broadleaf;foothills-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;鳥嗜果,high,true
+72,沙朴,Celtis formosana,台灣朴,Cannabaceae,Celtis,broadleaf,100,1500,foothills-broadleaf,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 朴樹,台灣特有種,medium,true
+73,台灣赤楠,Syzygium formosanum,赤楠,Myrtaceae,Syzygium,broadleaf,100,1800,foothills-broadleaf;mid-elevation-broadleaf,,0.70,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,台灣特有種,high,true
+74,賽赤楠,Syzygium tetragonum,輪葉赤楠,Myrtaceae,Syzygium,broadleaf,100,1500,foothills-broadleaf,,0.70,ipcc-tier2,genus-default,medium,genus-fallback from 台灣赤楠,低海拔常綠,medium,true
+75,蓮霧,Syzygium samarangense,南洋蒲桃,Myrtaceae,Syzygium,broadleaf,0,500,plantation,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 台灣赤楠,果樹;經濟栽培,high,true
+76,大葉合歡,Albizia lebbeck,闊莢合歡,Fabaceae,Albizia,broadleaf,0,800,plantation;lowland-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,外來;固氮造林,high,true
+77,印度紫檀,Pterocarpus indicus,花梨木,Fabaceae,Pterocarpus,broadleaf,0,600,plantation,,0.60,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;名貴用材,high,true
+78,大葉相思,Acacia mangium,馬占相思,Fabaceae,Acacia,broadleaf,0,800,plantation,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 相思樹,外來造林試驗種,high,true
+79,木麻黃,Casuarina equisetifolia,短枝木麻黃,Casuarinaceae,Casuarina,broadleaf,0,100,coastal;plantation,,0.85,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,海岸防風林主力;固氮,high,true
+80,桉樹,Eucalyptus robusta,大葉桉,Myrtaceae,Eucalyptus,broadleaf,0,1000,plantation,,0.70,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,外來;早期造林試驗,high,true
+81,檸檬桉,Corymbia citriodora,檸檬尤加利,Myrtaceae,Corymbia,broadleaf,0,800,plantation,,0.85,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,外來;精油植物,high,true
+82,猴歡喜,Sloanea formosana,台灣猴歡喜,Elaeocarpaceae,Sloanea,broadleaf,100,2000,foothills-broadleaf;mid-elevation-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,台灣特有種;果具刺,medium,true
+83,杜英,Elaeocarpus sylvestris,山杜英,Elaeocarpaceae,Elaeocarpus,broadleaf,100,1800,foothills-broadleaf;mid-elevation-broadleaf,,0.55,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉前紅葉;常用造林,high,true
+84,鵝掌柴,Schefflera octophylla,江某;鴨腳木,Araliaceae,Schefflera,broadleaf,0,1800,foothills-broadleaf;secondary-pioneer,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,蜜源;常綠;次生,high,true
+85,木荷,Schima superba,荷樹,Theaceae,Schima,broadleaf,100,2200,mid-elevation-broadleaf,,0.65,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,防火樹種;造林常用,high,true
+86,油茶,Camellia oleifera,茶油樹,Theaceae,Camellia,broadleaf,100,1500,plantation,,0.60,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,茶油經濟作物,high,true
+87,烏皮九芎,Styrax suberifolia,葉下白,Styracaceae,Styrax,broadleaf,100,2000,mid-elevation-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,常綠;台灣低中海拔常見,medium,true
+88,紅皮,Styrax tonkinensis,安息香,Styracaceae,Styrax,broadleaf,100,1500,foothills-broadleaf,,0.50,ipcc-tier2,genus-default,medium,genus-fallback from 烏皮九芎,安息香原料樹,medium,true
+89,大花紫薇,Lagerstroemia speciosa,大葉紫薇,Lythraceae,Lagerstroemia,broadleaf,0,800,plantation;lowland-broadleaf,,0.60,ipcc-tier2,genus-default,medium,genus-fallback from 九芎,行道樹;觀花,high,true
+90,小葉白蠟樹,Fraxinus floribunda,繁花白蠟樹,Oleaceae,Fraxinus,broadleaf,500,2000,mid-elevation-broadleaf,,0.62,ipcc-tier2,genus-default,low,genus-fallback from 光蠟樹,分布資料較少,low,false
+91,無患子,Sapindus mukorossi,黃目子,Sapindaceae,Sapindus,broadleaf,0,1500,foothills-broadleaf;lowland-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;果皂代用,high,true
+92,台灣欒樹,Koelreuteria henryi,苦楝舅,Sapindaceae,Koelreuteria,broadleaf,0,1500,foothills-broadleaf;lowland-broadleaf,,0.55,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,台灣特有種;四色行道樹,high,true
+93,荔枝,Litchi chinensis,離支,Sapindaceae,Litchi,broadleaf,0,600,plantation,,0.65,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,果樹經濟栽培,high,true
+94,龍眼,Dimocarpus longan,桂圓,Sapindaceae,Dimocarpus,broadleaf,0,600,plantation,,0.65,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,果樹經濟栽培,high,true
+95,山欖,Planchonella obovata,蘭嶼山欖,Sapotaceae,Planchonella,broadleaf,0,500,coastal,,0.65,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,海岸常綠;蘭嶼常見,medium,true
+96,黃花風鈴木,Tabebuia chrysantha,黃鐘木,Bignoniaceae,Tabebuia,broadleaf,0,500,plantation,,0.70,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;南美原生,high,true
+97,藍花楹,Jacaranda mimosifolia,藍楹,Bignoniaceae,Jacaranda,broadleaf,0,500,plantation,,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;南美原生,high,true
+98,台灣海桐,Pittosporum pentandrum,十里香,Pittosporaceae,Pittosporum,broadleaf,0,800,coastal;lowland-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,低海拔濱海,medium,true
+99,海茄苳,Avicennia marina,白骨壤,Acanthaceae,Avicennia,mangrove,0,5,mangrove,,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,紅樹林;台灣全島,high,true
+100,紅海欖,Rhizophora stylosa,五梨跤,Rhizophoraceae,Rhizophora,mangrove,0,5,mangrove,,0.85,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,紅樹林;南部西海岸,high,true
+101,水筆仔,Kandelia obovata,水筆,Rhizophoraceae,Kandelia,mangrove,0,5,mangrove,,0.65,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,紅樹林;北部淡水河系,high,true
+102,欖李,Lumnitzera racemosa,欖李樹,Combretaceae,Lumnitzera,mangrove,0,5,mangrove,,0.85,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,紅樹林;南部稀有,high,true
+103,芒果,Mangifera indica,檬果,Anacardiaceae,Mangifera,broadleaf,0,600,plantation,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,果樹;經濟栽培,high,true
+104,台東蘇鐵,Cycas taitungensis,台灣蘇鐵,Cycadaceae,Cycas,palm,100,800,foothills-broadleaf,II,0.30,ipcc-tier2,type-default-ipcc,low,IPCC 2006 palm,保育類 II 級;台灣特有種;蘇鐵獨立綱,medium,true
+105,烏來杜鵑,Rhododendron kanehirae,烏來杜鵑,Ericaceae,Rhododendron,broadleaf,100,500,riparian,I,0.50,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,保育類 I 級;野生族群滅絕,medium,true
+106,台灣油桐,Aleurites fordii,千年桐;三年桐,Euphorbiaceae,Aleurites,broadleaf,100,1000,plantation;foothills-broadleaf,,0.32,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;桐油料源;客庄五月雪,high,true
+107,油桐,Vernicia montana,木油桐,Euphorbiaceae,Vernicia,broadleaf,100,1500,foothills-broadleaf;plantation,,0.32,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;與千年桐易混淆,medium,true
+108,水黃皮,Pongamia pinnata,九重吹,Fabaceae,Pongamia,broadleaf,0,100,coastal,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,海岸防風;固氮,high,true
+109,刺桐,Erythrina variegata,梯枯,Fabaceae,Erythrina,broadleaf,0,500,coastal;lowland-broadleaf,,0.30,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;原住民曆木;刺桐釉小蜂害,high,true
+110,黃槿,Hibiscus tiliaceus,粿葉樹,Malvaceae,Hibiscus,broadleaf,0,100,coastal;lowland-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,海岸常綠;原住民利用,high,true
+111,欖仁,Terminalia catappa,雨傘樹,Combretaceae,Terminalia,broadleaf,0,100,coastal;lowland-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,海岸；行道樹;落葉前紅葉,high,true
+112,欖仁舅,Neonauclea reticulata,欖仁舅,Rubiaceae,Neonauclea,broadleaf,0,500,lowland-broadleaf;coastal,,0.55,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,南部低海拔,low,false
+113,棋盤腳,Barringtonia asiatica,濱玉蕊,Lecythidaceae,Barringtonia,broadleaf,0,50,coastal,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,海岸;果如棋盤腳;蘭嶼信仰木,high,true
+114,水筆仔屬其他,Bruguiera gymnorrhiza,五梨跤;紅茄苳,Rhizophoraceae,Bruguiera,mangrove,0,5,mangrove,,0.80,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,歷史紅樹林;野生在台已滅,low,false
+115,林投,Pandanus tectorius,露兜樹,Pandanaceae,Pandanus,palm,0,50,coastal,,0.30,ipcc-tier2,type-default-ipcc,low,IPCC 2006 palm,海岸灌叢;帶氣根,medium,true
+116,椰子,Cocos nucifera,椰子樹,Arecaceae,Cocos,palm,0,100,coastal;plantation,,0.30,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 palm,栽培果樹,high,true
+117,檳榔,Areca catechu,菁仔,Arecaceae,Areca,palm,0,1000,plantation,,0.40,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 palm,果樹;山坡濫植致沖蝕,high,true
+118,蒲葵,Livistona chinensis,華盛頓椰子,Arecaceae,Livistona,palm,0,500,coastal;plantation,,0.40,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 palm,行道樹;海岸,high,true
+119,台灣海棗,Phoenix hanceana,糠榔,Arecaceae,Phoenix,palm,0,500,coastal,,0.40,ipcc-tier2,type-default-ipcc,low,IPCC 2006 palm,台灣海岸特有亞種,medium,true
+120,山棕,Arenga engleri,虎尾棕,Arecaceae,Arenga,palm,100,1500,foothills-broadleaf,,0.35,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 palm,下層棕櫚;原住民利用,high,true
+121,黃藤,Calamus quiquesetinervius,藤心,Arecaceae,Calamus,palm,100,1500,foothills-broadleaf,,0.40,ipcc-tier2,type-default-ipcc,low,IPCC 2006 palm,藤本棕櫚;非典型樹,medium,true
+122,水社柳,Salix kusanoi,水社柳,Salicaceae,Salix,broadleaf,0,1000,riparian,,0.40,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,台灣特有種;濕地,medium,true
+123,水柳,Salix warburgii,水柳,Salicaceae,Salix,broadleaf,0,1000,riparian,,0.40,ipcc-tier2,genus-default,medium,genus-fallback from 水社柳,溪流側;雌雄異株,medium,true
+124,楊梅,Myrica rubra,樹梅,Myricaceae,Myrica,broadleaf,100,1500,foothills-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,果可食;固氮放線菌共生,high,true
+125,烏來柯,Lithocarpus uraianus,烏來柯,Fagaceae,Lithocarpus,broadleaf,300,1800,mid-elevation-broadleaf,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,北部殼斗科,medium,true
+126,森氏櫟,Cyclobalanopsis morii,森氏椆,Fagaceae,Cyclobalanopsis,broadleaf,1500,2500,mid-elevation-broadleaf;montane-coniferous,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,中海拔殼斗;台灣特有種,high,true
+127,錐果櫟,Cyclobalanopsis longinux,錐果椆,Fagaceae,Cyclobalanopsis,broadleaf,500,2000,mid-elevation-broadleaf,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,中海拔常綠殼斗,medium,true
+128,狹葉櫟,Cyclobalanopsis stenophylloides,狹葉高山櫟,Fagaceae,Cyclobalanopsis,broadleaf,1500,3000,montane-coniferous,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,高山殼斗;台灣特有,medium,true
+129,短尾葉石櫟,Lithocarpus brevicaudatus,短尾石柯,Fagaceae,Lithocarpus,broadleaf,500,1800,mid-elevation-broadleaf,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,台灣特有,medium,true
+130,台灣栲,Castanopsis formosana,台灣苦櫧,Fagaceae,Castanopsis,broadleaf,200,2000,mid-elevation-broadleaf,,0.65,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,台灣特有,high,true
+131,卡氏櫧,Castanopsis carlesii,長尾櫧,Fagaceae,Castanopsis,broadleaf,200,2000,mid-elevation-broadleaf,,0.65,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,分類常與長尾尖葉櫧合併,medium,true
+132,大葉石櫟,Lithocarpus kawakamii,大葉石柯,Fagaceae,Lithocarpus,broadleaf,500,2000,mid-elevation-broadleaf,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,台灣特有,medium,true
+133,鬼石櫟,Lithocarpus lepidocarpus,鬼石柯,Fagaceae,Lithocarpus,broadleaf,500,1800,mid-elevation-broadleaf,,0.78,ipcc-tier2,genus-default,low,櫧櫟類式 林子玉 1975,分布資料少,low,false
+134,赤柯,Limlia uraiana,赤柯;烏來柯,Fagaceae,Limlia,broadleaf,500,1800,mid-elevation-broadleaf,,0.78,ipcc-tier2,genus-default,low,櫧櫟類式 林子玉 1975,分類學變動;與 Castanopsis 區分,low,false
+135,圓葉布勒登,Bridelia tomentosa,土密樹,Phyllanthaceae,Bridelia,broadleaf,0,1000,foothills-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,次生闊葉,low,false
+136,野桐,Mallotus japonicus,楸樹,Euphorbiaceae,Mallotus,broadleaf,0,1500,secondary-pioneer,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,次生先驅;落葉,high,true
+137,白匏子,Mallotus paniculatus,白葉野桐,Euphorbiaceae,Mallotus,broadleaf,100,1500,secondary-pioneer,,0.45,ipcc-tier2,genus-default,medium,genus-fallback from 野桐,次生;葉背白,high,true
+138,粗糠柴,Mallotus philippensis,呂宋楸,Euphorbiaceae,Mallotus,broadleaf,0,1500,foothills-broadleaf,,0.50,ipcc-tier2,genus-default,medium,genus-fallback from 野桐,果毛紅;染料,medium,true
+139,江某,Schefflera heptaphylla,鴨腳木;鵝掌柴,Araliaceae,Schefflera,broadleaf,0,1800,foothills-broadleaf,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,常與鵝掌柴混用;蜜源,high,true
+140,筆筒樹,Sphaeropteris lepifera,蛇木,Cyatheaceae,Sphaeropteris,broadleaf,100,1800,foothills-broadleaf;mid-elevation-broadleaf,II,0.20,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,保育類 II 級;樹蕨;非真樹,medium,true
+141,台灣桫欏,Cyathea spinulosa,桫欏,Cyatheaceae,Cyathea,broadleaf,100,2000,foothills-broadleaf;mid-elevation-broadleaf,,0.20,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,樹蕨;非真樹,medium,true
+142,大葉羅漢松,Podocarpus macrophyllus,羅漢松,Podocarpaceae,Podocarpus,conifer,100,1500,foothills-broadleaf;plantation,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 蘭嶼羅漢松,觀賞;盆景,high,true
+143,百日青,Podocarpus nakaii,南投羅漢松,Podocarpaceae,Podocarpus,conifer,300,1500,mid-elevation-mixed,II,0.55,ipcc-tier2,genus-default,low,genus-fallback from 蘭嶼羅漢松,保育類 II 級;台灣特有種,medium,true
+144,竹柏,Nageia nagi,大果竹柏,Podocarpaceae,Nageia,conifer,100,1500,foothills-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,觀賞;闊葉狀針葉,high,true
+145,台灣黃杉,Pseudotsuga sinensis var. wilsoniana,黃杉,Pinaceae,Pseudotsuga,conifer,1500,2500,montane-coniferous,II,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,保育類 II 級;台灣特有變種,high,true
+146,華山松,Pinus armandii,華山松,Pinaceae,Pinus,conifer,1500,3000,montane-coniferous,,0.45,ipcc-tier2,genus-default,medium,genus-fallback from 二葉松,造林試驗;與五葉松混淆,medium,true
+147,馬尾松,Pinus massoniana,濕地松(易混),Pinaceae,Pinus,conifer,100,1500,plantation,,0.50,ipcc-tier2,genus-default,medium,genus-fallback from 二葉松 / 松類,栽培試驗;少見,medium,true
+148,黑松,Pinus thunbergii,日本黑松,Pinaceae,Pinus,conifer,0,100,coastal;plantation,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 二葉松 / 松類,海岸防風造林,high,true
+149,鐵刀木,Senna siamea,暹羅決明,Fabaceae,Senna,broadleaf,0,500,plantation;lowland-broadleaf,,0.65,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;蝶類寄主,high,true
+150,阿勃勒,Cassia fistula,金急雨,Fabaceae,Cassia,broadleaf,0,500,plantation,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;觀花,high,true
+151,鳳凰木,Delonix regia,火樹,Fabaceae,Delonix,broadleaf,0,500,plantation;lowland-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;紅花,high,true
+152,羊蹄甲,Bauhinia variegata,南洋櫻,Fabaceae,Bauhinia,broadleaf,0,500,plantation,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;粉紫花,high,true
+153,洋紫荊,Bauhinia purpurea,紫羊蹄甲,Fabaceae,Bauhinia,broadleaf,0,500,plantation,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 羊蹄甲,行道樹,high,true
+154,白千層,Melaleuca leucadendra,千層皮,Myrtaceae,Melaleuca,broadleaf,0,500,plantation;coastal,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;樹皮可剝,high,true
+155,茄苳屬其他,Bischofia polycarpa,秋楓,Phyllanthaceae,Bischofia,broadleaf,0,1500,foothills-broadleaf,,0.62,ipcc-tier2,genus-default,low,genus-fallback from 茄苳,分類學變動,low,false
+156,山櫻花,Prunus campanulata,緋寒櫻,Rosaceae,Prunus,broadleaf,100,2000,foothills-broadleaf;mid-elevation-broadleaf,,0.55,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;觀賞;台灣特有,high,true
+157,霧社山櫻,Prunus taiwaniana,台灣山櫻,Rosaceae,Prunus,broadleaf,500,2500,mid-elevation-broadleaf,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 山櫻花,落葉;台灣特有,medium,true
+158,山枇杷,Eriobotrya deflexa,赤葉枇杷,Rosaceae,Eriobotrya,broadleaf,100,2000,mid-elevation-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,常綠;台灣特有,medium,true
+159,枇杷,Eriobotrya japonica,枇杷,Rosaceae,Eriobotrya,broadleaf,0,1000,plantation,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 山枇杷,果樹;經濟栽培,high,true
+160,烏皮石櫟,Lithocarpus glaber,烏皮柯,Fagaceae,Lithocarpus,broadleaf,100,1500,foothills-broadleaf,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,樟櫧林帶,medium,true
+161,鋸葉長尾栲,Castanopsis kawakamii,川上氏栲,Fagaceae,Castanopsis,broadleaf,300,1500,mid-elevation-broadleaf,,0.65,ipcc-tier2,genus-default,low,櫧櫟類式 林子玉 1975,少見;台灣特有,low,false
+162,南華氏鈍葉櫟,Quercus glauca subsp. pseudo-glauca,假青剛,Fagaceae,Quercus,broadleaf,500,2000,mid-elevation-broadleaf,,0.75,ipcc-tier2,genus-default,low,櫧櫟類式 林子玉 1975,分類有爭議,low,false
+163,高山櫟,Quercus spinosa,刺葉高山櫟,Fagaceae,Quercus,broadleaf,2000,3500,montane-coniferous;subalpine-shrub,,0.78,ipcc-tier2,genus-default,medium,櫧櫟類式 林子玉 1975,高山殼斗;耐寒,medium,true
+164,玉山箭竹,Yushania niitakayamensis,玉山矢竹,Poaceae,Yushania,bamboo,1500,3800,subalpine-shrub;subalpine-coniferous,,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 bamboo,高山下層竹;火後優勢,high,true
+165,包籜矢竹,Pseudosasa usawai,包籜竹,Poaceae,Pseudosasa,bamboo,100,1000,foothills-broadleaf,,0.50,ipcc-tier2,type-default-ipcc,low,IPCC 2006 bamboo,北部低海拔,low,false
+166,綠竹,Bambusa oldhamii,烏腳綠竹,Poaceae,Bambusa,bamboo,0,500,plantation,,0.55,taiwan-tfri,type-default-ipcc,medium,IPCC 2006 bamboo,叢生竹;筍材兼用,high,true
+167,長枝竹,Bambusa dolichoclada,長枝竹,Poaceae,Bambusa,bamboo,0,800,plantation,,0.55,ipcc-tier2,genus-default,low,genus-fallback from 刺竹,叢生竹,low,false
+168,蓬萊竹,Bambusa multiplex,觀音竹,Poaceae,Bambusa,bamboo,0,1000,plantation,,0.50,ipcc-tier2,genus-default,medium,genus-fallback from 刺竹,叢生竹;籬笆,medium,true
+169,金毛杜鵑,Rhododendron oldhamii,烏皮杜鵑,Ericaceae,Rhododendron,broadleaf,100,2500,mid-elevation-broadleaf;subalpine-shrub,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,台灣特有種;低中海拔常綠,medium,true
+170,玉山杜鵑,Rhododendron pseudochrysanthum,玉山杜鵑,Ericaceae,Rhododendron,broadleaf,2500,3800,subalpine-shrub,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 金毛杜鵑,台灣特有種;高山灌叢,high,true
+171,森氏杜鵑,Rhododendron morii,森氏紅淡比(誤),Ericaceae,Rhododendron,broadleaf,1800,2800,montane-coniferous,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 金毛杜鵑,台灣特有種,medium,true
+172,西施花,Rhododendron ellipticum,西施杜鵑,Ericaceae,Rhododendron,broadleaf,100,1500,foothills-broadleaf,,0.55,ipcc-tier2,genus-default,medium,genus-fallback from 金毛杜鵑,低海拔常綠杜鵑,medium,true
+173,紅淡比,Cleyera japonica,楊桐,Pentaphylacaceae,Cleyera,broadleaf,100,2000,mid-elevation-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,常綠;祭祀用,high,true
+174,森氏紅淡比,Cleyera japonica var. morii,長果紅淡比,Pentaphylacaceae,Cleyera,broadleaf,1000,2500,mid-elevation-broadleaf,,0.55,ipcc-tier2,genus-default,low,genus-fallback from 紅淡比,台灣特有變種,low,false
+175,灰木,Symplocos paniculata,白檀,Symplocaceae,Symplocos,broadleaf,100,2500,foothills-broadleaf;mid-elevation-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,常綠;台灣低中海拔常見屬,medium,true
+176,山黃梔,Gardenia jasminoides,黃梔,Rubiaceae,Gardenia,broadleaf,0,1500,foothills-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,常綠灌喬木;果為染料,high,true
+177,破布子,Cordia dichotoma,樹子,Boraginaceae,Cordia,broadleaf,0,1000,foothills-broadleaf;lowland-broadleaf,,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,果可食加工,high,true
+178,土沉香,Aquilaria sinensis,沉香,Thymelaeaceae,Aquilaria,broadleaf,0,1000,plantation,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,造林試驗;沉香經濟,medium,true
+179,克蘭樹,Kleinhovia hospita,面頭果(易混),Malvaceae,Kleinhovia,broadleaf,0,500,lowland-broadleaf;coastal,,0.50,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,南部低海拔,low,false
+180,銀葉樹,Heritiera littoralis,銀葉板根,Malvaceae,Heritiera,broadleaf,0,100,coastal,,0.85,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,海岸;板根顯著,high,true
+181,蓮葉桐,Hernandia nymphiifolia,蓮葉桐,Hernandiaceae,Hernandia,broadleaf,0,100,coastal,,0.40,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,海岸;蘭嶼綠島,medium,true
+182,瓊崖海棠,Calophyllum inophyllum,胡桐,Calophyllaceae,Calophyllum,broadleaf,0,100,coastal,,0.65,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,海岸;果可榨油,high,true
+183,大葉山欖,Palaquium formosanum,台灣膠木,Sapotaceae,Palaquium,broadleaf,0,500,coastal,,0.65,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,北海岸與蘭嶼;台灣特有,high,true
+184,烏皮茶,Eurya emarginata,凹葉柃木,Pentaphylacaceae,Eurya,broadleaf,100,2000,mid-elevation-broadleaf,,0.60,ipcc-tier2,type-default-ipcc,low,IPCC 2006 subtropical broadleaf,常綠;台灣常見小喬木,medium,true
+185,厚殼樹,Ehretia acuminata,破布烏,Boraginaceae,Ehretia,broadleaf,0,1500,foothills-broadleaf,,0.55,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,低海拔落葉,medium,true
+186,馬拉巴栗,Pachira aquatica,發財樹,Malvaceae,Pachira,broadleaf,0,500,plantation,,0.40,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,觀賞;果可食,high,true
+187,美人樹,Ceiba speciosa,酒瓶樹,Malvaceae,Ceiba,broadleaf,0,500,plantation,,0.30,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;南美原生,high,true
+188,吉貝,Ceiba pentandra,木棉(誤),Malvaceae,Ceiba,broadleaf,0,500,plantation,,0.25,ipcc-tier2,genus-default,medium,genus-fallback from 美人樹,棉絮;熱帶經濟樹,medium,true
+189,木棉,Bombax ceiba,英雄樹,Malvaceae,Bombax,broadleaf,0,500,plantation;lowland-broadleaf,,0.35,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,行道樹;落葉;紅花,high,true
+190,南洋杉,Araucaria heterophylla,小葉南洋杉,Araucariaceae,Araucaria,conifer,0,500,plantation,,0.45,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,行道樹;外來,high,true
+191,肯氏南洋杉,Araucaria cunninghamii,大葉南洋杉,Araucariaceae,Araucaria,conifer,0,500,plantation,,0.45,ipcc-tier2,genus-default,medium,genus-fallback from 南洋杉,行道樹;外來,high,true
+192,銀杏,Ginkgo biloba,公孫樹,Ginkgoaceae,Ginkgo,broadleaf,500,1500,plantation,,0.50,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,觀賞栽培;落葉,high,true
+193,水杉,Metasequoia glyptostroboides,水杉,Cupressaceae,Metasequoia,conifer,500,1800,plantation;riparian,,0.32,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,落葉針葉;栽培觀賞,high,true
+194,落羽松,Taxodium distichum,落羽杉,Cupressaceae,Taxodium,conifer,0,800,plantation;riparian,,0.42,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical conifer,落葉針葉;濕地造景,high,true
+195,榔榆,Ulmus parvifolia,秋榆,Ulmaceae,Ulmus,broadleaf,100,1500,foothills-broadleaf,,0.65,ipcc-tier2,type-default-ipcc,medium,IPCC 2006 subtropical broadleaf,落葉;盆景;行道樹,high,true
+196,銀合歡,Leucaena leucocephala,白相思,Fabaceae,Leucaena,broadleaf,0,1000,secondary-pioneer,,0.55,taiwan-tfri,species-specific,high,陳朝圳 范貴珠 1989 恆春潮州 ln_power,外來入侵種;固氮先驅,high,true
