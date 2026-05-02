@@ -1,19 +1,21 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21004';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21005';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21004';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21005';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21004';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21005';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21004';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21005';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
+// v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
+import { createSpeciesPicker } from './species-picker.js?v=21005';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21004';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21005';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -2398,21 +2400,19 @@ export async function openTreeForm(project, plot, existing = null) {
   }
   const padNum = (n) => String(n).padStart(3, '0');
 
-  // 樹種 autocomplete（datalist）
-  const speciesList = el('datalist', { id: 'dl-species' },
-    ...SPECIES.map(s => el('option', { value: s.zh }, `${s.sci}${s.cons ? ` [${s.cons}]` : ''}`))
-  );
-
-  const speciesInput = el('input', {
-    type: 'text', name: 'speciesZh', required: 'true',
-    list: 'dl-species', placeholder: '輸入或選擇',
+  // v2.10.5：樹種搜尋（取代 datalist；資料源 = Firestore 224 種 + fallback 靜態 TREES）
+  //   保留變數名 speciesInput 以最小化下方計算邏輯改動
+  const speciesPicker = createSpeciesPicker({
+    name: 'speciesZh', required: true,
     value: existing?.speciesZh || '',
-    autocomplete: 'off'
   });
+  const speciesInput = speciesPicker.input;
   const consWarn = el('div', { class: 'text-xs mt-1' });
   function updateConsWarn() {
-    const s = SPECIES.find(x => x.zh === speciesInput.value);
-    if (s?.cons) consWarn.innerHTML = `<span class="cons-warn">⚠ 保育類 第 ${s.cons} 級</span>`;
+    // 優先從 picker cache 找（含 Firestore 新 226 種），fallback 靜態 SPECIES
+    const matched = speciesPicker.getMatched();
+    const cons = matched?.conservationGrade ?? SPECIES.find(x => x.zh === speciesInput.value)?.cons ?? null;
+    if (cons) consWarn.innerHTML = `<span class="cons-warn">⚠ 保育類 第 ${cons} 級</span>`;
     else consWarn.innerHTML = '';
   }
   speciesInput.addEventListener('input', updateConsWarn);
@@ -2525,7 +2525,6 @@ export async function openTreeForm(project, plot, existing = null) {
   treeNumInput.addEventListener('input', updateTreeCodePreview);
 
   const f = el('form', { class: 'space-y-2' },
-    speciesList,
     el('div', { class: 'field' },
       el('label', {}, '個體編號 ', el('span', { class: 'req' }, '*')),
       el('div', { style: 'display:flex;align-items:stretch' },
@@ -2538,7 +2537,7 @@ export async function openTreeForm(project, plot, existing = null) {
     ),
     el('div', { class: 'field' },
       el('label', {}, '樹種 ', el('span', { class: 'req' }, '*')),
-      speciesInput,
+      speciesPicker.root,                    // v2.10.5：picker.root 含 input + dropdown panel
       consWarn
     ),
     // v2.5：立木個體座標（樣區內局部 X/Y → 自動算 absolute TWD97 + WGS84）
@@ -2671,14 +2670,16 @@ export async function openTreeForm(project, plot, existing = null) {
 
 // ===== 自然更新表單 =====
 export function openRegenForm(project, plot, existing = null) {
-  // v2.7.7：樹種 datalist（與立木表單共用 species-dict.js TREES）
-  //         獨立 ID 避免與立木表單 dl-species 衝突
-  const speciesList = el('datalist', { id: 'dl-regen-species' },
-    ...SPECIES.map(s => el('option', { value: s.zh }, `${s.sci}${s.cons ? ` [${s.cons}]` : ''}`))
-  );
+  // v2.10.5：樹種搜尋（取代 datalist）
+  const regenPicker = createSpeciesPicker({
+    name: 'speciesZh', required: true,
+    value: existing?.speciesZh || '',
+  });
   const f = el('form', { class: 'space-y-2' },
-    speciesList,
-    field({ label: '樹種', name: 'speciesZh', required: true, list: 'dl-regen-species', placeholder: '輸入或選擇', value: existing?.speciesZh || '' }),
+    el('div', { class: 'field' },
+      el('label', {}, '樹種 ', el('span', { class: 'req' }, ' *')),
+      regenPicker.root
+    ),
     field({ label: '苗高分級', name: 'heightClass', required: true,
       options: [
         { value: '<30', label: '< 30 cm' },
