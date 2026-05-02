@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=29020">
+  <link rel="stylesheet" href="style.css?v=29030">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.9.2</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.9.3</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -51,6 +51,11 @@
   </div>
   <div id="offline-banner" class="hidden bg-amber-500 text-white text-center text-sm py-1">
     📵 離線模式 — 資料已暫存，回連時自動同步
+  </div>
+  <!-- v2.9.3：新版可用橫幅（手機 PWA 不用記下拉重整 2 次）-->
+  <div id="update-banner" class="hidden bg-blue-600 text-white text-center text-sm py-1.5 px-3 flex items-center justify-center gap-2 flex-wrap">
+    <span>🔄 ForestMRV 有新版本可用</span>
+    <button data-update-apply class="bg-white text-blue-700 hover:bg-blue-50 px-3 py-0.5 rounded text-xs font-semibold">立即套用</button>
   </div>
 </header>
 
@@ -595,6 +600,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=29020"></script>
+<script type="module" src="js/app.js?v=29030"></script>
 </body>
 </html>

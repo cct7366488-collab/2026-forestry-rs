@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.9.2';  // v2.9.2：polish round — (#5) v2.6 黃 banner addEventListener 改 banner.querySelector + 防 detached；(#6) admin 退回 verified 後 rect-conversion banner 補 re-render 去 stale 紅字；(#7) 加 window.__debug 暴露 state/db/auth/storage 給 DevTools；(#8) 樣區形狀 UI 標籤改完整對照（rectangle 不再顯示「方形」）；(#11) per-plot 碳/CO₂ 同刻度顯示（max(C,CO₂) ≥ 1000 kg → 都切 t）；(#12) QAQC 誤差 histogram x 軸 label 旋轉 45° + autoSkip + maxTicksLimit=8 解擠
+const CACHE = 'forest-monitor-v2.9.3';  // v2.9.3：手機 PWA 友善「新版可用」橫幅 — install 拿掉 self.skipWaiting（改 client 觸發），加 message handler 收 SKIP_WAITING；app.js 加 updatefound 監聽 → showUpdateBanner（topbar 下藍色橫幅 + 「立即套用」按鈕）→ postMessage SKIP_WAITING → controllerchange → location.reload。長期 PWA session 每 30 min reg.update() 主動戳一次。手機不用記「下拉重整 2 次」，且 user 控制更新時機（避免表單填一半被打斷）
 const SHELL = [
   './',
   './index.html',
@@ -24,10 +24,12 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
+  // v2.9.3：拿掉 self.skipWaiting() — 改由 client 收到「新版可用」橫幅後 user click 觸發 SKIP_WAITING
+  // 動機：手機 PWA 沒 pull-to-refresh，cache-first SW 導致使用者要 reload 兩次才看到新版。改成 user 控制
+  // 何時 activate，避免在表單填一半時被靜默更新打斷。
   e.waitUntil(
     caches.open(CACHE).then(c => c.addAll(SHELL).catch(() => {}))
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
@@ -37,6 +39,11 @@ self.addEventListener('activate', e => {
     ))
   );
   self.clients.claim();
+});
+
+// v2.9.3：收到 client 的 SKIP_WAITING → 立即從 waiting 切換到 active，觸發 controllerchange
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', e => {
