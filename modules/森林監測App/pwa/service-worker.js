@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.10.0';  // v2.10.0：Phase 1 樹種 DB 擴充 — species CSV importer 升級到 v2.10 enriched schema（19 欄：rank/aliases/family/genus/treeType/elevationMin/Max_m/forestTypePreference/woodDensity/woodDensitySource/equationSource/equationConfidence/equationCitation/notes/_confidence + 既有 zh/sci/conservationGrade/verified）；parseSpeciesCSV 改為動態欄位偵測（缺欄不寫，merge 不誤清）+ enum 驗證 + semicolon-array 解析 + 數值型轉換 + quote-aware row parser；preview UI 加 # 排名 / treeType / family / 公式徽章（🟢 species-specific / 🟡 genus-default / 🟠 type-default-ipcc）；舊 4 欄 CSV 仍向後相容；Firestore species doc 新增 popularityRank / aliases / treeType / forestTypePreference 等欄位（schemaVersion='v2.10'）；附 196 物種草稿 CSV 在 modules/森林監測App/data/species-final.csv（admin 手動批次匯入觸發）
+const CACHE = 'forest-monitor-v2.10.1';  // v2.10.1：hotfix — preview UI 上傳 species-final.csv 跳「Failed to execute 'appendChild' on 'Node'」。原因：el() helper 只 stringify string children，遇 number（如 r.rank=1）直接 appendChild(1) → DOM throw。修：el() 同時支援 number / boolean → textNode（向下相容；之前 caller 都傳 string，沒人靠這個 throw）
 const SHELL = [
   './',
   './index.html',
