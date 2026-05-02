@@ -106,13 +106,43 @@ const SP = {
   '桂竹': { sci: 'Phyllostachys makinoi', category: 'bamboo',
     calcV: (D, H) => ev.power({ a: 26.032, b: 1.5777, c: 1.1237 }, D, H),
     bef: 0.5, cf: 0.47, source: '黃崑崗 1972 中南部 power（單位特殊）' },
-  // ===== Fallback =====
+  // ===== Fallback（v2.10.7 擴 5 大樹型）=====
+  // 沒對應 species-specific / 屬群代理時，依 treeType 路由到下列 5 個之一
   '其它針': { sci: 'Other conifers', category: 'conifer',
     calcV: (D, H) => ev.log_dhf({ a: -3.4692, b: 2.0052, c: 0.5598, d: 0.0077 }, D, H, 0.5),
     bef: 0.52, cf: 0.49, source: '農林航空測量隊 1959 全省 log_dhf (F=0.5)' },
   '其他闊': { sci: 'Other broadleaf', category: 'broadleaf',
     calcV: (D, H) => ev.power({ a: 8.62e-05, b: 1.8742, c: 0.8671 }, D, H),
     bef: 0.58, cf: 0.47, source: '羅紹麟 馮豐隆 1986 全省 power' },
+  // v2.10.7：竹類 fallback（桂竹 SP 公式單位特殊不直接 clone；改用簡化中空竹稈圓柱）
+  // V = π/4 × (D/100)² × H × 0.20（0.20 = 約 0.4 中空率 × 0.5 漸縮係數）
+  // bef = WD 0.60 × BCEF 1.0（竹幾乎全為竹稈，無分支重量）
+  '其他竹': { sci: 'Other bamboo', category: 'bamboo',
+    calcV: (D, H) => Math.PI / 4 * Math.pow(D / 100, 2) * H * 0.20,
+    bef: 0.60, cf: 0.47, source: 'IPCC 2006 + 簡化竹稈圓柱（V = π/4 × D² × H × 0.20；中空+漸縮；WD 0.60 × BCEF 1.0）' },
+  // v2.10.7：棕櫚 fallback（棕櫚 stem 近圓柱，少漸縮）
+  // V = π/4 × (D/100)² × H × 0.50（form factor 0.5）
+  // bef = WD 0.30 × BCEF 1.05（棕櫚主要 biomass 在 stem，葉片較輕）
+  '其他棕櫚': { sci: 'Other palm', category: 'palm',
+    calcV: (D, H) => Math.PI / 4 * Math.pow(D / 100, 2) * H * 0.50,
+    bef: 0.315, cf: 0.47, source: 'IPCC 2006 + 棕櫚圓柱（V = π/4 × D² × H × 0.50；form factor 0.5；WD 0.30 × BCEF 1.05）' },
+  // v2.10.7：紅樹林 fallback（用闊葉式 V，BEF 上修反映高密度）
+  // V = 闊葉羅紹麟 馮豐隆 1986
+  // bef = 0.87（闊葉 0.58 × WD 比率 0.75/0.50；IPCC mangrove WD 0.75）
+  '其他紅樹林': { sci: 'Other mangrove', category: 'mangrove',
+    calcV: (D, H) => ev.power({ a: 8.62e-05, b: 1.8742, c: 0.8671 }, D, H),
+    bef: 0.87, cf: 0.47, source: '其他闊式 V (羅紹麟 馮豐隆 1986)；BEF 0.87 反映紅樹林高密度（IPCC mangrove WD 0.75）' },
+};
+
+// v2.10.7：treeType → fallback species key 對照
+//   tree form 從 species-picker 取得 picker.getMatched().treeType 傳入 calcTreeMetrics
+//   匹配不到 SP/ALIAS 時用此 map 路由（取代 v2.10.6 之前的單一 sci-regex 二分）
+const CATEGORY_FALLBACK = {
+  conifer:   '其它針',
+  broadleaf: '其他闊',
+  bamboo:    '其他竹',
+  palm:      '其他棕櫚',
+  mangrove:  '其他紅樹林',
 };
 
 // ===== Aliases (中文別名 → primary species key) =====
@@ -166,26 +196,35 @@ const ALIAS = {
 
 const CONIFER_GENUS_RE = /Pinus|Cunninghamia|Cryptomeria|Cedrus|Picea|Abies|Tsuga|Taiwania|Chamaecyparis|Calocedrus|Keteleeria|Amentotaxus|Taxus|Podocarpus|Juniperus/;
 
-// 從中文名 / 學名 解析到對應 species 條目；找不到 → 其它針 / 其他闊 fallback
-export function resolveSpecies(speciesZh, speciesSci) {
+// 從中文名 / 學名 / 樹型 解析到對應 species 條目
+// v2.10.7：優先序 SP 完全 → ALIAS → CATEGORY_FALLBACK[treeType] → CONIFER_GENUS_RE (legacy) → 其他闊
+//   treeType 由 caller 從 species-picker.getMatched().treeType 傳入（Firestore 224 種有此欄位）
+//   自由輸入新物種無 treeType 時，仍走 sci-regex legacy path 保證不破
+export function resolveSpecies(speciesZh, speciesSci, treeType) {
   if (speciesZh) {
     if (SP[speciesZh]) return { key: speciesZh, sp: SP[speciesZh], matched: 'exact' };
     const aliasKey = ALIAS[speciesZh];
     if (aliasKey && SP[aliasKey]) return { key: aliasKey, sp: SP[aliasKey], matched: 'alias' };
   }
-  // Fallback：依拉丁名屬判斷針/闊
+  // v2.10.7：treeType 優先（picker 傳入）→ 落 5 大樹型 fallback
+  if (treeType && CATEGORY_FALLBACK[treeType] && SP[CATEGORY_FALLBACK[treeType]]) {
+    const key = CATEGORY_FALLBACK[treeType];
+    return { key, sp: SP[key], matched: 'fallback-treeType' };
+  }
+  // 沒 treeType → 用 sci 屬名 regex 推測（legacy；自由輸入物種）
   const isConifer = speciesSci && CONIFER_GENUS_RE.test(speciesSci);
   const fbKey = isConifer ? '其它針' : '其他闊';
-  return { key: fbKey, sp: SP[fbKey], matched: 'fallback' };
+  return { key: fbKey, sp: SP[fbKey], matched: 'fallback-sci' };
 }
 
 // 主計算函式：取代 v1.6.20 自編的 calcTreeMetrics
 // 注意：skill 的 V × BEF 直出 tonnes（biomass），這裡轉成 kg（× 1000）對齊既有 schema
-export function calcTreeMetrics({ dbh_cm, height_m, speciesZh, speciesSci }) {
+// v2.10.7：加 treeType 參數（optional），讓 picker 選的物種能命中 5 大樹型 fallback
+export function calcTreeMetrics({ dbh_cm, height_m, speciesZh, speciesSci, treeType }) {
   if (!dbh_cm || !height_m) {
     return { basalArea_m2: 0, volume_m3: 0, biomass_kg: 0, carbon_kg: 0, co2_kg: 0 };
   }
-  const { sp } = resolveSpecies(speciesZh, speciesSci);
+  const { sp } = resolveSpecies(speciesZh, speciesSci, treeType);
   const D = dbh_cm, H = height_m;
   const basalArea_m2 = Math.PI * Math.pow(D / 200, 2);
   let volume_m3 = sp.calcV(D, H);
@@ -208,9 +247,14 @@ export function calcTreeMetrics({ dbh_cm, height_m, speciesZh, speciesSci }) {
   };
 }
 
-export function speciesParamsLabel(speciesZh, speciesSci) {
-  const { key, sp, matched } = resolveSpecies(speciesZh, speciesSci);
-  const tag = matched === 'exact' ? `[${key}]` : matched === 'alias' ? `[${key}←${speciesZh}]` : `[fallback ${key}]`;
+// v2.10.7：加 treeType param + 區分 fallback-treeType / fallback-sci 標籤（reviewer 透明度）
+export function speciesParamsLabel(speciesZh, speciesSci, treeType) {
+  const { key, sp, matched } = resolveSpecies(speciesZh, speciesSci, treeType);
+  const tag = matched === 'exact'              ? `[${key}]`
+            : matched === 'alias'              ? `[${key}←${speciesZh}]`
+            : matched === 'fallback-treeType'  ? `[fallback ${key} (treeType=${treeType})]`
+            : matched === 'fallback-sci'       ? `[fallback ${key} (sci-regex)]`
+            : `[fallback ${key}]`;
   return `${tag} BEF ${sp.bef} / CF ${sp.cf} ｜ ${sp.source}`;
 }
 

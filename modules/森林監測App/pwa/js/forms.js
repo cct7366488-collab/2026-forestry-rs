@@ -1,21 +1,21 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21006';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21007';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21006';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21007';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21006';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21007';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21006';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21007';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21006';
+import { createSpeciesPicker } from './species-picker.js?v=21007';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21006';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21007';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -2424,14 +2424,17 @@ export async function openTreeForm(project, plot, existing = null) {
     const dbh = parseFloat(f.querySelector('[name=dbh_cm]').value);
     const h = parseFloat(f.querySelector('[name=height_m]').value);
     const zh = speciesInput.value;
-    const sci = SPECIES.find(x => x.zh === zh)?.sci || '';
+    // v2.10.7：優先 picker.getMatched()（Firestore 224 種有 sci / treeType / family）
+    //   fallback 靜態 SPECIES.find（自由輸入新物種仍可走 sci-regex）
+    const matched = speciesPicker.getMatched();
+    const sci = matched?.sci ?? SPECIES.find(x => x.zh === zh)?.sci ?? '';
+    const treeType = matched?.treeType ?? null;
     if (!dbh || !h) { calcOut.textContent = '輸入 DBH 與樹高即時試算'; return; }
-    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh: zh, speciesSci: sci });
-    // v1.6.20：顯示樹種別參數來源 + 完整碳/CO2 計算
+    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh: zh, speciesSci: sci, treeType });
     calcOut.innerHTML =
       `<div>斷面積 <b>${m.basalArea_m2}</b> m² ｜ 幹材積 <b>${m.volume_m3}</b> m³</div>` +
       `<div>全株生物量 <b>${m.biomass_kg}</b> kg ｜ 碳蓄積 <b>${m.carbon_kg}</b> kg ｜ CO₂ 當量 <b>${m.co2_kg}</b> kg</div>` +
-      `<div class="text-[10px] text-stone-500 mt-1">${speciesParamsLabel(zh, sci)}</div>`;
+      `<div class="text-[10px] text-stone-500 mt-1">${speciesParamsLabel(zh, sci, treeType)}</div>`;
   }
 
   // 病蟲害 checkbox（v1.6.9：inline style 寫死在 HTML，不依賴 CSS file，避開任何快取問題）
@@ -2584,9 +2587,14 @@ export async function openTreeForm(project, plot, existing = null) {
     const fd = new FormData(f);
     const speciesZh = fd.get('speciesZh').trim();
     const sp = SPECIES.find(x => x.zh === speciesZh) || {};
+    // v2.10.7：優先 picker.getMatched()（Firestore 224 種有 sci / treeType / conservationGrade）
+    const matched = speciesPicker.getMatched();
+    const speciesSci = matched?.sci ?? sp.sci ?? null;
+    const speciesCons = matched?.conservationGrade ?? sp.cons ?? null;
+    const treeType = matched?.treeType ?? null;
     const dbh = parseFloat(fd.get('dbh_cm'));
     const h = parseFloat(fd.get('height_m'));
-    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh, speciesSci: sp.sci });
+    const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh, speciesSci, treeType });
     const treeNumVal = parseInt(fd.get('treeNum'), 10);
     // v2.5：立木座標換算（local X/Y → absolute TWD97 + WGS84 geopoint）
     const localX = parseFloat(fd.get('localX_m'));
@@ -2609,8 +2617,9 @@ export async function openTreeForm(project, plot, existing = null) {
       // v2.3.3：完整字串編號（DEMO-010-001 格式），方便顯示與匯出
       treeCode: `${plot.code}-${String(treeNumVal).padStart(3, '0')}`,
       speciesZh,
-      speciesSci: sp.sci || null,
-      conservationGrade: sp.cons || null,
+      speciesSci,                       // v2.10.7：優先 picker（含 Firestore 新 species sci）
+      conservationGrade: speciesCons,
+      treeType,                         // v2.10.7：存樹型供將來重算 / 統計分析
       dbh_cm: dbh,
       height_m: h,
       branchHeight_m: parseFloat(fd.get('branchHeight_m')) || null,

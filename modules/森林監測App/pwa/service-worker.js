@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.10.6';  // v2.10.6：species-picker 加海拔分層 band pills（台灣氣候帶：全部 / 低 <500m / 中 500-1500m / 高 >1500m）。pill 點選時切換並 localStorage 持久化（key=speciesPicker.elevBand）。filter 邏輯用「物種海拔範圍與 band 範圍 overlap」（端點相觸算 overlap；無 elevationMin/Max 物種視為「分布不明」不排除）。pill bar sticky 於 dropdown 頂端不論有無資料都顯示。setBand/getBand API 預留給將來 DEM auto-detect（Phase 1 Step 3）介接。空 query 顯示「該 band top-30」+ header 顯示「本 band X 種」
+const CACHE = 'forest-monitor-v2.10.7';  // v2.10.7：Phase 1 Step 5 — species-equations.js 加 5 大樹型 fallback（其它針/其他闊既有 + 新增 其他竹/其他棕櫚/其他紅樹林）覆蓋 167 個無 species-specific 公式的物種。CATEGORY_FALLBACK 對照 treeType→fallback key。resolveSpecies(zh,sci,treeType) 優先序：SP 完全→ALIAS→treeType fallback→sci-regex legacy→其他闊。calcTreeMetrics + speciesParamsLabel 加 treeType param。tree form 兩處 caller (updateCalc + submit) 從 picker.getMatched().treeType 取值並傳入；submit 也存 treeType 到 tree doc（將來重算/統計）。speciesParamsLabel 區分 fallback-treeType / fallback-sci 標籤（reviewer 透明度）
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、
