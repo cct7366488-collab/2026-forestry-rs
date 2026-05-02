@@ -2,10 +2,10 @@
 
 import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=29010';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=29020';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=29010';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=29020';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -262,8 +262,14 @@ export function renderPlotOverview(plot, trees) {
     ['立木密度', `${stemsPerHa.toLocaleString()} 株/ha`],
     ['總斷面積', `${totalBA.toFixed(2)} m² (${ba_m2_ha.toFixed(1)}/ha)`],
     ['總材積', `${totalV.toFixed(2)} m³`],
-    ['總碳蓄積', totalC < 1000 ? `${totalC.toFixed(0)} kg-C` : `${(totalC/1000).toFixed(2)} t-C`],
-    ['CO₂ 當量', totalCO2 < 1000 ? `${totalCO2.toFixed(0)} kg` : `${(totalCO2/1000).toFixed(2)} t`],
+    // v2.9.2 #11：碳 / CO₂ 同一刻度顯示（避免 273 kg-C 與 1.00 t-CO₂ 並列）
+    //   threshold 基準：max(totalC, totalCO2)；任一達 1000 kg 就一起切到 t
+    ...(() => {
+      const useTonne = Math.max(totalC, totalCO2) >= 1000;
+      const carbonStr = useTonne ? `${(totalC / 1000).toFixed(2)} t-C` : `${totalC.toFixed(0)} kg-C`;
+      const co2Str = useTonne ? `${(totalCO2 / 1000).toFixed(2)} t-CO₂` : `${totalCO2.toFixed(0)} kg-CO₂`;
+      return [['總碳蓄積', carbonStr], ['CO₂ 當量', co2Str]];
+    })(),
     ['平均 DBH', `${meanDbh.toFixed(1)} cm`],
     ['平均樹高', `${meanH.toFixed(1)} m`],
   ];
@@ -434,7 +440,11 @@ export function renderQaqcErrorHistograms(realPlots, sampledTrees = [], cfg = DE
           subtitle: c.threshold != null ? { display: true, text: `閾值 ${c.threshold}${c.unit}（過閾值 = 紅）`, font: { size: 10 }, color: '#dc2626', position: 'top', align: 'end' } : { display: false }
         },
         scales: {
-          x: { title: { display: true, text: `誤差 (${c.unit.trim()})` } },
+          // v2.9.2 #12：bin 多時 label 擠在一起 → 旋轉 + autoSkip + 限上限
+          x: {
+            title: { display: true, text: `誤差 (${c.unit.trim()})` },
+            ticks: { autoSkip: true, maxTicksLimit: 8, maxRotation: 45, minRotation: 45, font: { size: 10 } }
+          },
           y: { title: { display: true, text: '樣本數' }, ticks: { precision: 0 } }
         }
       }

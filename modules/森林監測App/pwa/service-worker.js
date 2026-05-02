@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.9.1';  // v2.9.1：dashboard 後續升級 — (B) 樹種組成矩陣（plot × species 大表，cell=株數/BA/材積/碳，4 dropdown 切換 metric + topN；尾欄合「其他」、最後 2 列為平均/總計；exportXlsx 加 4 sheet「組成矩陣-株數/斷面積/材積/碳蓄積」）；(E) 空間密度 heat map（map 加 layer toggle radio：QA 狀態 / 立木密度 株/ha / 斷面積密度 m²/ha；後兩者用 5-quintile 色階 + 圖例；popup 補密度資訊）
+const CACHE = 'forest-monitor-v2.9.2';  // v2.9.2：polish round — (#5) v2.6 黃 banner addEventListener 改 banner.querySelector + 防 detached；(#6) admin 退回 verified 後 rect-conversion banner 補 re-render 去 stale 紅字；(#7) 加 window.__debug 暴露 state/db/auth/storage 給 DevTools；(#8) 樣區形狀 UI 標籤改完整對照（rectangle 不再顯示「方形」）；(#11) per-plot 碳/CO₂ 同刻度顯示（max(C,CO₂) ≥ 1000 kg → 都切 t）；(#12) QAQC 誤差 histogram x 軸 label 旋轉 45° + autoSkip + maxTicksLimit=8 解擠
 const SHELL = [
   './',
   './index.html',
