@@ -1,25 +1,18 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.10.1';  // v2.10.1：hotfix — preview UI 上傳 species-final.csv 跳「Failed to execute 'appendChild' on 'Node'」。原因：el() helper 只 stringify string children，遇 number（如 r.rank=1）直接 appendChild(1) → DOM throw。修：el() 同時支援 number / boolean → textNode（向下相容；之前 caller 都傳 string，沒人靠這個 throw）
+const CACHE = 'forest-monitor-v2.10.3';  // v2.10.3：v2.10.2 還沒解（live inspect 發現 perfLoadedUrls 仍有 v=21000 / no-qs / v=21002 三種 app.js 同時存在）— root cause 二段式：(1) ESM URL identity（v2.10.2 已修 imports 加版號）；(2) SW SHELL 預快取 ./js/*.js（無 qs），讓任何「歷史殘留」的 no-qs import 命中舊內容並 cascade 載入舊版整個鏈。本版把 SHELL 拿掉所有 .js，只保留 ./ + index.html + style.css + manifest + firebase-config.js。.js 改全靠 fetch handler 動態快取（按 ?v= URL 區分），徹底消除 module duplication。bump 全部 ?v=21002→?v=21003
+// v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
+//   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
+//   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、
+//   initializeFirestore() 第二次 throw、preview UI 的 el() 跑到舊版。
+//   改成 .js 全靠 fetch handler 動態快取（cache-first by URL）+ index.html 帶 ?v=NNNNN cache bust。
+//   離線冷啟動：第一次 online 訪問會 cache 所有用到的 ?v= JS，之後 offline 仍可用。
 const SHELL = [
   './',
   './index.html',
   './style.css',
   './manifest.json',
-  './js/app.js',
-  './js/forms.js',
-  './js/analytics.js',
-  './js/species-equations.js',
-  './js/species-dict.js',     // v2.0：物種字典（樹種/動物/草本/入侵）
-  './js/code-tables.js',
-  './js/project-status.js',   // v2.3：階段 2 狀態機
-  './js/import-wizard.js',    // v2.5：Excel 匯入 wizard（雛形 / DRY-RUN）
-  './js/distribution.js',     // v2.6.2：立木分布散布圖（Canvas）
-  './js/species-admin.js',    // v2.7.10：admin 樹種字典管理 UI
-  './js/plot-geometry.js',    // v2.7.15：樣區幾何 + 坡度修正 utility
-  './js/plot-qaqc.js',        // v2.7.17：reviewer QAQC（抽樣 / 誤差 / 閾值）utility
-  './js/plot-polygon.js',     // v2.8.0：irregular plot 多邊形 utility（Shoelace / point-in-polygon / GeoJSON）
   './firebase-config.js'
 ];
 
