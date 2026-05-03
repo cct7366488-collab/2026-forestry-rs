@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.10.9';  // v2.10.9：Phase 1 Step 3（完整收尾）— DEM 海拔自動偵測。新檔 dem-elevation.js 用 open-meteo 免費 API（無 key、~90m SRTM 解析度）：getElevation(lat,lng) async fetch 含 10s timeout + module Map 快取（4 位小數座標 key ~10m 精度）+ Taiwan sanity check (-50~4500m) + 失敗 cache null 避重打。elevationToBand 與 picker ELEV_BANDS 切分一致。species-picker setBand 加 {auto:true} 旗標 + _userTouched 紀錄 user 是否手動點過 pill（auto 不覆蓋手動選擇、auto 不寫 localStorage 避污染全域偏好）。openTreeForm 流程：plot.elevation_m 已存 → initialBand 直接傳 picker；不存且有 GPS → 背景 fetch + toast 「📍 DEM 偵測 plot 海拔 1234m → 中海拔」+ setBand({auto:true}) + writeback Firestore（PI/admin 才寫 elevation_m / elevationSource='open-meteo' / elevationFetchedAt）下次開省 fetch
+const CACHE = 'forest-monitor-v2.11.0';  // v2.11.0：Phase 2 啟動 — AI 樹種辨識（線上 Pl@ntNet API）。兩個新檔：(1) ai-species.js — Pl@ntNet API wrapper（POST /v2/identify/all + multipart images + organs；30s timeout；錯誤碼 401/403/404/429 友善訊息）、resizeImage(blob, 800px, q=0.85) 用 canvas 壓縮、matchToLocalSpecies(aiResult, allSpecies) 用 sci 完全/去 var. 對應 Firestore 224 種、API key localStorage 保存（forestmrv.plantnet.apiKey）。(2) ai-identify-modal.js — 首次無 key 顯示「請去 my.plantnet.org 註冊 free key」設定流程；主流程：file input (capture=environment) + image preview + 器官選擇 (auto/leaf/bark/flower/fruit/habit) + 「🔍 辨識」按鈕 → top-3 結果（含中文 zh + 學名 sci + 信心 % 顏色 + ✓字典中/⚠字典外 tag + ⚠保育級 tag）→ 點擊任一結果 → onPick callback 套用到 picker.setValue + dispatch input event + 自動關閉 modal。tree form openTreeForm 加「📸 AI 辨識」綠色按鈕在「樹種」label 旁邊
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、

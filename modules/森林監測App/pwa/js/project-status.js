@@ -9,7 +9,7 @@
 //   reviewer 完成審查（v2.7）       → review → verified（保留 Lock，autoLockReason='reviewer-approved'）
 //   admin 結案                       → verified → archived（封存按鈕，已實作於 forms.archiveProject）
 
-import { fb, state } from './app.js?v=21009';
+import { fb, state } from './app.js?v=21100';
 
 export const STATUS = {
   CREATED:  'created',
