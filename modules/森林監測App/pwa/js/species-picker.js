@@ -12,7 +12,7 @@
 //   form.appendChild(picker.root);
 //   picker.input.addEventListener('input', () => { ... picker.getMatched() ... });
 
-import { fb, el } from './app.js?v=21008';
+import { fb, el } from './app.js?v=21009';
 import { TREES } from './species-dict.js?v=2000';
 
 // ===== Module-level cache（一次 fetch / session）=====
@@ -139,6 +139,8 @@ export function createSpeciesPicker({
   let _open = false;
   // v2.10.6：海拔 band 狀態（caller 傳入 > localStorage > 'all'）
   let _band = 'all';
+  // v2.10.9：user 是否手動點過 pill — 若已手動，DEM auto-set 不覆蓋
+  let _userTouched = false;
   if (elevationBand && BAND_KEYS.includes(elevationBand)) {
     _band = elevationBand;
   } else {
@@ -191,6 +193,7 @@ export function createSpeciesPicker({
       pill.addEventListener('mousedown', (e) => {
         e.preventDefault();    // 不讓 input blur
         _band = key;
+        _userTouched = true;   // v2.10.9：標記 user 動過，後續 DEM auto-set 不覆蓋
         try { localStorage.setItem(LS_BAND_KEY, _band); } catch {}
         refresh();
       });
@@ -317,12 +320,19 @@ export function createSpeciesPicker({
     setValue: (v) => { input.value = v || ''; },
     getMatched,                       // 回傳 species object 或 null（自由輸入時）
     cache: () => _all,                // 整份 cache（caller 想批次用）
-    // v2.10.6：海拔 band 控制（將來 DEM auto-detect 接這個）
+    // v2.10.6：海拔 band 控制（v2.10.9 DEM auto-detect 透過 setBand({auto:true}) 接入）
     getBand: () => _band,
-    setBand: (b) => {
+    isBandUserTouched: () => _userTouched,
+    setBand: (b, opts = {}) => {
       if (!BAND_KEYS.includes(b)) return;
+      // v2.10.9：auto 模式下若 user 已手動選過 band，不覆蓋（尊重 user 意圖）
+      if (opts.auto && _userTouched) return;
       _band = b;
-      try { localStorage.setItem(LS_BAND_KEY, _band); } catch {}
+      // auto 模式不寫 localStorage（避免 DEM 結果污染 user 全域偏好）
+      if (!opts.auto) {
+        _userTouched = true;
+        try { localStorage.setItem(LS_BAND_KEY, _band); } catch {}
+      }
       if (_open) refresh();
     },
   };

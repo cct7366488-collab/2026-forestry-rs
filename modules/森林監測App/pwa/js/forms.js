@@ -1,21 +1,23 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21008';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21009';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21008';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21009';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21008';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21009';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21008';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21009';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21008';
+import { createSpeciesPicker } from './species-picker.js?v=21009';
+// v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21009';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21008';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21009';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -2402,11 +2404,40 @@ export async function openTreeForm(project, plot, existing = null) {
 
   // v2.10.5：樹種搜尋（取代 datalist；資料源 = Firestore 224 種 + fallback 靜態 TREES）
   //   保留變數名 speciesInput 以最小化下方計算邏輯改動
+  // v2.10.9：若 plot.elevation_m 已有 → 初始 band；不在 → fire & forget DEM lookup
+  const initialBand = Number.isFinite(plot.elevation_m) ? elevationToBand(plot.elevation_m) : null;
   const speciesPicker = createSpeciesPicker({
     name: 'speciesZh', required: true,
     value: existing?.speciesZh || '',
+    elevationBand: initialBand,
   });
   const speciesInput = speciesPicker.input;
+
+  // v2.10.9：背景 DEM auto-detect（plot 沒 elevation_m 才 fetch）
+  if (!Number.isFinite(plot.elevation_m) && plot.location) {
+    const lat = plot.location.latitude ?? plot.location._lat;
+    const lng = plot.location.longitude ?? plot.location._long;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      getElevation(lat, lng).then(elev => {
+        if (elev == null) return;
+        const band = elevationToBand(elev);
+        // setBand({auto:true}) — 若 user 已手動點過 pill，不覆蓋
+        speciesPicker.setBand(band, { auto: true });
+        const willOverride = !speciesPicker.isBandUserTouched();
+        toast(`📍 DEM 偵測 plot 海拔 ${elev.toFixed(0)}m → ${bandLabel(band)}${willOverride ? '（已自動切換）' : '（已尊重你手動選擇）'}`, 4000);
+        // writeback Firestore（PI/admin 才寫）
+        if (isPi() || isSystemAdmin()) {
+          const ref = fb.doc(fb.db, 'projects', project.id, 'plots', plot.id);
+          fb.updateDoc(ref, {
+            elevation_m: +elev.toFixed(1),
+            elevationSource: 'open-meteo',
+            elevationFetchedAt: fb.serverTimestamp(),
+          }).catch(e => console.warn('[plot.elevation_m writeback] failed', e));
+        }
+      });
+    }
+  }
+
   const consWarn = el('div', { class: 'text-xs mt-1' });
   function updateConsWarn() {
     // 優先從 picker cache 找（含 Firestore 新 226 種），fallback 靜態 SPECIES
