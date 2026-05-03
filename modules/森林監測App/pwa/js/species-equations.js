@@ -260,3 +260,39 @@ export function speciesParamsLabel(speciesZh, speciesSci, treeType) {
 
 // 給 forms.js / app.js 用的方便 export
 export const SPECIES_DB = SP;
+
+// v2.10.8（backlog #13）：公式來源徽章 — 給 dashboard / 立木表 reviewer 透明度用
+//   level 對應 Step 5 的 resolveSpecies matched 結果：
+//     species-specific（🟢 高信心，學者實證公式）
+//     genus-default   （🟡 中信心，同屬借用公式）
+//     type-default-ipcc（🟠 低信心，5 大樹型 IPCC fallback）
+//     legacy-sci      （⚪ 最低信心，自由輸入用 sci-regex 推測）
+export function getEquationBadge(speciesZh, speciesSci, treeType) {
+  const { key, sp, matched } = resolveSpecies(speciesZh, speciesSci, treeType);
+  let level, badge;
+  if (matched === 'exact') {
+    // SP 直接命中 — 但 「其它針 / 其他闊 / 其他竹 / 其他棕櫚 / 其他紅樹林」5 個 fallback key
+    // 也可能是 caller 直接傳入「其他闊」當 zh，視為 type-default
+    if (CATEGORY_FALLBACK_KEYS.has(key)) {
+      level = 'type-default-ipcc'; badge = '🟠';
+    } else {
+      level = 'species-specific'; badge = '🟢';
+    }
+  } else if (matched === 'alias') {
+    // alias 可能解析到 species-specific（紅檜←扁柏）或 fallback（青剛櫟←櫧櫟類）
+    if (CATEGORY_FALLBACK_KEYS.has(key)) {
+      level = 'type-default-ipcc'; badge = '🟠';
+    } else {
+      level = 'genus-default'; badge = '🟡';
+    }
+  } else if (matched === 'fallback-treeType') {
+    level = 'type-default-ipcc'; badge = '🟠';
+  } else {
+    // fallback-sci legacy（自由輸入物種無 treeType）
+    level = 'legacy-sci'; badge = '⚪';
+  }
+  return { level, badge, key, source: sp.source, bef: sp.bef, cf: sp.cf };
+}
+
+// 5 大 fallback key 集合（讓 getEquationBadge 區分 species-specific vs type-default）
+const CATEGORY_FALLBACK_KEYS = new Set(Object.values(CATEGORY_FALLBACK));

@@ -1,11 +1,13 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js?v=21007';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js?v=21008';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21007';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21008';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21007';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21008';
+// v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
+import { getEquationBadge } from './species-equations.js?v=21008';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -279,6 +281,36 @@ export function renderPlotOverview(plot, trees) {
       el('div', { class: 'text-base font-bold' }, String(v))
     )
   ));
+
+  // v2.10.8（backlog #13）：公式來源覆蓋率 — reviewer 透明度
+  if (totalTrees > 0) {
+    const eqDist = { 'species-specific': 0, 'genus-default': 0, 'type-default-ipcc': 0, 'legacy-sci': 0 };
+    trees.forEach(t => {
+      const info = getEquationBadge(t.speciesZh, t.speciesSci, t.treeType);
+      if (eqDist[info.level] != null) eqDist[info.level]++;
+    });
+    const pct = (n) => Math.round(100 * n / totalTrees);
+    const specPct = pct(eqDist['species-specific']);
+    const goodPct = specPct + pct(eqDist['genus-default']);
+    let conf;
+    if (specPct > 70) conf = { label: '高', cls: 'text-green-700', hint: '>70% species-specific' };
+    else if (goodPct > 40) conf = { label: '中', cls: 'text-amber-700', hint: '>40% species-specific + genus-default' };
+    else conf = { label: '低', cls: 'text-red-700', hint: '主要走 IPCC 通用 fallback' };
+    const distRow = el('div', { class: 'flex flex-wrap gap-x-3 gap-y-0.5 text-xs leading-tight mt-0.5' });
+    if (eqDist['species-specific'])   distRow.appendChild(el('span', { class: 'text-green-700' }, `🟢 ${eqDist['species-specific']} (${specPct}%)`));
+    if (eqDist['genus-default'])      distRow.appendChild(el('span', { class: 'text-yellow-700' }, `🟡 ${eqDist['genus-default']} (${pct(eqDist['genus-default'])}%)`));
+    if (eqDist['type-default-ipcc'])  distRow.appendChild(el('span', { class: 'text-orange-700' }, `🟠 ${eqDist['type-default-ipcc']} (${pct(eqDist['type-default-ipcc'])}%)`));
+    if (eqDist['legacy-sci'])         distRow.appendChild(el('span', { class: 'text-stone-600' }, `⚪ ${eqDist['legacy-sci']} (${pct(eqDist['legacy-sci'])}%)`));
+    const card = el('div', { class: 'bg-white rounded-lg shadow p-2 col-span-2 sm:col-span-3 lg:col-span-4' },
+      el('div', { class: 'flex items-baseline justify-between' },
+        el('div', { class: 'text-[10px] text-stone-500' }, '公式來源覆蓋率（reviewer 透明度）'),
+        el('span', { class: `text-xs font-medium ${conf.cls}`, title: conf.hint }, `信心：${conf.label}`)
+      ),
+      distRow,
+      el('div', { class: 'text-[10px] text-stone-500 mt-0.5' }, '🟢 species-specific（學者實證）｜ 🟡 屬群代理 ｜ 🟠 IPCC 5 樹型 fallback ｜ ⚪ 自由輸入物種 sci-regex 推測')
+    );
+    kpisBox.appendChild(card);
+  }
 
   // ----- DBH 直方圖（5 cm 一級）-----
   killChart('plot-dbh');

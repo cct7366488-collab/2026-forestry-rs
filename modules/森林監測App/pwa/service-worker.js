@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.10.7';  // v2.10.7：Phase 1 Step 5 — species-equations.js 加 5 大樹型 fallback（其它針/其他闊既有 + 新增 其他竹/其他棕櫚/其他紅樹林）覆蓋 167 個無 species-specific 公式的物種。CATEGORY_FALLBACK 對照 treeType→fallback key。resolveSpecies(zh,sci,treeType) 優先序：SP 完全→ALIAS→treeType fallback→sci-regex legacy→其他闊。calcTreeMetrics + speciesParamsLabel 加 treeType param。tree form 兩處 caller (updateCalc + submit) 從 picker.getMatched().treeType 取值並傳入；submit 也存 treeType 到 tree doc（將來重算/統計）。speciesParamsLabel 區分 fallback-treeType / fallback-sci 標籤（reviewer 透明度）
+const CACHE = 'forest-monitor-v2.10.8';  // v2.10.8：Phase 1 Step 4（backlog #13）— per-plot dashboard 加公式來源徽章 reviewer 透明度。新 export getEquationBadge(zh,sci,treeType) 回 {level, badge, key, source, bef, cf}，4 級：🟢 species-specific（學者實證）/ 🟡 genus-default（屬群代理 alias 解析）/ 🟠 type-default-ipcc（5 大樹型 fallback）/ ⚪ legacy-sci（自由輸入 sci-regex）。立木 row（app.js）speciesCell 前綴加徽章 + hover title 顯示完整 source；per-plot dashboard（analytics.js renderPlotOverview）加「公式來源覆蓋率」KPI card（橫跨 col-span-2~4），列出各級數量+%、reviewer 信心評估（>70% 🟢=高 / >40% 🟢🟡=中 / 其餘=低）
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、
