@@ -185,5 +185,14 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+
+    // ===== App Settings（v2.11.4）=====
+    // 全域共用設定（如 AI 辨識的 PlantNet API key + CORS Proxy URL）
+    //   read：所有登入者（執行 AI 辨識需讀取）
+    //   write：僅 systemAdmin（避免 user 亂改全域 key）
+    match /app_settings/{docId} {
+      allow read:  if isSignedIn();
+      allow write: if isSystemAdmin();
+    }
   }
 }

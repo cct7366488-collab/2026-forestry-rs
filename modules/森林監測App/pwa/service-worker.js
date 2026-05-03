@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.11.2';  // v2.11.2：hotfix — v2.11.1 揭露實際 PlantNet 回應後發現 root cause 不是 key 而是 CORS：PlantNet 拒絕 browser 直連（"Origin not allowed" 即使 email 已驗證 / key active），須 server-side proxy 轉送。架構升級：(1) ai-species.js 加 getProxyUrl/setProxyUrl/clearProxyUrl localStorage（key=forestmrv.plantnet.proxyUrl），identifySpecies base 改 `getProxyUrl() || PLANTNET_DIRECT`；setApiKey 加 aggressive sanitize 移除所有空白與 zero-width 字元（防 PlantNet UI 複製帶到不可見字元）。(2) ai-identify-modal.js setup 流程整合 API key + Proxy URL 兩個欄位（須兩個都填才能進主流程），footer 顯示 key 長度 + proxy URL + 兩個獨立清除按鈕。建議用 Cloudflare Workers 自架 proxy（5 分鐘、free、無 CC）— Worker code 在 obsidian / commit msg
+const CACHE = 'forest-monitor-v2.11.5';  // v2.11.5：Phase 2 polish 第三棒 — Pl@ntNet + LLM 混合架構（抄參考系統的 LLM rich metadata，但用 PlantNet 當主辨識）。ai-species 加 enrichWithLLM(imageBlob, candidates) → 用 Anthropic Claude Messages API（claude-sonnet-4-5、anthropic-dangerous-direct-browser-access 直連 browser）+ blobToBase64 + system prompt 扮演「臺灣植物學家」要求純 JSON 回 imageQuality + per-candidate {characteristics/habitat/isNative/notes}。LLM key 三組 API getLlmKey/setLlmKey/clearLlmKey + getEffectiveLlmKey async（同 PlantNet 優先序）。setGlobalAiConfig 加 llmApiKey 欄位。ai-identify-modal admin setup 加「Anthropic Claude API key（選填）」欄位 + 取得方式 hint。主流程 PlantNet 結果 render 完背景 fire enrichWithLLM → 顯示 imageQuality 警告框（good 綠 / poor 黃 / unknown 灰）+ 每 row 下方 detail box（特徵/棲地/原生 tag/備註）。LLM key 沒設則跳過 enrich（pure PlantNet 行為）。每次 enrich 約 $0.008 成本
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、

@@ -14,12 +14,85 @@
 //   const top = await identifySpecies(small, { organs: ['leaf'] });
 //   const localSp = matchToLocalSpecies(top[0], allSpecies);
 
+// v2.11.4：API key + Proxy URL 從 user-only localStorage 升級為「Firestore 全域 admin > localStorage user」優先序
+import { fb, isSystemAdmin, state } from './app.js?v=21105';
+
 const LS_API_KEY = 'forestmrv.plantnet.apiKey';
 const LS_PROXY_URL = 'forestmrv.plantnet.proxyUrl';   // v2.11.2：CORS proxy URL（如 Cloudflare Worker）
+const LS_LLM_KEY = 'forestmrv.llm.apiKey';            // v2.11.5：LLM (Anthropic Claude) key
 const PLANTNET_DIRECT = 'https://my-api.plantnet.org';
+const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-5';
+const GLOBAL_AI_DOC = 'app_settings/aiConfig';        // v2.11.4：Firestore 全域 admin 設定路徑
 
+// v2.11.4：模組層 cache 全域設定（一次 fetch / session）
+let _globalCache = null;
+let _globalPromise = null;
+
+export async function loadGlobalAiConfig(force = false) {
+  if (!force && _globalCache !== null) return _globalCache;
+  if (!force && _globalPromise) return _globalPromise;
+  _globalPromise = (async () => {
+    try {
+      const ref = fb.doc(fb.db, 'app_settings', 'aiConfig');
+      const snap = await fb.getDoc(ref);
+      _globalCache = snap.exists() ? snap.data() : {};
+      return _globalCache;
+    } catch (e) {
+      console.warn('[ai-species] Firestore admin config 讀取失敗，fallback localStorage', e);
+      _globalCache = {};
+      return _globalCache;
+    } finally {
+      _globalPromise = null;
+    }
+  })();
+  return _globalPromise;
+}
+
+// v2.11.4：admin 寫入全域設定（Firestore rules 須限 systemAdmin write）
+// v2.11.5：加 llmApiKey 欄位
+export async function setGlobalAiConfig({ plantnetApiKey, plantnetProxyUrl, llmApiKey }) {
+  if (!isSystemAdmin()) throw new Error('僅 admin 可設定全域 AI config');
+  const payload = {};
+  if (plantnetApiKey != null) payload.plantnetApiKey = String(plantnetApiKey).replace(/[\s​-‍﻿]/g, '');
+  if (plantnetProxyUrl != null) payload.plantnetProxyUrl = String(plantnetProxyUrl).trim().replace(/\/+$/, '');
+  if (llmApiKey != null) payload.llmApiKey = String(llmApiKey).replace(/[\s​-‍﻿]/g, '');
+  payload.updatedAt = fb.serverTimestamp();
+  payload.updatedBy = state.user?.uid || null;
+  const ref = fb.doc(fb.db, 'app_settings', 'aiConfig');
+  await fb.setDoc(ref, payload, { merge: true });
+  _globalCache = { ..._globalCache, ...payload };  // local cache 同步
+}
+
+// v2.11.5：LLM (Anthropic Claude) key 管理
+export function getLlmKey() {
+  try { return localStorage.getItem(LS_LLM_KEY) || ''; } catch { return ''; }
+}
+export function setLlmKey(key) {
+  const clean = (key || '').replace(/[\s​-‍﻿]/g, '');
+  try { localStorage.setItem(LS_LLM_KEY, clean); } catch {}
+}
+export function clearLlmKey() {
+  try { localStorage.removeItem(LS_LLM_KEY); } catch {}
+}
+export async function getEffectiveLlmKey() {
+  const userKey = getLlmKey();
+  if (userKey) return userKey;
+  const global = await loadGlobalAiConfig();
+  return global?.llmApiKey || '';
+}
+
+// User 個人 key（localStorage）— override admin 全域用
 export function getApiKey() {
   try { return localStorage.getItem(LS_API_KEY) || ''; } catch { return ''; }
+}
+
+// v2.11.4：實際使用的 key — user override > admin 全域 > 空字串
+export async function getEffectiveApiKey() {
+  const userKey = getApiKey();
+  if (userKey) return userKey;
+  const global = await loadGlobalAiConfig();
+  return global?.plantnetApiKey || '';
 }
 
 export function setApiKey(key) {
@@ -39,6 +112,14 @@ export function getProxyUrl() {
   try { return localStorage.getItem(LS_PROXY_URL) || ''; } catch { return ''; }
 }
 
+// v2.11.4：實際使用的 proxy URL — user override > admin 全域
+export async function getEffectiveProxyUrl() {
+  const userProxy = getProxyUrl();
+  if (userProxy) return userProxy;
+  const global = await loadGlobalAiConfig();
+  return global?.plantnetProxyUrl || '';
+}
+
 export function setProxyUrl(url) {
   // 移除尾部斜線，避免雙斜線
   const clean = (url || '').trim().replace(/\/+$/, '');
@@ -55,7 +136,8 @@ export function clearProxyUrl() {
 // opts.organs: ['auto'] | ['leaf'] | ['flower'] 等（與 images 同陣列順序對應）
 // 回傳：[{ score, sci, family, genus, commonNames }, ...] 已 slice(0, 5)
 export async function identifySpecies(imageBlob, opts = {}) {
-  const apiKey = getApiKey();
+  // v2.11.4：effective key/proxy = user localStorage override > admin Firestore global > 空
+  const apiKey = await getEffectiveApiKey();
   if (!apiKey) throw new Error('NO_API_KEY');
   const project = opts.project || 'all';
   const organs = opts.organs || ['auto'];
@@ -64,8 +146,8 @@ export async function identifySpecies(imageBlob, opts = {}) {
   formData.append('images', imageBlob, 'tree.jpg');
   organs.forEach(o => formData.append('organs', o));
 
-  // v2.11.2：proxy URL 設則走 proxy（CF Worker），否則直連 PlantNet（會被 CORS 擋）
-  const base = getProxyUrl() || PLANTNET_DIRECT;
+  const proxy = await getEffectiveProxyUrl();
+  const base = proxy || PLANTNET_DIRECT;
   const url = `${base}/v2/identify/${project}?api-key=${encodeURIComponent(apiKey)}&include-related-images=false`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);   // 30s timeout
@@ -125,6 +207,105 @@ export function matchToLocalSpecies(aiResult, allSpecies) {
     return localBase === aiBase;
   });
   return m || null;
+}
+
+// v2.11.5：把 PlantNet top-N 候選 + 圖片送 LLM 補 characteristics/habitat/imageQuality
+//   抄參考系統設計：LLM 扮演「臺灣植物學家」回 JSON
+//   單次 call 涵蓋全部候選 + image quality（成本控制）
+//   用 Anthropic Claude Messages API + dangerous-direct-browser-access header
+export async function enrichWithLLM(imageBlob, candidates, opts = {}) {
+  const llmKey = await getEffectiveLlmKey();
+  if (!llmKey) throw new Error('NO_LLM_KEY');
+  if (!candidates || candidates.length === 0) return null;
+
+  const small = await resizeImage(imageBlob, 800);
+  const base64 = await blobToBase64(small);
+  const mediaType = small.type || 'image/jpeg';
+
+  const top3 = candidates.slice(0, 3);
+  const candidateList = top3.map((c, i) => `${i + 1}. ${c.sci}${c.commonNames?.[0] ? `（${c.commonNames[0]}）` : ''}`).join('\n');
+
+  const systemPrompt = `你是專業的臺灣植物學家，專精於臺灣原生樹種與常見造林樹種的辨識。使用者提供一張植物照片 + Pl@ntNet 已給的 ${top3.length} 個候選學名。
+
+請針對每個候選，依照片實際內容判斷其合理性，給：
+- characteristics: 此物種的辨識特徵（葉形、樹皮、樹形等，1-2 句中文）
+- habitat: 臺灣常見海拔/棲地（1 句中文，例如「中海拔 1500-2500m 雲霧帶」）
+- isNative: 是否為臺灣原生種（boolean）
+- notes: 任何補充提醒（與其他相似種如何區分、保育狀態等；無則空字串）
+
+並評估**照片本身的品質**：
+- imageQuality: "good"（清晰，可辨識）/ "poor"（過暗/模糊/角度差/非植物）/ "unknown"
+- imageQualityReason: 一句中文說明（例如「葉片清晰可見」/「光線過暗無法判斷葉緣」）
+
+回覆**純 JSON**，不加 \\\`\\\`\\\` 包裝：
+{"imageQuality":"good","imageQualityReason":"...","candidates":[{"sci":"...","characteristics":"...","habitat":"...","isNative":true,"notes":""},...]}`;
+
+  const userPrompt = `候選清單（依 Pl@ntNet 信心由高到低）：\n${candidateList}\n\n請評估照片並給出 JSON。`;
+
+  const body = {
+    model: opts.model || ANTHROPIC_DEFAULT_MODEL,
+    max_tokens: 1500,
+    system: systemPrompt,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+        { type: 'text', text: userPrompt }
+      ]
+    }]
+  };
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  let res;
+  try {
+    res = await fetch(ANTHROPIC_API, {
+      method: 'POST',
+      headers: {
+        'x-api-key': llmKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.text()).slice(0, 300); } catch {}
+    console.error(`[Anthropic ${res.status}]`, detail);
+    if (res.status === 401) throw new Error(`Anthropic API key 無效 (401)`);
+    if (res.status === 429) throw new Error(`Anthropic quota 超額 (429)`);
+    throw new Error(`Anthropic ${res.status}: ${detail}`);
+  }
+
+  const data = await res.json();
+  const text = data.content?.[0]?.text || '';
+  // Parse JSON（容錯：剝 ```json 包裝）
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error('LLM 回傳非 JSON：' + text.slice(0, 200));
+  }
+}
+
+async function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // 「data:image/jpeg;base64,XXX」→ 取 XXX
+      const result = String(reader.result || '');
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 // === 圖片壓縮（client-side，避免大檔上傳浪費頻寬+被 Pl@ntNet 拒絕）===

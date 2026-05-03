@@ -15,20 +15,18 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast } from './app.js?v=21102';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, resizeImage, matchToLocalSpecies } from './ai-species.js?v=21102';
-import { loadSpeciesCache } from './species-picker.js?v=21102';
+import { el, toast, isSystemAdmin } from './app.js?v=21105';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, enrichWithLLM, resizeImage, matchToLocalSpecies } from './ai-species.js?v=21105';
+import { loadSpeciesCache } from './species-picker.js?v=21105';
 
-export function openAiIdentifyModal({ onPick } = {}) {
+export async function openAiIdentifyModal({ onPick } = {}) {
   const wrap = el('div', { class: 'fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto' });
   const card = el('div', { class: 'bg-white rounded-lg shadow-lg p-4 max-w-md w-full my-8' });
   wrap.appendChild(card);
   document.body.appendChild(wrap);
   const close = () => wrap.remove();
-  // 點 backdrop 關閉
   wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
 
-  // 標題列
   card.appendChild(el('div', { class: 'flex justify-between items-center mb-3 pb-2 border-b' },
     el('h3', { class: 'font-bold text-lg' }, '📸 AI 樹種辨識'),
     el('button', {
@@ -37,62 +35,127 @@ export function openAiIdentifyModal({ onPick } = {}) {
     }, '✕')
   ));
 
-  // === API key 或 proxy URL 未設 → 設定流程 ===
-  if (!getApiKey() || !getProxyUrl()) {
+  // v2.11.4：先 await effective key/proxy（含 Firestore admin 全域）
+  const [effKey, effProxy] = await Promise.all([getEffectiveApiKey(), getEffectiveProxyUrl()]);
+  const global = await loadGlobalAiConfig();
+  const amAdmin = isSystemAdmin();
+
+  // === effective key/proxy 任一缺 → 設定流程 ===
+  if (!effKey || !effProxy) {
     const setup = el('div', { class: 'space-y-3' });
-    const hint = el('div', { class: 'bg-amber-50 border border-amber-300 rounded p-3 text-sm' });
-    hint.innerHTML = `
-      <p class="font-medium mb-2">⚠ 首次設定（需 2 樣）</p>
-      <p class="text-xs mb-1"><b>(1) Pl@ntNet API key</b></p>
-      <ol class="list-decimal list-inside space-y-0.5 text-[11px] ml-1 mb-2">
-        <li><a href="https://my.plantnet.org/" target="_blank" rel="noopener" class="text-blue-700 underline">my.plantnet.org</a> 註冊（要點 email 認證信！）</li>
-        <li>登入 → API key → Generate（free tier 500 次/日）</li>
-        <li>👁 展開全字串 → 📋 copy 按鈕複製</li>
-      </ol>
-      <p class="text-xs mb-1"><b>(2) CORS Proxy URL</b>（PlantNet 不允許 browser 直連，要繞）</p>
-      <ol class="list-decimal list-inside space-y-0.5 text-[11px] ml-1">
-        <li>建 Cloudflare Worker（5 分鐘、免費、無需信用卡）</li>
-        <li>方法見對話視窗，貼 https://xxx.workers.dev URL</li>
-      </ol>
-      <p class="text-[10px] text-stone-600 mt-2">key + proxy 都只存你瀏覽器，不會經過我們 server。</p>
-    `;
-    setup.appendChild(hint);
 
-    setup.appendChild(el('label', { class: 'text-xs font-medium' }, 'Pl@ntNet API key'));
-    const keyInput = el('input', {
-      type: 'text', placeholder: '2b10... (貼完整 key)',
-      value: getApiKey() || '',
-      class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
-    });
-    setup.appendChild(keyInput);
+    // 非 admin 且 admin 沒設過全域 → 提示「請聯絡 admin」
+    if (!amAdmin && !global?.plantnetApiKey && !global?.plantnetProxyUrl) {
+      const hint = el('div', { class: 'bg-amber-50 border border-amber-300 rounded p-3 text-sm' });
+      hint.innerHTML = `
+        <p class="font-medium mb-2">⚠ 尚未設定 AI 辨識</p>
+        <p class="text-xs mb-2">系統 admin 還沒設定 PlantNet API key + CORS Proxy URL（全域共用）。請聯絡 admin 完成設定，或自己暫時設個人 key。</p>
+      `;
+      setup.appendChild(hint);
+    }
 
-    setup.appendChild(el('label', { class: 'text-xs font-medium mt-2' }, 'Proxy URL'));
-    const proxyInput = el('input', {
-      type: 'text', placeholder: 'https://xxx.workers.dev',
-      value: getProxyUrl() || '',
-      class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
-    });
-    setup.appendChild(proxyInput);
+    if (amAdmin) {
+      // admin：寫全域（Firestore）
+      const adminHint = el('div', { class: 'bg-blue-50 border border-blue-300 rounded p-3 text-sm' });
+      adminHint.innerHTML = `
+        <p class="font-medium mb-1">⚙️ 全域設定（admin only）— 寫入 Firestore，全 user 共用</p>
+        <p class="text-[10px] text-stone-600">取得方式：<a href="https://my.plantnet.org/" target="_blank" rel="noopener" class="text-blue-700 underline">my.plantnet.org</a> 註冊+認證信→Generate key；CF Worker 5 分鐘建好。</p>
+      `;
+      setup.appendChild(adminHint);
 
-    const saveBtn = el('button', {
-      type: 'button',
-      class: 'bg-forest-700 hover:bg-forest-800 text-white px-3 py-1.5 rounded text-sm font-medium w-full mt-2',
-    }, '儲存並開始');
-    saveBtn.addEventListener('click', () => {
-      const k = keyInput.value.trim();
-      const p = proxyInput.value.trim();
-      if (!k) { toast('請貼上 Pl@ntNet API key'); return; }
-      if (!p) { toast('請貼上 Proxy URL（如 Cloudflare Worker）'); return; }
-      if (!/^https:\/\//.test(p)) { toast('Proxy URL 須以 https:// 開頭'); return; }
-      setApiKey(k);
-      setProxyUrl(p);
-      close();
-      // 重新開啟 modal 進入主流程
-      openAiIdentifyModal({ onPick });
-    });
-    setup.appendChild(saveBtn);
+      setup.appendChild(el('label', { class: 'text-xs font-medium' }, 'Pl@ntNet API key（全域）'));
+      const adminKeyInput = el('input', {
+        type: 'text', placeholder: '2b10... (貼完整 key)',
+        value: global?.plantnetApiKey || '',
+        class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
+      });
+      setup.appendChild(adminKeyInput);
+
+      setup.appendChild(el('label', { class: 'text-xs font-medium mt-2' }, 'Proxy URL（全域）'));
+      const adminProxyInput = el('input', {
+        type: 'text', placeholder: 'https://xxx.workers.dev',
+        value: global?.plantnetProxyUrl || '',
+        class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
+      });
+      setup.appendChild(adminProxyInput);
+
+      // v2.11.5：LLM 補詳細解釋（optional，可空白）
+      setup.appendChild(el('label', { class: 'text-xs font-medium mt-2' },
+        'Anthropic Claude API key（全域，選填 — 啟用詳細解釋）'));
+      const adminLlmInput = el('input', {
+        type: 'text', placeholder: 'sk-ant-... (留空=不啟用 LLM 補詳細)',
+        value: global?.llmApiKey || '',
+        class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
+      });
+      setup.appendChild(adminLlmInput);
+      setup.appendChild(el('div', { class: 'text-[10px] text-stone-500 mt-0.5' },
+        '取得：https://console.anthropic.com/settings/keys（每次辨識約 $0.008，可空白省成本）'));
+
+      const saveAdminBtn = el('button', {
+        type: 'button',
+        class: 'bg-blue-700 hover:bg-blue-800 text-white px-3 py-1.5 rounded text-sm font-medium w-full mt-2',
+      }, '💾 儲存到全域 (admin)');
+      saveAdminBtn.addEventListener('click', async () => {
+        const k = adminKeyInput.value.trim();
+        const p = adminProxyInput.value.trim();
+        const l = adminLlmInput.value.trim();          // 可空
+        if (!k) { toast('請貼上 Pl@ntNet API key'); return; }
+        if (!p) { toast('請貼上 Proxy URL'); return; }
+        if (!/^https:\/\//.test(p)) { toast('Proxy URL 須以 https:// 開頭'); return; }
+        try {
+          saveAdminBtn.disabled = true; saveAdminBtn.textContent = '⏳ 寫入...';
+          await setGlobalAiConfig({ plantnetApiKey: k, plantnetProxyUrl: p, llmApiKey: l || null });
+          toast('✓ 全域設定已儲存');
+          close();
+          openAiIdentifyModal({ onPick });
+        } catch (e) {
+          toast('儲存失敗：' + e.message);
+          saveAdminBtn.disabled = false; saveAdminBtn.textContent = '💾 儲存到全域 (admin)';
+        }
+      });
+      setup.appendChild(saveAdminBtn);
+    }
+
+    // 所有 user 都可設個人 override（localStorage）
+    setup.appendChild(el('details', { class: 'mt-2' },
+      el('summary', { class: 'text-xs text-blue-700 cursor-pointer' },
+        amAdmin ? '👤 或設個人 override（不寫全域）' : '👤 設個人 key（暫時用，admin 設好全域後可清掉）'),
+      (() => {
+        const userBox = el('div', { class: 'space-y-2 mt-2' });
+        userBox.appendChild(el('label', { class: 'text-xs' }, 'PlantNet API key（個人）'));
+        const userKeyInput = el('input', {
+          type: 'text', placeholder: '2b10...', value: getApiKey() || '',
+          class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
+        });
+        userBox.appendChild(userKeyInput);
+        userBox.appendChild(el('label', { class: 'text-xs' }, 'Proxy URL（個人）'));
+        const userProxyInput = el('input', {
+          type: 'text', placeholder: 'https://xxx.workers.dev', value: getProxyUrl() || '',
+          class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
+        });
+        userBox.appendChild(userProxyInput);
+        const saveUserBtn = el('button', {
+          type: 'button',
+          class: 'bg-stone-700 hover:bg-stone-800 text-white px-3 py-1 rounded text-xs font-medium',
+        }, '儲存個人設定');
+        saveUserBtn.addEventListener('click', () => {
+          const k = userKeyInput.value.trim();
+          const p = userProxyInput.value.trim();
+          if (k) setApiKey(k);
+          if (p) {
+            if (!/^https:\/\//.test(p)) { toast('Proxy URL 須以 https:// 開頭'); return; }
+            setProxyUrl(p);
+          }
+          toast('✓ 個人設定已儲存');
+          close();
+          openAiIdentifyModal({ onPick });
+        });
+        userBox.appendChild(saveUserBtn);
+        return userBox;
+      })()
+    ));
+
     card.appendChild(setup);
-    setTimeout(() => (getApiKey() ? proxyInput : keyInput).focus(), 50);
     return;
   }
 
@@ -162,6 +225,14 @@ export function openAiIdentifyModal({ onPick } = {}) {
     resultsBox.innerHTML = '';
     resultsBox.appendChild(el('div', { class: 'text-xs text-stone-600 mb-2 font-medium' },
       '👇 點選最像的物種套用（依信心排序，最多 3 筆）'));
+
+    // v2.11.5：佔位給 LLM 補詳細結果（imageQuality + characteristics/habitat）
+    const llmTopBox = el('div', { class: 'mb-2' });
+    resultsBox.appendChild(llmTopBox);
+
+    // 每個 candidate 對應一個 detail box（LLM enrich 完後 inline 注入）
+    const detailBoxes = {};   // sci → detail container element
+
     results.slice(0, 3).forEach(r => {
       const localSp = matchToLocalSpecies(r, allSpecies);
       const scorePct = Math.round(r.score * 100);
@@ -194,15 +265,57 @@ export function openAiIdentifyModal({ onPick } = {}) {
       `;
       row.addEventListener('click', () => {
         const finalZh = localSp?.zh || zh;
-        if (onPick) onPick({ zh: finalZh, sci: r.sci, localSpecies: localSp, aiResult: r });
-        toast(`✓ AI 套用：${finalZh}（信心 ${scorePct}%）`, 3000);
+        // v2.11.3：onPick 多帶 imageBlob，讓 caller 把這張照片自動加入 tree.photos（一動作雙功能）
+        if (onPick) onPick({
+          zh: finalZh, sci: r.sci, localSpecies: localSp, aiResult: r,
+          imageBlob: _imageBlob,
+        });
+        toast(`✓ AI 套用：${finalZh}（信心 ${scorePct}%）+ 照片已入立木紀錄`, 3000);
         close();
       });
+      // v2.11.5：detail box 在 row 下方 — LLM enrich 完後填內容
+      const detail = el('div', { class: 'text-[11px] text-stone-600 px-2 py-1 border-l-2 border-stone-200 ml-2 hidden' });
+      detailBoxes[r.sci] = detail;
       resultsBox.appendChild(row);
+      resultsBox.appendChild(detail);
     });
     // hint
     resultsBox.appendChild(el('div', { class: 'text-[10px] text-stone-500 mt-2 border-t pt-2' },
       '✓ 字典中 = 已對應 Firestore 224 種；⚠ 字典外 = 套用後請手動編輯字典或自由輸入'));
+
+    // v2.11.5：背景 fire LLM enrich（若有 LLM key）
+    getEffectiveLlmKey().then(llmKey => {
+      if (!llmKey) return;
+      const top3 = results.slice(0, 3);
+      llmTopBox.innerHTML = '<div class="text-[11px] text-stone-500">🔬 LLM 補詳細解釋中...（約 5-15 秒）</div>';
+      enrichWithLLM(_imageBlob, top3)
+        .then(enriched => {
+          // 顯示 imageQuality
+          if (enriched?.imageQuality) {
+            const q = enriched.imageQuality;
+            const qReason = enriched.imageQualityReason || '';
+            const cls = q === 'good' ? 'bg-green-50 border-green-300 text-green-800'
+                      : q === 'poor' ? 'bg-amber-50 border-amber-300 text-amber-800'
+                      : 'bg-stone-50 border-stone-300 text-stone-700';
+            const icon = q === 'good' ? '✓' : q === 'poor' ? '⚠' : '?';
+            llmTopBox.innerHTML = `<div class="border rounded p-1.5 text-xs ${cls}">${icon} 照片品質：<b>${escHtml(q)}</b> — ${escHtml(qReason)}</div>`;
+          } else {
+            llmTopBox.innerHTML = '';
+          }
+          // 注入 per-candidate 詳細
+          (enriched?.candidates || []).forEach(c => {
+            const box = detailBoxes[c.sci];
+            if (!box) return;
+            const native = c.isNative ? '<span class="text-green-700">原生</span>' : '<span class="text-stone-500">非原生</span>';
+            box.innerHTML = `🔬 <b>特徵</b>: ${escHtml(c.characteristics || '—')}<br>📍 <b>棲地</b>: ${escHtml(c.habitat || '—')}（${native}）${c.notes ? `<br>📝 ${escHtml(c.notes)}` : ''}`;
+            box.classList.remove('hidden');
+          });
+        })
+        .catch(e => {
+          console.warn('[ai enrich]', e);
+          llmTopBox.innerHTML = `<div class="text-[11px] text-amber-700">⚠ LLM 補詳細失敗：${escHtml(e?.message || String(e))}（不影響 PlantNet 結果）</div>`;
+        });
+    });
   }
 
   function escHtml(s) {
@@ -225,22 +338,38 @@ export function openAiIdentifyModal({ onPick } = {}) {
       idBtn
     ),
     resultsBox,
-    // v2.11.2 底部設定區 — 顯示 key + proxy 資訊 + 清除按鈕
-    el('div', { class: 'text-[10px] text-stone-500 mt-3 border-t pt-2 space-y-0.5' },
-      el('div', { class: 'flex items-center justify-between' },
-        el('span', {}, `🔑 key: ${getApiKey().slice(0, 8)}... (${getApiKey().length} 字)`),
-        el('button', {
-          type: 'button', class: 'text-blue-700 hover:underline',
-          onclick: () => { clearApiKey(); toast('API key 已清除'); close(); }
-        }, '清除 key')
-      ),
-      el('div', { class: 'flex items-center justify-between' },
-        el('span', { class: 'truncate max-w-[60%]' }, `🔧 proxy: ${getProxyUrl()}`),
-        el('button', {
-          type: 'button', class: 'text-blue-700 hover:underline',
-          onclick: () => { clearProxyUrl(); toast('Proxy URL 已清除'); close(); }
-        }, '清除 proxy')
-      )
-    )
+    // v2.11.4 底部設定區 — 顯示 effective key/proxy 來源（admin 全域 / 個人 override）
+    (() => {
+      const userKey = getApiKey();
+      const userProxy = getProxyUrl();
+      const keySource = userKey ? '個人 override' : (global?.plantnetApiKey ? 'admin 全域' : '無');
+      const proxySource = userProxy ? '個人 override' : (global?.plantnetProxyUrl ? 'admin 全域' : '無');
+      return el('div', { class: 'text-[10px] text-stone-500 mt-3 border-t pt-2 space-y-0.5' },
+        el('div', { class: 'flex items-center justify-between' },
+          el('span', {}, `🔑 key (${keySource}): ${effKey.slice(0, 8)}... (${effKey.length} 字)`),
+          userKey ? el('button', {
+            type: 'button', class: 'text-blue-700 hover:underline',
+            onclick: () => { clearApiKey(); toast('個人 key 已清除（將回到全域設定）'); close(); }
+          }, '清除個人 key') : null
+        ),
+        el('div', { class: 'flex items-center justify-between' },
+          el('span', { class: 'truncate max-w-[60%]' }, `🔧 proxy (${proxySource}): ${effProxy}`),
+          userProxy ? el('button', {
+            type: 'button', class: 'text-blue-700 hover:underline',
+            onclick: () => { clearProxyUrl(); toast('個人 proxy 已清除'); close(); }
+          }, '清除個人 proxy') : null
+        ),
+        amAdmin ? el('div', { class: 'mt-1' },
+          el('button', {
+            type: 'button', class: 'text-blue-700 hover:underline text-[10px]',
+            onclick: () => {
+              clearApiKey(); clearProxyUrl();
+              close();
+              openAiIdentifyModal({ onPick });
+            }
+          }, '⚙️ 編輯全域設定 (admin)')
+        ) : null
+      );
+    })()
   ));
 }

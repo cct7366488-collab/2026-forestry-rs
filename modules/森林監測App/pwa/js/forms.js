@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21102';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21105';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21102';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21105';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21102';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21105';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21102';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21105';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21102';
+import { createSpeciesPicker } from './species-picker.js?v=21105';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21102';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21105';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21102';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21105';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21102';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21105';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -294,6 +294,17 @@ function photoUploader({ existing = [], onChange = null } = {}) {
   return {
     element: wrap,
     get count() { return kept.length + pending.length; },
+    // v2.11.3：外部加 file 進來（給 AI 辨識 modal 用 — 拍照辨識完照片自動入 tree.photos）
+    addFile(file) {
+      if (!file || !file.type?.startsWith('image/')) return false;
+      if (file.size > 5 * 1024 * 1024) { toast(`檔案過大（>5MB）：${file.name}`); return false; }
+      const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const previewUrl = URL.createObjectURL(file);
+      pending.push({ file, previewUrl, tempId });
+      redraw();
+      onChange?.();
+      return true;
+    },
     // 上傳 + 回傳合併陣列。upload 失敗的檔案會 throw，由 caller 處理
     async commit({ projectId, plotId, prefix = 'plot' }) {
       const uploaded = [];
@@ -2575,13 +2586,18 @@ export async function openTreeForm(project, plot, existing = null) {
       el('label', { class: 'flex items-center justify-between gap-2' },
         el('span', {}, '樹種 ', el('span', { class: 'req' }, '*')),
         // v2.11.0：AI 樹種辨識按鈕（拍葉/花/皮 → Pl@ntNet → top-3 → 套用 picker）
+        // v2.11.3：onPick 帶 imageBlob → 自動加入 tree.photos（一動作雙功能，省 surveyor 重拍）
         el('button', {
           type: 'button',
           class: 'bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2 py-1 rounded font-medium whitespace-nowrap',
           onclick: () => openAiIdentifyModal({
-            onPick: ({ zh }) => {
+            onPick: ({ zh, imageBlob }) => {
               speciesPicker.setValue(zh);
               speciesInput.dispatchEvent(new Event('input', { bubbles: true }));
+              // v2.11.3：把 AI 辨識用的照片加入立木 photo 陣列（pending，submit 才上傳 Storage）
+              if (imageBlob && treePhotoUp) {
+                treePhotoUp.addFile(imageBlob);
+              }
             }
           })
         }, '📸 AI 辨識')
