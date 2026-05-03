@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.11.6';  // v2.11.6：LLM model 選擇器 + 修舊 model 名 — user 反映 Claude Pro $20/月不含 API；想用 LLM 補詳細要 console.anthropic.com 加值。提了 3 選項（加值/留空/換 Haiku 便宜 3 倍），user 選做 model 選擇器。ai-species 新 export LLM_MODELS = { 'claude-sonnet-4-6': $0.015/次, 'claude-haiku-4-5-20251001': $0.005/次 }；ANTHROPIC_DEFAULT_MODEL 改 Haiku 4.5（v2.11.5 用的 'claude-sonnet-4-5' 是舊名也順便修掉）。setGlobalAiConfig 加 llmModel 欄位；getEffectiveLlmModel async；enrichWithLLM 改 await getEffectiveLlmModel。modal admin setup 加 select dropdown「LLM 模型」顯示 Sonnet/Haiku 標籤+價格+描述。footer 加「🔬 LLM: Claude Haiku 4.5 ($0.005/次)」狀態列
+const CACHE = 'forest-monitor-v2.11.7';  // v2.11.7：hotfix — admin 點「⚙️ 編輯全域設定」按鈕沒反應。原邏輯 clearApiKey + clearProxyUrl + reopen，但 admin 全域 key 還在 → effective 仍滿足 → modal 開後直接跳主流程，setup form 不出現。修：加 forceSetup 旗標到 openAiIdentifyModal({forceSetup:true})，無視 effective 狀態強制進設定畫面。按鈕改不再 clear 個人 keys（避免破壞 user override），只 close + reopen with forceSetup. saveAdminBtn 寫完後重開的 modal 沒帶 forceSetup → 自然跳主流程
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、

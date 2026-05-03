@@ -15,11 +15,12 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast, isSystemAdmin } from './app.js?v=21106';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, LLM_MODELS } from './ai-species.js?v=21106';
-import { loadSpeciesCache } from './species-picker.js?v=21106';
+import { el, toast, isSystemAdmin } from './app.js?v=21107';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, LLM_MODELS } from './ai-species.js?v=21107';
+import { loadSpeciesCache } from './species-picker.js?v=21107';
 
-export async function openAiIdentifyModal({ onPick } = {}) {
+// v2.11.7：加 forceSetup 旗標 — 「編輯全域設定」按鈕走這條，不論 effective 是否滿足都進設定畫面
+export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
   const wrap = el('div', { class: 'fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto' });
   const card = el('div', { class: 'bg-white rounded-lg shadow-lg p-4 max-w-md w-full my-8' });
   wrap.appendChild(card);
@@ -40,8 +41,8 @@ export async function openAiIdentifyModal({ onPick } = {}) {
   const global = await loadGlobalAiConfig();
   const amAdmin = isSystemAdmin();
 
-  // === effective key/proxy 任一缺 → 設定流程 ===
-  if (!effKey || !effProxy) {
+  // === effective key/proxy 任一缺 OR 明確要求 forceSetup → 設定流程 ===
+  if (!effKey || !effProxy || forceSetup) {
     const setup = el('div', { class: 'space-y-3' });
 
     // 非 admin 且 admin 沒設過全域 → 提示「請聯絡 admin」
@@ -382,10 +383,10 @@ export async function openAiIdentifyModal({ onPick } = {}) {
         amAdmin ? el('div', { class: 'mt-1' },
           el('button', {
             type: 'button', class: 'text-blue-700 hover:underline text-[10px]',
+            // v2.11.7：直接 forceSetup 進設定畫面（不清個人 keys，保留 user override）
             onclick: () => {
-              clearApiKey(); clearProxyUrl();
               close();
-              openAiIdentifyModal({ onPick });
+              openAiIdentifyModal({ onPick, forceSetup: true });
             }
           }, '⚙️ 編輯全域設定 (admin)')
         ) : null
