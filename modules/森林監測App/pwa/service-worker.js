@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.11.5';  // v2.11.5：Phase 2 polish 第三棒 — Pl@ntNet + LLM 混合架構（抄參考系統的 LLM rich metadata，但用 PlantNet 當主辨識）。ai-species 加 enrichWithLLM(imageBlob, candidates) → 用 Anthropic Claude Messages API（claude-sonnet-4-5、anthropic-dangerous-direct-browser-access 直連 browser）+ blobToBase64 + system prompt 扮演「臺灣植物學家」要求純 JSON 回 imageQuality + per-candidate {characteristics/habitat/isNative/notes}。LLM key 三組 API getLlmKey/setLlmKey/clearLlmKey + getEffectiveLlmKey async（同 PlantNet 優先序）。setGlobalAiConfig 加 llmApiKey 欄位。ai-identify-modal admin setup 加「Anthropic Claude API key（選填）」欄位 + 取得方式 hint。主流程 PlantNet 結果 render 完背景 fire enrichWithLLM → 顯示 imageQuality 警告框（good 綠 / poor 黃 / unknown 灰）+ 每 row 下方 detail box（特徵/棲地/原生 tag/備註）。LLM key 沒設則跳過 enrich（pure PlantNet 行為）。每次 enrich 約 $0.008 成本
+const CACHE = 'forest-monitor-v2.11.6';  // v2.11.6：LLM model 選擇器 + 修舊 model 名 — user 反映 Claude Pro $20/月不含 API；想用 LLM 補詳細要 console.anthropic.com 加值。提了 3 選項（加值/留空/換 Haiku 便宜 3 倍），user 選做 model 選擇器。ai-species 新 export LLM_MODELS = { 'claude-sonnet-4-6': $0.015/次, 'claude-haiku-4-5-20251001': $0.005/次 }；ANTHROPIC_DEFAULT_MODEL 改 Haiku 4.5（v2.11.5 用的 'claude-sonnet-4-5' 是舊名也順便修掉）。setGlobalAiConfig 加 llmModel 欄位；getEffectiveLlmModel async；enrichWithLLM 改 await getEffectiveLlmModel。modal admin setup 加 select dropdown「LLM 模型」顯示 Sonnet/Haiku 標籤+價格+描述。footer 加「🔬 LLM: Claude Haiku 4.5 ($0.005/次)」狀態列
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、

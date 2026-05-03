@@ -15,9 +15,9 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast, isSystemAdmin } from './app.js?v=21105';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, enrichWithLLM, resizeImage, matchToLocalSpecies } from './ai-species.js?v=21105';
-import { loadSpeciesCache } from './species-picker.js?v=21105';
+import { el, toast, isSystemAdmin } from './app.js?v=21106';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, LLM_MODELS } from './ai-species.js?v=21106';
+import { loadSpeciesCache } from './species-picker.js?v=21106';
 
 export async function openAiIdentifyModal({ onPick } = {}) {
   const wrap = el('div', { class: 'fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto' });
@@ -89,7 +89,20 @@ export async function openAiIdentifyModal({ onPick } = {}) {
       });
       setup.appendChild(adminLlmInput);
       setup.appendChild(el('div', { class: 'text-[10px] text-stone-500 mt-0.5' },
-        '取得：https://console.anthropic.com/settings/keys（每次辨識約 $0.008，可空白省成本）'));
+        '取得：console.anthropic.com/settings/keys（須加值至少 $5；Claude Pro 月費不含 API）'));
+
+      // v2.11.6：LLM model 選擇 — 預設 Haiku 省 3 倍成本
+      setup.appendChild(el('label', { class: 'text-xs font-medium mt-2' }, 'LLM 模型'));
+      const adminModelSel = el('select', {
+        class: 'border rounded px-2 py-1.5 text-xs w-full',
+      });
+      const currentModel = global?.llmModel || 'claude-haiku-4-5-20251001';
+      Object.entries(LLM_MODELS).forEach(([k, m]) => {
+        const opt = el('option', { value: k }, `${m.label} ${m.pricePerCall} — ${m.desc}`);
+        if (k === currentModel) opt.setAttribute('selected', 'true');
+        adminModelSel.appendChild(opt);
+      });
+      setup.appendChild(adminModelSel);
 
       const saveAdminBtn = el('button', {
         type: 'button',
@@ -99,12 +112,13 @@ export async function openAiIdentifyModal({ onPick } = {}) {
         const k = adminKeyInput.value.trim();
         const p = adminProxyInput.value.trim();
         const l = adminLlmInput.value.trim();          // 可空
+        const m = adminModelSel.value;                 // v2.11.6
         if (!k) { toast('請貼上 Pl@ntNet API key'); return; }
         if (!p) { toast('請貼上 Proxy URL'); return; }
         if (!/^https:\/\//.test(p)) { toast('Proxy URL 須以 https:// 開頭'); return; }
         try {
           saveAdminBtn.disabled = true; saveAdminBtn.textContent = '⏳ 寫入...';
-          await setGlobalAiConfig({ plantnetApiKey: k, plantnetProxyUrl: p, llmApiKey: l || null });
+          await setGlobalAiConfig({ plantnetApiKey: k, plantnetProxyUrl: p, llmApiKey: l || null, llmModel: m });
           toast('✓ 全域設定已儲存');
           close();
           openAiIdentifyModal({ onPick });
@@ -344,6 +358,10 @@ export async function openAiIdentifyModal({ onPick } = {}) {
       const userProxy = getProxyUrl();
       const keySource = userKey ? '個人 override' : (global?.plantnetApiKey ? 'admin 全域' : '無');
       const proxySource = userProxy ? '個人 override' : (global?.plantnetProxyUrl ? 'admin 全域' : '無');
+      const llmKey = global?.llmApiKey || '';
+      const llmModelKey = global?.llmModel || 'claude-haiku-4-5-20251001';
+      const llmModelLabel = LLM_MODELS[llmModelKey]?.label || llmModelKey;
+      const llmPrice = LLM_MODELS[llmModelKey]?.pricePerCall || '?';
       return el('div', { class: 'text-[10px] text-stone-500 mt-3 border-t pt-2 space-y-0.5' },
         el('div', { class: 'flex items-center justify-between' },
           el('span', {}, `🔑 key (${keySource}): ${effKey.slice(0, 8)}... (${effKey.length} 字)`),
@@ -359,6 +377,8 @@ export async function openAiIdentifyModal({ onPick } = {}) {
             onclick: () => { clearProxyUrl(); toast('個人 proxy 已清除'); close(); }
           }, '清除個人 proxy') : null
         ),
+        // v2.11.6：顯示 LLM 狀態
+        el('div', {}, llmKey ? `🔬 LLM: ${llmModelLabel} (${llmPrice}/次)` : '🔬 LLM: 未啟用（純 PlantNet）'),
         amAdmin ? el('div', { class: 'mt-1' },
           el('button', {
             type: 'button', class: 'text-blue-700 hover:underline text-[10px]',

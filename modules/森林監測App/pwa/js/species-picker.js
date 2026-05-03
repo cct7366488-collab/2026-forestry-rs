@@ -12,7 +12,7 @@
 //   form.appendChild(picker.root);
 //   picker.input.addEventListener('input', () => { ... picker.getMatched() ... });
 
-import { fb, el } from './app.js?v=21105';
+import { fb, el } from './app.js?v=21106';
 import { TREES } from './species-dict.js?v=2000';
 
 // ===== Module-level cache（一次 fetch / session）=====

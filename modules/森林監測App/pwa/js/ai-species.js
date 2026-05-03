@@ -15,14 +15,22 @@
 //   const localSp = matchToLocalSpecies(top[0], allSpecies);
 
 // v2.11.4：API key + Proxy URL 從 user-only localStorage 升級為「Firestore 全域 admin > localStorage user」優先序
-import { fb, isSystemAdmin, state } from './app.js?v=21105';
+import { fb, isSystemAdmin, state } from './app.js?v=21106';
 
 const LS_API_KEY = 'forestmrv.plantnet.apiKey';
 const LS_PROXY_URL = 'forestmrv.plantnet.proxyUrl';   // v2.11.2：CORS proxy URL（如 Cloudflare Worker）
 const LS_LLM_KEY = 'forestmrv.llm.apiKey';            // v2.11.5：LLM (Anthropic Claude) key
 const PLANTNET_DIRECT = 'https://my-api.plantnet.org';
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-5';
+// v2.11.6：可選 model — admin 在設定區下拉選 Sonnet（高品質貴）或 Haiku（快便宜 3 倍）
+//   pricing 估算：每次辨識 = 圖 ~1500 tok input + system/user prompt ~500 tok input + JSON 輸出 ~600 tok
+//   Sonnet 4.6: $3/M in + $15/M out → ~$0.015/次
+//   Haiku 4.5:  $1/M in + $5/M out  → ~$0.005/次
+export const LLM_MODELS = {
+  'claude-sonnet-4-6':         { label: 'Claude Sonnet 4.6', desc: '高品質、貴 3 倍',   pricePerCall: '~$0.015' },
+  'claude-haiku-4-5-20251001': { label: 'Claude Haiku 4.5',  desc: '快、便宜（推薦）',   pricePerCall: '~$0.005' },
+};
+const ANTHROPIC_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';   // v2.11.6：預設 Haiku 省成本
 const GLOBAL_AI_DOC = 'app_settings/aiConfig';        // v2.11.4：Firestore 全域 admin 設定路徑
 
 // v2.11.4：模組層 cache 全域設定（一次 fetch / session）
@@ -51,17 +59,25 @@ export async function loadGlobalAiConfig(force = false) {
 
 // v2.11.4：admin 寫入全域設定（Firestore rules 須限 systemAdmin write）
 // v2.11.5：加 llmApiKey 欄位
-export async function setGlobalAiConfig({ plantnetApiKey, plantnetProxyUrl, llmApiKey }) {
+// v2.11.6：加 llmModel 欄位（admin 選 Sonnet / Haiku）
+export async function setGlobalAiConfig({ plantnetApiKey, plantnetProxyUrl, llmApiKey, llmModel }) {
   if (!isSystemAdmin()) throw new Error('僅 admin 可設定全域 AI config');
   const payload = {};
   if (plantnetApiKey != null) payload.plantnetApiKey = String(plantnetApiKey).replace(/[\s​-‍﻿]/g, '');
   if (plantnetProxyUrl != null) payload.plantnetProxyUrl = String(plantnetProxyUrl).trim().replace(/\/+$/, '');
   if (llmApiKey != null) payload.llmApiKey = String(llmApiKey).replace(/[\s​-‍﻿]/g, '');
+  if (llmModel != null) payload.llmModel = String(llmModel).trim();
   payload.updatedAt = fb.serverTimestamp();
   payload.updatedBy = state.user?.uid || null;
   const ref = fb.doc(fb.db, 'app_settings', 'aiConfig');
   await fb.setDoc(ref, payload, { merge: true });
   _globalCache = { ..._globalCache, ...payload };  // local cache 同步
+}
+
+// v2.11.6：取 effective model — global 設過則用，否則 default Haiku
+export async function getEffectiveLlmModel() {
+  const global = await loadGlobalAiConfig();
+  return (global?.llmModel && LLM_MODELS[global.llmModel]) ? global.llmModel : ANTHROPIC_DEFAULT_MODEL;
 }
 
 // v2.11.5：LLM (Anthropic Claude) key 管理
@@ -242,8 +258,10 @@ export async function enrichWithLLM(imageBlob, candidates, opts = {}) {
 
   const userPrompt = `候選清單（依 Pl@ntNet 信心由高到低）：\n${candidateList}\n\n請評估照片並給出 JSON。`;
 
+  // v2.11.6：opts.model > effective (global > default Haiku)
+  const model = opts.model || await getEffectiveLlmModel();
   const body = {
-    model: opts.model || ANTHROPIC_DEFAULT_MODEL,
+    model,
     max_tokens: 1500,
     system: systemPrompt,
     messages: [{
