@@ -15,9 +15,9 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast } from './app.js?v=21101';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, resizeImage, matchToLocalSpecies } from './ai-species.js?v=21101';
-import { loadSpeciesCache } from './species-picker.js?v=21101';
+import { el, toast } from './app.js?v=21102';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, resizeImage, matchToLocalSpecies } from './ai-species.js?v=21102';
+import { loadSpeciesCache } from './species-picker.js?v=21102';
 
 export function openAiIdentifyModal({ onPick } = {}) {
   const wrap = el('div', { class: 'fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto' });
@@ -37,41 +37,62 @@ export function openAiIdentifyModal({ onPick } = {}) {
     }, '✕')
   ));
 
-  // === API key 未設 → 設定流程 ===
-  if (!getApiKey()) {
+  // === API key 或 proxy URL 未設 → 設定流程 ===
+  if (!getApiKey() || !getProxyUrl()) {
     const setup = el('div', { class: 'space-y-3' });
     const hint = el('div', { class: 'bg-amber-50 border border-amber-300 rounded p-3 text-sm' });
     hint.innerHTML = `
-      <p class="font-medium mb-2">⚠ 需要 Pl@ntNet API key（首次設定）</p>
-      <ol class="list-decimal list-inside space-y-1 text-xs ml-1">
-        <li>到 <a href="https://my.plantnet.org/" target="_blank" rel="noopener" class="text-blue-700 underline">my.plantnet.org</a> 免費註冊</li>
-        <li>登入 → 右上角頭像 → My account → API key</li>
-        <li>產生 key（free tier 每日 500 次辨識）</li>
-        <li>複製 key 貼到下方</li>
+      <p class="font-medium mb-2">⚠ 首次設定（需 2 樣）</p>
+      <p class="text-xs mb-1"><b>(1) Pl@ntNet API key</b></p>
+      <ol class="list-decimal list-inside space-y-0.5 text-[11px] ml-1 mb-2">
+        <li><a href="https://my.plantnet.org/" target="_blank" rel="noopener" class="text-blue-700 underline">my.plantnet.org</a> 註冊（要點 email 認證信！）</li>
+        <li>登入 → API key → Generate（free tier 500 次/日）</li>
+        <li>👁 展開全字串 → 📋 copy 按鈕複製</li>
       </ol>
-      <p class="text-[10px] text-stone-600 mt-2">key 只存在你瀏覽器（localStorage），不會送到我們 server。</p>
+      <p class="text-xs mb-1"><b>(2) CORS Proxy URL</b>（PlantNet 不允許 browser 直連，要繞）</p>
+      <ol class="list-decimal list-inside space-y-0.5 text-[11px] ml-1">
+        <li>建 Cloudflare Worker（5 分鐘、免費、無需信用卡）</li>
+        <li>方法見對話視窗，貼 https://xxx.workers.dev URL</li>
+      </ol>
+      <p class="text-[10px] text-stone-600 mt-2">key + proxy 都只存你瀏覽器，不會經過我們 server。</p>
     `;
     setup.appendChild(hint);
+
+    setup.appendChild(el('label', { class: 'text-xs font-medium' }, 'Pl@ntNet API key'));
     const keyInput = el('input', {
-      type: 'text', placeholder: '貼上 Pl@ntNet API key',
-      class: 'border rounded px-2 py-1.5 w-full font-mono text-sm',
+      type: 'text', placeholder: '2b10... (貼完整 key)',
+      value: getApiKey() || '',
+      class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
     });
     setup.appendChild(keyInput);
+
+    setup.appendChild(el('label', { class: 'text-xs font-medium mt-2' }, 'Proxy URL'));
+    const proxyInput = el('input', {
+      type: 'text', placeholder: 'https://xxx.workers.dev',
+      value: getProxyUrl() || '',
+      class: 'border rounded px-2 py-1.5 w-full font-mono text-xs',
+    });
+    setup.appendChild(proxyInput);
+
     const saveBtn = el('button', {
       type: 'button',
-      class: 'bg-forest-700 hover:bg-forest-800 text-white px-3 py-1.5 rounded text-sm font-medium w-full',
+      class: 'bg-forest-700 hover:bg-forest-800 text-white px-3 py-1.5 rounded text-sm font-medium w-full mt-2',
     }, '儲存並開始');
     saveBtn.addEventListener('click', () => {
       const k = keyInput.value.trim();
-      if (!k) { toast('請貼上 API key'); return; }
+      const p = proxyInput.value.trim();
+      if (!k) { toast('請貼上 Pl@ntNet API key'); return; }
+      if (!p) { toast('請貼上 Proxy URL（如 Cloudflare Worker）'); return; }
+      if (!/^https:\/\//.test(p)) { toast('Proxy URL 須以 https:// 開頭'); return; }
       setApiKey(k);
+      setProxyUrl(p);
       close();
       // 重新開啟 modal 進入主流程
       openAiIdentifyModal({ onPick });
     });
     setup.appendChild(saveBtn);
     card.appendChild(setup);
-    setTimeout(() => keyInput.focus(), 50);
+    setTimeout(() => (getApiKey() ? proxyInput : keyInput).focus(), 50);
     return;
   }
 
@@ -204,13 +225,22 @@ export function openAiIdentifyModal({ onPick } = {}) {
       idBtn
     ),
     resultsBox,
-    // 底部設定區
-    el('div', { class: 'text-[10px] text-stone-500 mt-3 border-t pt-2 flex items-center justify-between' },
-      el('span', {}, `🔑 key: ${getApiKey().slice(0, 8)}...`),
-      el('button', {
-        type: 'button', class: 'text-blue-700 hover:underline',
-        onclick: () => { clearApiKey(); toast('API key 已清除'); close(); }
-      }, '清除/換 key')
+    // v2.11.2 底部設定區 — 顯示 key + proxy 資訊 + 清除按鈕
+    el('div', { class: 'text-[10px] text-stone-500 mt-3 border-t pt-2 space-y-0.5' },
+      el('div', { class: 'flex items-center justify-between' },
+        el('span', {}, `🔑 key: ${getApiKey().slice(0, 8)}... (${getApiKey().length} 字)`),
+        el('button', {
+          type: 'button', class: 'text-blue-700 hover:underline',
+          onclick: () => { clearApiKey(); toast('API key 已清除'); close(); }
+        }, '清除 key')
+      ),
+      el('div', { class: 'flex items-center justify-between' },
+        el('span', { class: 'truncate max-w-[60%]' }, `🔧 proxy: ${getProxyUrl()}`),
+        el('button', {
+          type: 'button', class: 'text-blue-700 hover:underline',
+          onclick: () => { clearProxyUrl(); toast('Proxy URL 已清除'); close(); }
+        }, '清除 proxy')
+      )
     )
   ));
 }

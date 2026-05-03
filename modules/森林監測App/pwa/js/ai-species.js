@@ -15,18 +15,38 @@
 //   const localSp = matchToLocalSpecies(top[0], allSpecies);
 
 const LS_API_KEY = 'forestmrv.plantnet.apiKey';
-const PLANTNET_BASE = 'https://my-api.plantnet.org/v2/identify';
+const LS_PROXY_URL = 'forestmrv.plantnet.proxyUrl';   // v2.11.2：CORS proxy URL（如 Cloudflare Worker）
+const PLANTNET_DIRECT = 'https://my-api.plantnet.org';
 
 export function getApiKey() {
   try { return localStorage.getItem(LS_API_KEY) || ''; } catch { return ''; }
 }
 
 export function setApiKey(key) {
-  try { localStorage.setItem(LS_API_KEY, (key || '').trim()); } catch {}
+  // v2.11.2：除了 trim 也清掉所有空白與不可見字（防止 PlantNet UI 複製帶到 zero-width 字元）
+  const clean = (key || '').replace(/[\s​-‍﻿]/g, '');
+  try { localStorage.setItem(LS_API_KEY, clean); } catch {}
 }
 
 export function clearApiKey() {
   try { localStorage.removeItem(LS_API_KEY); } catch {}
+}
+
+// v2.11.2：Proxy URL（CORS 解決方案）— 例如 Cloudflare Worker 部署的 https://xxx.workers.dev
+//   PlantNet 拒絕 browser 直連（origin whitelist）→ 須透過 server-side proxy 轉送
+//   設了 proxy URL 後，identifySpecies 改用 ${proxyUrl}/v2/identify/{project}?api-key=...
+export function getProxyUrl() {
+  try { return localStorage.getItem(LS_PROXY_URL) || ''; } catch { return ''; }
+}
+
+export function setProxyUrl(url) {
+  // 移除尾部斜線，避免雙斜線
+  const clean = (url || '').trim().replace(/\/+$/, '');
+  try { localStorage.setItem(LS_PROXY_URL, clean); } catch {}
+}
+
+export function clearProxyUrl() {
+  try { localStorage.removeItem(LS_PROXY_URL); } catch {}
 }
 
 // === 主辨識函式 ===
@@ -44,7 +64,9 @@ export async function identifySpecies(imageBlob, opts = {}) {
   formData.append('images', imageBlob, 'tree.jpg');
   organs.forEach(o => formData.append('organs', o));
 
-  const url = `${PLANTNET_BASE}/${project}?api-key=${encodeURIComponent(apiKey)}&include-related-images=false`;
+  // v2.11.2：proxy URL 設則走 proxy（CF Worker），否則直連 PlantNet（會被 CORS 擋）
+  const base = getProxyUrl() || PLANTNET_DIRECT;
+  const url = `${base}/v2/identify/${project}?api-key=${encodeURIComponent(apiKey)}&include-related-images=false`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);   // 30s timeout
   let res;

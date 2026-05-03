@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.11.1';  // v2.11.1：hotfix — user 取得 Pl@ntNet key 後測試跳「API key 無效或過期 (403)」但 key 顯示正常（2b10jQFj 格式對）。原 ai-species.js error handler 把 401/403 都包成「key 無效」，遮蔽了實際 Pl@ntNet 回應內容（可能是帳號未驗證 email / project 'all' 不在 free tier / key 沒完整複製等其他原因）。修：完整 res body log 到 console.error；403 錯誤訊息列 3 個常見原因 + 回應 excerpt；401 / 429 也 attach excerpt
+const CACHE = 'forest-monitor-v2.11.2';  // v2.11.2：hotfix — v2.11.1 揭露實際 PlantNet 回應後發現 root cause 不是 key 而是 CORS：PlantNet 拒絕 browser 直連（"Origin not allowed" 即使 email 已驗證 / key active），須 server-side proxy 轉送。架構升級：(1) ai-species.js 加 getProxyUrl/setProxyUrl/clearProxyUrl localStorage（key=forestmrv.plantnet.proxyUrl），identifySpecies base 改 `getProxyUrl() || PLANTNET_DIRECT`；setApiKey 加 aggressive sanitize 移除所有空白與 zero-width 字元（防 PlantNet UI 複製帶到不可見字元）。(2) ai-identify-modal.js setup 流程整合 API key + Proxy URL 兩個欄位（須兩個都填才能進主流程），footer 顯示 key 長度 + proxy URL + 兩個獨立清除按鈕。建議用 Cloudflare Workers 自架 proxy（5 分鐘、free、無 CC）— Worker code 在 obsidian / commit msg
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、
