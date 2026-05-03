@@ -55,12 +55,26 @@ export async function identifySpecies(imageBlob, opts = {}) {
   }
 
   if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.text()).slice(0, 200); } catch {}
-    if (res.status === 401 || res.status === 403) throw new Error(`API key 無效或過期 (${res.status})`);
+    let body = '';
+    try { body = await res.text(); } catch {}
+    // v2.11.1：完整回應 log 到 console 方便除錯
+    console.error(`[Pl@ntNet API ${res.status}]`, body, '\nRequest URL:', url.replace(apiKey, '***'));
+    const bodyExcerpt = body ? body.slice(0, 200) : res.statusText;
+    if (res.status === 401) {
+      throw new Error(`API key 缺失或格式錯 (401)\n回應：${bodyExcerpt}`);
+    }
+    if (res.status === 403) {
+      throw new Error(
+        `Pl@ntNet 拒絕 (403) — 通常原因：\n` +
+        `(a) 帳號 email 未驗證（檢查信箱認證信）\n` +
+        `(b) key 未完全複製（去 my.plantnet.org 重 generate）\n` +
+        `(c) project 'all' 不在 free tier — 試 'weurope' 或 'world-flora' \n` +
+        `回應：${bodyExcerpt}`
+      );
+    }
     if (res.status === 404) throw new Error(`Pl@ntNet 查無此影像 (404)`);
-    if (res.status === 429) throw new Error(`API quota 超額 (429) — 等明天 reset 或換 key`);
-    throw new Error(`Pl@ntNet ${res.status}: ${detail}`);
+    if (res.status === 429) throw new Error(`API quota 超額 (429) — 等明天 reset 或換 key\n回應：${bodyExcerpt}`);
+    throw new Error(`Pl@ntNet ${res.status}: ${bodyExcerpt}`);
   }
 
   const data = await res.json();

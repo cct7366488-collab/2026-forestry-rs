@@ -15,9 +15,9 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast } from './app.js?v=21100';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, resizeImage, matchToLocalSpecies } from './ai-species.js?v=21100';
-import { loadSpeciesCache } from './species-picker.js?v=21100';
+import { el, toast } from './app.js?v=21101';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, resizeImage, matchToLocalSpecies } from './ai-species.js?v=21101';
+import { loadSpeciesCache } from './species-picker.js?v=21101';
 
 export function openAiIdentifyModal({ onPick } = {}) {
   const wrap = el('div', { class: 'fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto' });
