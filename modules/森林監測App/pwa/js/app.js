@@ -15,18 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21107";
-import * as forms from "./forms.js?v=21107";
-import * as analytics from "./analytics.js?v=21107";
-import * as importWizard from "./import-wizard.js?v=21107";
-import { renderTreeDistribution } from "./distribution.js?v=21107";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21107";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=21108";
+import * as forms from "./forms.js?v=21108";
+import * as analytics from "./analytics.js?v=21108";
+import * as importWizard from "./import-wizard.js?v=21108";
+import { renderTreeDistribution } from "./distribution.js?v=21108";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21108";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21107";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21107";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21108";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21108";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, computeProgress } from "./project-status.js?v=21107";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21108";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -359,7 +359,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21107');
+    const m = await import('./migration-v2715.js?v=21108');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -381,7 +381,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21107');
+    const m = await import('./migration-v2715.js?v=21108');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -2158,8 +2158,16 @@ async function renderSettings() {
   } else {
     lines.push(`<div>🔓 未鎖定 — 所有授權成員可正常寫入</div>`);
   }
+  // v2.11.8：修正 v2.3 起的誤導訊息 — 之前寫「請對某筆標 flag/reject 即會自動退回」，
+  //   但 plot detail / 6 子集合 / 待覆核三條 markQA 路徑都被 `canQA() && !isLocked()` 擋住，
+  //   實際上 review+Lock 狀態下使用者根本看不到 flag 按鈕 → 訊息死循環。
+  //   改為誠實描述：reviewer 走查證 / admin god-view 強制退回 / 改幾筆 qaStatus 為 pending（後者要 admin 介入）。
   if (reason === 'all-verified') {
-    lines.push(`<div class="text-xs text-stone-500 mt-1">⚙️ 系統自動鎖定。若需修正資料，請對某筆標 ⚠ flag / ✕ reject 即會自動退回 active 並解鎖。</div>`);
+    if (isSystemAdmin()) {
+      lines.push(`<div class="text-xs text-stone-500 mt-1">⚙️ 系統自動鎖定（全資料 verified 自動觸發）。處理選項：① reviewer 走「審查（QAQC）」分頁簽發查證；② admin 強制退回作業中（下方按鈕，會留 audit trail）。</div>`);
+    } else {
+      lines.push(`<div class="text-xs text-stone-500 mt-1">⚙️ 系統自動鎖定（全資料 verified 自動觸發）。要繼續編輯需請 admin 強制退回，或請 reviewer 完成查證簽發。</div>`);
+    }
   }
   lockStatus.innerHTML = lines.join('');
 
@@ -2168,12 +2176,41 @@ async function renderSettings() {
   if (curStatus === STATUS.VERIFIED || curStatus === STATUS.ARCHIVED) {
     lockBtn.classList.add('hidden');
   } else if (isAutoLocked) {
-    // 系統自動 lock：顯示提示按鈕但禁用，引導使用者用 markQA 退回
+    // v2.11.8：admin god-view 後門 — review+auto-Lock 強制退回 active+Unlock
+    //   對齊 v2.7.9 verified→active 後門 pattern；非 admin 仍維持 disabled 視覺
     lockBtn.classList.remove('hidden');
-    lockBtn.textContent = '🔒 系統自動鎖定（請對任一筆標 flag 退回）';
-    lockBtn.className = 'bg-stone-300 text-stone-600 px-4 py-2 rounded text-sm cursor-not-allowed';
-    lockBtn.disabled = true;
-    lockBtn.onclick = (e) => { e.preventDefault(); toast('系統自動鎖定無法手動解除，請對某筆 markQA flag/reject'); };
+    if (isSystemAdmin() && curStatus === STATUS.REVIEW) {
+      lockBtn.textContent = '↩️ admin 強制退回作業中（解鎖）';
+      lockBtn.className = 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-4 py-2 rounded text-sm font-medium';
+      lockBtn.disabled = false;
+      lockBtn.onclick = async () => {
+        if (!confirm(
+          'admin 後門：強制退回為「作業中（active）」？\n\n' +
+          '• 狀態：review → active\n' +
+          '• 自動 Unlock（PI / surveyor 可重新編輯）\n' +
+          '• 此操作會記錄在 statusChangedAt / statusChangedBy（你的 admin uid）\n\n' +
+          '確定退回？'
+        )) return;
+        try {
+          lockBtn.disabled = true;
+          lockBtn.textContent = '⏳ 處理中…';
+          await applyStatusForceUnlockReview(state.project);
+          toast('▶ 已強制退回作業中（已解除鎖定）', 4000);
+          renderSettings();
+          renderStatusBanner();
+        } catch (e) {
+          toast('退回失敗：' + e.message);
+          lockBtn.disabled = false;
+          lockBtn.textContent = '↩️ admin 強制退回作業中（解鎖）';
+        }
+      };
+    } else {
+      // PI / surveyor / legacy lock：維持 disabled 視覺
+      lockBtn.textContent = '🔒 系統自動鎖定';
+      lockBtn.className = 'bg-stone-300 text-stone-600 px-4 py-2 rounded text-sm cursor-not-allowed';
+      lockBtn.disabled = true;
+      lockBtn.onclick = (e) => { e.preventDefault(); toast('系統自動鎖定無法手動解除 — 請洽 admin 強制退回，或請 reviewer 完成查證簽發'); };
+    }
   } else {
     lockBtn.classList.remove('hidden');
     lockBtn.disabled = false;

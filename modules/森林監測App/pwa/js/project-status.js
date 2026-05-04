@@ -9,7 +9,7 @@
 //   reviewer 完成審查（v2.7）       → review → verified（保留 Lock，autoLockReason='reviewer-approved'）
 //   admin 結案                       → verified → archived（封存按鈕，已實作於 forms.archiveProject）
 
-import { fb, state } from './app.js?v=21107';
+import { fb, state } from './app.js?v=21108';
 
 export const STATUS = {
   CREATED:  'created',
@@ -296,6 +296,53 @@ export async function applyStatusRevertVerified(project, target) {
     project.lockedBy = null;
     project.autoLockReason = null;
   }
+}
+
+/**
+ * v2.11.8：admin 強制退回 active（review god-view 後門）
+ * 動機：review + auto-Lock 是「全 verified 系統自動觸發」的正常終局，
+ *       但 PWA UI 把所有 markQA 按鈕擋在 isLocked=false 之後（plot detail / 6 子集合 / 待覆核），
+ *       導致設定頁的提示「請對某筆 markQA flag/reject」實際上找不到按鈕可按 — 死循環。
+ *       本函式給 admin 一個正規 UI 路徑強制把 review→active + Unlock，
+ *       對齊 v2.7.9 verified→active 後門 pattern。
+ *
+ * 行為：
+ * - 僅允許 status=review 起點；其他狀態拒絕
+ * - 寫 status='active' + locked=false + 清 lockedAt/lockedBy/autoLockReason
+ * - 寫 statusChangedBy/statusChangedAt 留 admin uid 作 audit trail
+ * - 不清 verifiedAt/verifiedBy（review 階段本來就沒這兩欄；只有 verified 才有）
+ *
+ * 與 archive→unarchive 路徑差別：本路徑會寫 status='active'（乾淨終局），
+ *   archive→unarchive 不動 status 會留 review 殘影。
+ */
+export async function applyStatusForceUnlockReview(project) {
+  if (!project) throw new Error('project required');
+  if (project.archived) throw new Error('已封存專案不可強制退回（請先解封存）');
+  const cur = project.status;
+  if (cur !== STATUS.REVIEW) throw new Error(`狀態 ${cur} 不可強制退回（需處於 review）`);
+  const adminUid = state.user?.uid;
+  if (!adminUid) throw new Error('未登入');
+
+  const projectRef = fb.doc(fb.db, 'projects', project.id);
+  const updates = {
+    status: STATUS.ACTIVE,
+    statusChangedAt: fb.serverTimestamp(),
+    statusChangedBy: adminUid,
+    locked: false,
+    lockedAt: null,
+    lockedBy: null,
+    autoLockReason: null,
+  };
+  await fb.updateDoc(projectRef, updates);
+
+  // sync client state
+  project.status = STATUS.ACTIVE;
+  project.statusChangedAt = new Date();
+  project.statusChangedBy = adminUid;
+  project.locked = false;
+  project.lockedAt = null;
+  project.lockedBy = null;
+  project.autoLockReason = null;
 }
 
 /** PI 手動 toggle Lock — 寫 autoLockReason='manual'，狀態不動 */

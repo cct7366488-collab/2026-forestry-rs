@@ -1,7 +1,7 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.11.7';  // v2.11.7：hotfix — admin 點「⚙️ 編輯全域設定」按鈕沒反應。原邏輯 clearApiKey + clearProxyUrl + reopen，但 admin 全域 key 還在 → effective 仍滿足 → modal 開後直接跳主流程，setup form 不出現。修：加 forceSetup 旗標到 openAiIdentifyModal({forceSetup:true})，無視 effective 狀態強制進設定畫面。按鈕改不再 clear 個人 keys（避免破壞 user override），只 close + reopen with forceSetup. saveAdminBtn 寫完後重開的 modal 沒帶 forceSetup → 自然跳主流程
+const CACHE = 'forest-monitor-v2.11.8';  // v2.11.8：admin 後門 — review+auto-Lock 強制退回作業中（解鎖）。動機：v2.3 起設定頁提示「請對某筆 markQA flag 退回」實際做不到（plot detail / 6 子集合 / 待覆核三條 markQA 路徑都被 canQA() && !isLocked() 擋住），review+Lock 死循環。新增 applyStatusForceUnlockReview() (project-status.js) + 設定頁 admin 看到「↩️ admin 強制退回作業中」按鈕（對齊 v2.7.9 verified→active 後門 pattern）。順便修 line 2173 stale 提示文字 — 改為誠實描述 reviewer 簽發 / admin god-view / 改 qaStatus 為 pending 三條路徑。PI 仍維持 disabled 視覺，要解鎖必須請 admin 介入（設計意圖）。
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、
