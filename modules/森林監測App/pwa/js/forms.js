@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21109';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21111';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21109';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21111';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21109';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21111';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21109';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21111';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21109';
+import { createSpeciesPicker } from './species-picker.js?v=21111';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21109';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21111';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21109';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21111';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21109';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21111';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -41,7 +41,8 @@ function createGpsButton({
   initialAccuracy = null,   // 已存的精度（plot 表單用）
   showTwd97 = false,        // true: 顯示 TWD97 座標（plot 表單用）
   showInitialAsExisting = false, // true: 初始顯示「已存：lat, lng」（wildlife 用）
-  plotForDistance = null    // 若提供，定位後顯示與 plot 中心距離（wildlife 用）
+  plotForDistance = null,   // 若提供，定位後顯示與 plot 中心距離（wildlife 用）
+  onLocationChange = null   // v2.11.11：成功定位時 callback({ lng, lat, accuracy }) — plot form 用來偵測 GPS 變動後自動平移已上傳的多邊形
 } = {}) {
   // 三個 hidden input（lng/lat 必有，accuracy 視 showTwd97 決定）
   const lngInput = el('input', { type: 'hidden', name: 'lng', value: initialLng ?? '' });
@@ -106,6 +107,11 @@ function createGpsButton({
     if (accInput) accInput.value = '';     // 手動沒 accuracy
     gpsBtn.textContent = '📍 重新定位';
     manualEntry.removeAttribute('open');
+    // v2.11.11：通知 caller 定位變動（含手動輸入）
+    if (typeof onLocationChange === 'function') {
+      try { onLocationChange({ lng, lat, accuracy: null, source: 'manual' }); }
+      catch (err) { console.error('[onLocationChange] manual', err); }
+    }
   });
 
   // ===== v2.10.4：高精度失敗 → 自動降精度 retry =====
@@ -136,6 +142,11 @@ function createGpsButton({
         gpsStatus.innerHTML = `WGS84: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>TWD97: (${t.x}, ${t.y}) ｜ ±${Math.round(accuracy)}m${extraMsg}`;
       } else {
         gpsStatus.innerHTML = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} ±${Math.round(accuracy)}m${extraMsg}`;
+      }
+      // v2.11.11：通知 caller 定位變動（geolocation 成功）
+      if (typeof onLocationChange === 'function') {
+        try { onLocationChange({ lng: longitude, lat: latitude, accuracy, source: 'gps' }); }
+        catch (err) { console.error('[onLocationChange] gps', err); }
       }
     } catch (e) {
       console.error('[createGpsButton] success callback error', e);
@@ -1798,13 +1809,82 @@ export async function openPlotForm(project, existing = null) {
     } catch {}
   }
 
+  // ===== v2.11.11：表單訊息面板（取代 toast 用於阻擋型錯誤）=====
+  // 為什麼：HTML5 native validation 失敗（required + hidden）會在 user 看不到的地方擋 submit；
+  //         toast 又是閃過去的訊息容易看漏。改用持續顯示在表單頂部的訊息列。
+  const formMessages = el('div', { class: 'space-y-1', style: 'display:none' });
+  let _formMsgTimer = null;
+  function showFormMessages(items, opts = {}) {
+    if (_formMsgTimer) { clearTimeout(_formMsgTimer); _formMsgTimer = null; }
+    formMessages.innerHTML = '';
+    if (!items || items.length === 0) {
+      formMessages.style.display = 'none';
+      return;
+    }
+    const stylesByLevel = {
+      error: { cls: 'bg-red-50 border-red-300 text-red-800',          icon: '❌' },
+      warn:  { cls: 'bg-amber-50 border-amber-300 text-amber-800',    icon: '⚠️' },
+      info:  { cls: 'bg-emerald-50 border-emerald-300 text-emerald-800', icon: '✅' }
+    };
+    items.forEach(it => {
+      const s = stylesByLevel[it.level] || stylesByLevel.error;
+      formMessages.appendChild(el('div', {
+        class: `text-sm px-3 py-2 rounded border ${s.cls}`
+      }, `${s.icon} ${it.text}`));
+    });
+    formMessages.style.display = '';
+    formMessages.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (opts.autoHide) {
+      _formMsgTimer = setTimeout(() => {
+        formMessages.innerHTML = '';
+        formMessages.style.display = 'none';
+        _formMsgTimer = null;
+      }, opts.autoHide);
+    }
+  }
+  function clearFormMessages() {
+    if (_formMsgTimer) { clearTimeout(_formMsgTimer); _formMsgTimer = null; }
+    formMessages.innerHTML = '';
+    formMessages.style.display = 'none';
+  }
+
+  // ===== v2.11.11：上傳 GeoJSON 時的 GPS 中心（追蹤用，讓 GPS 變動時可自動平移多邊形）=====
+  // 編輯既有 irregular plot：以資料庫存的 locationTWD97 當基準（=== 該多邊形 vertices 對應的中心）
+  // 新建 plot：null，等到上傳 GeoJSON 才設值
+  let uploadCenterTwd97 = (existing?.shape === 'irregular' && existing?.locationTWD97
+    && Number.isFinite(existing.locationTWD97.x) && Number.isFinite(existing.locationTWD97.y))
+    ? { x: existing.locationTWD97.x, y: existing.locationTWD97.y }
+    : null;
+
+  // GPS 變動 → 平移多邊形以保持原地理位置（避免上傳 GeoJSON 後重新定位導致多邊形移位）
+  const handleLocationChange = ({ lng, lat }) => {
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+    if (!uploadCenterTwd97) return;
+    if (!Array.isArray(irregularVertices) || irregularVertices.length === 0) return;
+    const newCenter = wgs84ToTwd97(lng, lat);
+    const dx = newCenter.x - uploadCenterTwd97.x;
+    const dy = newCenter.y - uploadCenterTwd97.y;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;  // < 0.5 m 不處理（GPS jitter）
+    irregularVertices = irregularVertices.map(v => ({ x: v.x - dx, y: v.y - dy }));
+    uploadCenterTwd97 = newCenter;
+    if (typeof renderIrregularTable === 'function') renderIrregularTable();
+    if (typeof validateAndPreviewIrregular === 'function') validateAndPreviewIrregular();
+    const moved = Math.round(Math.hypot(dx, dy));
+    showFormMessages([{
+      level: 'info',
+      text: `GPS 中心移動 ${moved} m → 已自動平移多邊形（保持實地絕對位置不變、local 座標重算）`
+    }], { autoHide: 6000 });
+  };
+
   // v2.3.6：plot GPS 用共用 helper（顯示 TWD97 + accuracy）
   // v2.10.4：destructure 多接 manualEntry（手動輸入 fallback UI）
+  // v2.11.11：傳入 onLocationChange 偵測 GPS 變動 → 自動平移已上傳的多邊形
   const { gpsBtn, gpsStatus, manualEntry: gpsManualEntry, lngInput, latInput, accInput } = createGpsButton({
     initialLat: loc?.latitude ?? null,
     initialLng: loc?.longitude ?? null,
     initialAccuracy: existing?.locationAccuracy_m ?? null,
-    showTwd97: true
+    showTwd97: true,
+    onLocationChange: handleLocationChange
   });
 
   // v1.6：照片上傳元件
@@ -1985,26 +2065,107 @@ export async function openPlotForm(project, existing = null) {
       const lng = parseFloat(lngInput.value);
       const lat = parseFloat(latInput.value);
       if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-        toast('請先設定樣區 GPS（GeoJSON 解析時要計算 local 偏移）');
+        showFormMessages([{ level: 'error', text: '請先設定樣區 GPS（GeoJSON 解析時要計算 local 偏移）' }]);
         return;
       }
       const center = wgs84ToTwd97(lng, lat);
       const result = parseGeoJsonPolygon(json, center, twd97ToWgs84, wgs84ToTwd97);
       if (result.vertices.length > VERTEX_MAX) {
-        toast(`頂點數 ${result.vertices.length} 超過上限 ${VERTEX_MAX}`);
+        showFormMessages([{ level: 'error', text: `頂點數 ${result.vertices.length} 超過上限 ${VERTEX_MAX}` }]);
         return;
       }
       irregularVertices = result.vertices.map(v => ({ x: v.x, y: v.y }));
       irregularSrcInfo = `${file.name}（${result.srcSystem}，${result.vertices.length} 頂點）`;
+      // v2.11.11：記錄上傳當下的 GPS 中心，之後若 user 重新定位 GPS 可自動平移多邊形
+      uploadCenterTwd97 = { x: center.x, y: center.y };
       renderIrregularTable();
       validateAndPreviewIrregular();
-      toast(`已從 ${file.name} 載入 ${result.vertices.length} 頂點`);
+      // v2.11.11：警示多邊形跟 GPS 中心距離（合理應小於 200 m，超過提示可能 GPS 設錯位置）
+      const v = validatePolygon(irregularVertices);
+      const msgs = [{ level: 'info', text: `已從 ${file.name} 載入 ${result.vertices.length} 頂點（${result.srcSystem}）` }];
+      if (v.ok) {
+        const cx = v.vertices.reduce((s, p) => s + p.x, 0) / v.vertices.length;
+        const cy = v.vertices.reduce((s, p) => s + p.y, 0) / v.vertices.length;
+        const distFromCenter = Math.hypot(cx, cy);
+        if (distFromCenter > 200) {
+          msgs.push({
+            level: 'warn',
+            text: `多邊形重心離 GPS 中心 ${Math.round(distFromCenter)} m，超過合理範圍（< 200 m）— 請確認 GPS 是否設在樣區附近。儲存時會以 GPS 為中心、多邊形 local 座標保留現值。`
+          });
+        }
+      }
+      showFormMessages(msgs, { autoHide: 8000 });
     } catch (e) {
-      toast('GeoJSON 解析失敗：' + e.message);
+      showFormMessages([{ level: 'error', text: 'GeoJSON 解析失敗：' + e.message }]);
       console.error('[GeoJSON]', e);
     }
     geoFileInput.value = '';  // reset for re-upload
   });
+
+  // v2.11.11：GPS 量測位置說明（折疊式，預設收起）
+  const gpsHelpDetails = el('details', {
+    class: 'text-xs bg-white border border-stone-200 rounded p-2 mb-2',
+    style: 'cursor:default'
+  },
+    el('summary', {
+      class: 'cursor-pointer font-medium text-stone-700 hover:text-stone-900',
+      style: 'user-select:none'
+    }, '💡 GPS 應該量在多邊形的什麼位置？（點開看建議）'),
+    el('div', { class: 'mt-2 space-y-2 text-stone-700' },
+      el('div', {},
+        el('b', {}, '基本概念：'),
+        ' 系統儲存模型 = ',
+        el('code', { class: 'bg-stone-100 px-1 rounded' }, 'GPS 錨點（locationTWD97）'),
+        ' + ',
+        el('code', { class: 'bg-stone-100 px-1 rounded' }, '多邊形折點 local 偏移'),
+        '。GPS 是錨點，多邊形是相對它的偏移。'
+      ),
+      el('div', { class: 'bg-emerald-50 border border-emerald-200 rounded p-2' },
+        el('b', { class: 'text-emerald-800' }, '✅ 內部幾何（形狀／面積／周長）：'),
+        ' 不受 GPS 量測位置影響。Shoelace 面積由折點相對距離決定。'
+      ),
+      el('div', { class: 'bg-amber-50 border border-amber-200 rounded p-2' },
+        el('b', { class: 'text-amber-800' }, '⚠️ 整體絕對位置（地圖上落點）：'),
+        ' 會跟著 GPS 那一次的誤差一起平移。手機 GPS 在林冠下 ±5～15 m，RTK ±0.05 m。',
+        el('span', { class: 'text-amber-900 font-medium' }, '量得越準，多邊形落在地圖上越準。')
+      ),
+      el('div', {},
+        el('b', {}, '實務建議（依 GeoJSON 來源）：'),
+        el('table', { class: 'w-full text-xs mt-1', style: 'border-collapse:collapse' },
+          el('thead', { class: 'bg-stone-100' },
+            el('tr', {},
+              el('th', { class: 'p-1 text-left border border-stone-200' }, '情境'),
+              el('th', { class: 'p-1 text-left border border-stone-200' }, 'GPS 量測位置')
+            )
+          ),
+          el('tbody', {},
+            el('tr', {},
+              el('td', { class: 'p-1 border border-stone-200' }, 'RTK / GIS 數位化（高精度 GeoJSON）'),
+              el('td', { class: 'p-1 border border-stone-200' }, '量在', el('b', {}, '多邊形重心'), '，方便 reviewer 復測')
+            ),
+            el('tr', {},
+              el('td', { class: 'p-1 border border-stone-200' }, '手機 GPS 巡邊得到的 GeoJSON'),
+              el('td', { class: 'p-1 border border-stone-200' }, '量在', el('b', {}, '訊號最好的位置'), '（林緣／開闊地）')
+            ),
+            el('tr', {},
+              el('td', { class: 'p-1 border border-stone-200' }, '永久樣區（PSP，跨年復測）'),
+              el('td', { class: 'p-1 border border-stone-200' }, '量在', el('b', {}, '指定樁位'), '（常用 NW 角點）')
+            ),
+            el('tr', {},
+              el('td', { class: 'p-1 border border-stone-200' }, '臨時樣區／抽樣樣區'),
+              el('td', { class: 'p-1 border border-stone-200' }, '預設用', el('b', {}, '重心'))
+            )
+          )
+        )
+      ),
+      el('div', { class: 'bg-blue-50 border border-blue-200 rounded p-2' },
+        el('b', { class: 'text-blue-800' }, 'ℹ️ 量錯不用緊張：'),
+        ' 上傳 GeoJSON 後若你重新定位 GPS，系統會',
+        el('b', {}, '自動平移多邊形的 local 座標'),
+        '，保持絕對地理位置不變。所以你可以放心先量、再修正。'
+      )
+    )
+  );
 
   const irregularFields = el('div', { class: 'field', style: 'display:none;background:#fefce8;border:1px solid #fde047;border-radius:6px;padding:8px' },
     el('div', { class: 'flex items-center justify-between gap-2 mb-2' },
@@ -2013,6 +2174,7 @@ export async function openPlotForm(project, existing = null) {
         '📂 GeoJSON 上傳', geoFileInput
       )
     ),
+    gpsHelpDetails,                       // v2.11.11：GPS 量測位置說明（折疊式）
     el('div', { class: 'text-xs text-stone-600 mb-1' },
       `頂點以「local meters 相對 plot.locationTWD97」儲存。系統會自動：去重連續點 / 強制 CCW / 自交檢查 / 算 Shoelace 面積。`
     ),
@@ -2073,6 +2235,9 @@ export async function openPlotForm(project, existing = null) {
     // square 仍顯示面積 dropdown（user 選水平名目面積）；rectangle 用 hardcoded 20×25 故隱藏；irregular 由 vertices 算故隱藏
     areaSelField.style.display = (shape === 'rectangle' || shape === 'irregular') ? 'none' : '';
     slopeLengthField.style.display = isDualSlopeShape ? '' : 'none';
+    // 同步切換 required，避免 hidden input 仍被 HTML5 native validation 卡住 submit
+    // （症狀：Console 噴 "An invalid form control with name='slopeLengthDeg' is not focusable."）
+    slopeLengthInput.required = isDualSlopeShape;
     slopeWidthLabel.textContent = isDualSlopeShape ? '寬邊坡度 (°)' : '坡度 (°)';
     autofillHint.style.display = isDualSlopeShape ? '' : 'none';
 
@@ -2214,7 +2379,11 @@ export async function openPlotForm(project, existing = null) {
     previewBox
   );
 
-  const f = el('form', { class: 'space-y-2' },
+  // v2.11.11：novalidate 關閉 HTML5 native validation，改用 JS 集中驗證 + formMessages 顯示
+  //   起因：hidden 但 required 的 input 會讓 native validation 卡住 submit 卻不顯示錯誤
+  //         （Console: "An invalid form control with name='X' is not focusable"）
+  const f = el('form', { class: 'space-y-2', novalidate: 'true' },
+    formMessages,                       // v2.11.11：訊息面板放最頂端
     field({ label: '樣區編號', name: 'code', required: true, value: existing?.code || '', placeholder: `${project.code}-001` }),
     field({ label: '林班-小班', name: 'forestUnit', value: existing?.forestUnit || '', placeholder: '123-2' }),
     el('div', { class: 'field' },
@@ -2238,12 +2407,19 @@ export async function openPlotForm(project, existing = null) {
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
+    // v2.11.11：所有阻擋型錯誤統一收集到 errors[]，submit 時一次顯示在 formMessages
+    const errors = [];
     const lng = parseFloat(fd.get('lng'));
     const lat = parseFloat(fd.get('lat'));
-    if (!lng || !lat) { toast('請先抓取 GPS'); return; }
+    if (!lng || !lat) errors.push('請先抓取 GPS（或手動輸入座標）');
+    // 樣區編號
+    const code = (fd.get('code') || '').trim();
+    if (!code) errors.push('請填樣區編號');
+    // 設置日期
+    if (!fd.get('establishedAt')) errors.push('請選擇設置日期');
     // v1.6：照片 required 驗證
-    if (photoReq && photoUp.count === 0) { toast('方法學要求至少一張樣區照片'); return; }
-    const t97 = wgs84ToTwd97(lng, lat);
+    if (photoReq && photoUp.count === 0) errors.push('方法學要求至少一張樣區照片');
+
     // v2.7.16 / v2.8.0：幾何 + 坡度 — 算 area + plotDimensions + areaHorizontal_m2
     const shape = fd.get('shape');
     let area_m2, plotDimensions;
@@ -2252,27 +2428,31 @@ export async function openPlotForm(project, existing = null) {
       const w = parseFloat(fd.get('widthM'));
       const l = parseFloat(fd.get('lengthM'));
       if (!Number.isFinite(w) || w <= 0 || !Number.isFinite(l) || l <= 0) {
-        toast(`${shape === 'rectangle' ? '矩形' : '方形'}樣區需填寬與長（> 0）`); return;
-      }
-      area_m2 = w * l;
-      if (shape === 'square') {
-        // square 額外保留 side（水平名目側邊，從 areaSel 推出）以維持向後相容下游讀取
-        const nominalArea = parseInt(fd.get('area_m2'), 10) || (w * l);
-        plotDimensions = { side: Math.sqrt(nominalArea), width: w, length: l };
+        errors.push(`${shape === 'rectangle' ? '矩形' : '方形'}樣區需填寬與長（> 0）`);
       } else {
-        plotDimensions = { width: w, length: l };
+        area_m2 = w * l;
+        if (shape === 'square') {
+          // square 額外保留 side（水平名目側邊，從 areaSel 推出）以維持向後相容下游讀取
+          const nominalArea = parseInt(fd.get('area_m2'), 10) || (w * l);
+          plotDimensions = { side: Math.sqrt(nominalArea), width: w, length: l };
+        } else {
+          plotDimensions = { width: w, length: l };
+        }
       }
     } else if (shape === 'irregular') {
       // v2.8.0：不規則多邊形 — strict 驗證 + Shoelace 面積
       const v = validatePolygon(irregularVertices);
-      if (!v.ok) { toast('不規則多邊形驗證失敗：' + v.error); return; }
-      area_m2 = v.area;
-      const bbox = computeBbox(v.vertices);
-      plotDimensions = {
-        vertices: v.vertices,           // [{x,y},...] CCW + 去重後
-        bbox,                            // { minX, maxX, minY, maxY }
-      };
-      if (irregularSrcInfo) plotDimensions.sourceInfo = irregularSrcInfo;
+      if (!v.ok) {
+        errors.push('不規則多邊形驗證失敗：' + v.error);
+      } else {
+        area_m2 = v.area;
+        const bbox = computeBbox(v.vertices);
+        plotDimensions = {
+          vertices: v.vertices,           // [{x,y},...] CCW + 去重後
+          bbox,                            // { minX, maxX, minY, maxY }
+        };
+        if (irregularSrcInfo) plotDimensions.sourceInfo = irregularSrcInfo;
+      }
     } else if (shape === 'circle') {
       area_m2 = parseInt(fd.get('area_m2'), 10);
       plotDimensions = { radius: Math.sqrt(area_m2 / Math.PI) };
@@ -2283,12 +2463,20 @@ export async function openPlotForm(project, existing = null) {
     const slopeWidthRaw  = parseFloat(fd.get('slopeWidthDeg'));
     const slopeLengthRaw = parseFloat(fd.get('slopeLengthDeg'));
     if (!Number.isFinite(slopeWidthRaw)) {
-      toast(isDualSlopeShape ? '請填寬邊坡度' : '請填坡度');
-      return;
+      errors.push(isDualSlopeShape ? '請填寬邊坡度' : '請填坡度');
     }
     if (isDualSlopeShape && !Number.isFinite(slopeLengthRaw)) {
-      toast('請填長邊坡度'); return;
+      errors.push('請填長邊坡度');
     }
+
+    // v2.11.11：errors 收集完 → 一次顯示，return 前不再做後續處理
+    if (errors.length > 0) {
+      showFormMessages(errors.map(t => ({ level: 'error', text: t })));
+      return;
+    }
+    clearFormMessages();
+
+    const t97 = wgs84ToTwd97(lng, lat);
     const slopeWidthDeg  = slopeWidthRaw;
     const slopeLengthDeg = isDualSlopeShape ? slopeLengthRaw : slopeWidthRaw;
     // 主坡度（向後相容下游：QAQC error / analytics / 碳計算）= 長邊坡度
@@ -2350,7 +2538,10 @@ export async function openPlotForm(project, existing = null) {
         : '已建立（待審核）');
       closeModal();
     } catch (e) {
-      toast('儲存失敗：' + e.message);
+      // v2.11.11：Firestore 失敗也用 panel 顯示（帶 error code 方便 debug）
+      const errCode = e.code ? ` [${e.code}]` : '';
+      showFormMessages([{ level: 'error', text: `儲存失敗${errCode}：${e.message}` }]);
+      console.error('[plot save]', e);
       submitBtn.disabled = false;
       submitBtn.textContent = '儲存';
     }
