@@ -1,7 +1,8 @@
 // Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.11.8';  // v2.11.8：admin 後門 — review+auto-Lock 強制退回作業中（解鎖）。動機：v2.3 起設定頁提示「請對某筆 markQA flag 退回」實際做不到（plot detail / 6 子集合 / 待覆核三條 markQA 路徑都被 canQA() && !isLocked() 擋住），review+Lock 死循環。新增 applyStatusForceUnlockReview() (project-status.js) + 設定頁 admin 看到「↩️ admin 強制退回作業中」按鈕（對齊 v2.7.9 verified→active 後門 pattern）。順便修 line 2173 stale 提示文字 — 改為誠實描述 reviewer 簽發 / admin god-view / 改 qaStatus 為 pending 三條路徑。PI 仍維持 disabled 視覺，要解鎖必須請 admin 介入（設計意圖）。
+const CACHE = 'forest-monitor-v2.11.9';  // v2.11.9：執行/委託單位下拉清單微調（code-tables.js AGENCY_CODES）— 大學群刪 NDHU 東華、加 NIU 宜蘭；其他群加 TPFTA 臺北市林業技師公會（排在 PRIV/OTHER 之上）。純資料表變更、無 schema / rules / API 變動。
+// v2.11.8：admin 後門 — review+auto-Lock 強制退回作業中（解鎖）。新增 applyStatusForceUnlockReview() (project-status.js) + 設定頁 admin amber 按鈕 + 修 line 2173 stale 提示文字。
 // v2.10.2：SHELL 拿掉所有 ./js/*.js（保留 HTML / CSS / manifest）
 //   原因：之前 SHELL 預快取 ./js/app.js（無 qs），同時 index.html 用 ./js/app.js?v=NNNNN，
 //   兩個 URL 在 ESM 看是不同 module → app.js 被載入兩個實例。第一個 [projects query] 印兩遍、

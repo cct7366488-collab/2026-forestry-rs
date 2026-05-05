@@ -62,9 +62,10 @@ export const AGENCY_CODES = [
   { group: '大學', code: 'NTU',   label: '臺灣大學' },
   { group: '大學', code: 'NCYU',  label: '嘉義大學' },
   { group: '大學', code: 'PCCU',  label: '文化大學' },
-  { group: '大學', code: 'NDHU',  label: '東華大學' },
+  { group: '大學', code: 'NIU',   label: '宜蘭大學' },
 
   // ----- 其他 -----
+  { group: '其他', code: 'TPFTA', label: '臺北市林業技師公會' },
   { group: '其他', code: 'PRIV',  label: '私人/合作社' },
   { group: '其他', code: 'OTHER', label: '其他' },
 ];

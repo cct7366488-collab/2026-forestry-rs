@@ -15,7 +15,7 @@
 //   const localSp = matchToLocalSpecies(top[0], allSpecies);
 
 // v2.11.4：API key + Proxy URL 從 user-only localStorage 升級為「Firestore 全域 admin > localStorage user」優先序
-import { fb, isSystemAdmin, state } from './app.js?v=21108';
+import { fb, isSystemAdmin, state } from './app.js?v=21109';
 
 const LS_API_KEY = 'forestmrv.plantnet.apiKey';
 const LS_PROXY_URL = 'forestmrv.plantnet.proxyUrl';   // v2.11.2：CORS proxy URL（如 Cloudflare Worker）
