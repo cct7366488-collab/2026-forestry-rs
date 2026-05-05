@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21111';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21113';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21111';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21113';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21111';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21113';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21111';
+import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21113';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21111';
+import { createSpeciesPicker } from './species-picker.js?v=21113';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21111';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21113';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21111';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21113';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21111';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21113';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -2102,7 +2102,8 @@ export async function openPlotForm(project, existing = null) {
     geoFileInput.value = '';  // reset for re-upload
   });
 
-  // v2.11.11：GPS 量測位置說明（折疊式，預設收起）
+  // v2.11.12：GPS 量測位置說明改用 SVG 圖示（取代 v2.11.11 的冗長文字 + 表格 — 大幅縮減 forms.js 體積）
+  //          圖檔位置：pwa/img/gps-position-guide.svg（向量、~19 KB），點圖可開新分頁放大 / 列印 A4
   const gpsHelpDetails = el('details', {
     class: 'text-xs bg-white border border-stone-200 rounded p-2 mb-2',
     style: 'cursor:default'
@@ -2110,59 +2111,24 @@ export async function openPlotForm(project, existing = null) {
     el('summary', {
       class: 'cursor-pointer font-medium text-stone-700 hover:text-stone-900',
       style: 'user-select:none'
-    }, '💡 GPS 應該量在多邊形的什麼位置？（點開看建議）'),
-    el('div', { class: 'mt-2 space-y-2 text-stone-700' },
-      el('div', {},
-        el('b', {}, '基本概念：'),
-        ' 系統儲存模型 = ',
-        el('code', { class: 'bg-stone-100 px-1 rounded' }, 'GPS 錨點（locationTWD97）'),
-        ' + ',
-        el('code', { class: 'bg-stone-100 px-1 rounded' }, '多邊形折點 local 偏移'),
-        '。GPS 是錨點，多邊形是相對它的偏移。'
+    }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
+    el('div', { class: 'mt-2' },
+      el('a', {
+        href: './img/gps-position-guide.svg?v=21113',
+        target: '_blank',
+        rel: 'noopener',
+        class: 'block',
+        title: '點圖可開新分頁放大檢視 / 列印 A4'
+      },
+        el('img', {
+          src: './img/gps-position-guide.svg?v=21113',
+          alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
+          class: 'w-full h-auto rounded border border-stone-200',
+          loading: 'lazy'
+        })
       ),
-      el('div', { class: 'bg-emerald-50 border border-emerald-200 rounded p-2' },
-        el('b', { class: 'text-emerald-800' }, '✅ 內部幾何（形狀／面積／周長）：'),
-        ' 不受 GPS 量測位置影響。Shoelace 面積由折點相對距離決定。'
-      ),
-      el('div', { class: 'bg-amber-50 border border-amber-200 rounded p-2' },
-        el('b', { class: 'text-amber-800' }, '⚠️ 整體絕對位置（地圖上落點）：'),
-        ' 會跟著 GPS 那一次的誤差一起平移。手機 GPS 在林冠下 ±5～15 m，RTK ±0.05 m。',
-        el('span', { class: 'text-amber-900 font-medium' }, '量得越準，多邊形落在地圖上越準。')
-      ),
-      el('div', {},
-        el('b', {}, '實務建議（依 GeoJSON 來源）：'),
-        el('table', { class: 'w-full text-xs mt-1', style: 'border-collapse:collapse' },
-          el('thead', { class: 'bg-stone-100' },
-            el('tr', {},
-              el('th', { class: 'p-1 text-left border border-stone-200' }, '情境'),
-              el('th', { class: 'p-1 text-left border border-stone-200' }, 'GPS 量測位置')
-            )
-          ),
-          el('tbody', {},
-            el('tr', {},
-              el('td', { class: 'p-1 border border-stone-200' }, 'RTK / GIS 數位化（高精度 GeoJSON）'),
-              el('td', { class: 'p-1 border border-stone-200' }, '量在', el('b', {}, '多邊形重心'), '，方便 reviewer 復測')
-            ),
-            el('tr', {},
-              el('td', { class: 'p-1 border border-stone-200' }, '手機 GPS 巡邊得到的 GeoJSON'),
-              el('td', { class: 'p-1 border border-stone-200' }, '量在', el('b', {}, '訊號最好的位置'), '（林緣／開闊地）')
-            ),
-            el('tr', {},
-              el('td', { class: 'p-1 border border-stone-200' }, '永久樣區（PSP，跨年復測）'),
-              el('td', { class: 'p-1 border border-stone-200' }, '量在', el('b', {}, '指定樁位'), '（常用 NW 角點）')
-            ),
-            el('tr', {},
-              el('td', { class: 'p-1 border border-stone-200' }, '臨時樣區／抽樣樣區'),
-              el('td', { class: 'p-1 border border-stone-200' }, '預設用', el('b', {}, '重心'))
-            )
-          )
-        )
-      ),
-      el('div', { class: 'bg-blue-50 border border-blue-200 rounded p-2' },
-        el('b', { class: 'text-blue-800' }, 'ℹ️ 量錯不用緊張：'),
-        ' 上傳 GeoJSON 後若你重新定位 GPS，系統會',
-        el('b', {}, '自動平移多邊形的 local 座標'),
-        '，保持絕對地理位置不變。所以你可以放心先量、再修正。'
+      el('div', { class: 'text-stone-500 mt-1', style: 'font-size:10px' },
+        '↑ 點圖可開新分頁放大／列印 A4'
       )
     )
   );
