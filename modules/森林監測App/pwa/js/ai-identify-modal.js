@@ -15,9 +15,9 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast, isSystemAdmin } from './app.js?v=21113';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, LLM_MODELS } from './ai-species.js?v=21113';
-import { loadSpeciesCache } from './species-picker.js?v=21113';
+import { el, toast, isSystemAdmin } from './app.js?v=21116';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, LLM_MODELS } from './ai-species.js?v=21116';
+import { loadSpeciesCache } from './species-picker.js?v=21116';
 
 // v2.11.7：加 forceSetup 旗標 — 「編輯全域設定」按鈕走這條，不論 effective 是否滿足都進設定畫面
 export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
@@ -247,6 +247,9 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
 
     // 每個 candidate 對應一個 detail box（LLM enrich 完後 inline 注入）
     const detailBoxes = {};   // sci → detail container element
+    // v2.11.16：每筆候選的中文名動態狀態 — 來源優先序 字典(4) > iNat(3) > LLM(2) > 英文(1) > 查詢中(0)
+    //   onPick 點選時用 rowStates[sci].zh 而非 closure 內的初始 zh
+    const rowStates = {};   // sci → { zhSpan, sourceSpan, zh, sourcePri, localSp, englishFallback }
 
     results.slice(0, 3).forEach(r => {
       const localSp = matchToLocalSpecies(r, allSpecies);
@@ -258,11 +261,15 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
       const scoreClsText = scorePct >= 70 ? 'text-green-700'
                         : scorePct >= 40 ? 'text-amber-700'
                         : 'text-stone-600';
-      // 中文名 — 優先 Firestore 字典命中，其次 PlantNet commonNames，最後標 (字典外)
-      const zh = localSp?.zh || r.commonNames?.[0] || '(字典中無中名)';
-      const matchTag = localSp
+
+      // v2.11.16：初始顯示 — 字典命中直接用，否則先擱「⏳ 查中文名…」由 iNat / LLM 填
+      //   (避免先閃英文再變中文的視覺跳動；iNat 通常 <300ms 就回)
+      const englishFallback = r.commonNames?.[0] || '';
+      const initialZh = localSp?.zh || (englishFallback ? '⏳ 查中文名…' : '(無中名)');
+      const initialPri = localSp ? 4 : 0;
+      const initialSourceLabel = localSp
         ? '<span class="text-[10px] bg-green-200 text-green-900 px-1 rounded ml-1">✓ 字典中</span>'
-        : '<span class="text-[10px] bg-amber-200 text-amber-900 px-1 rounded ml-1">⚠ 字典外</span>';
+        : '<span class="text-[10px] bg-stone-200 text-stone-700 px-1 rounded ml-1">⏳ 查詢中</span>';
       const consTag = localSp?.conservationGrade
         ? `<span class="text-[10px] bg-red-200 text-red-900 px-1 rounded ml-1">⚠ 保育 ${escHtml(localSp.conservationGrade)}</span>`
         : '';
@@ -272,14 +279,20 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
       const row = el('div', { class: `border-2 rounded p-2 mb-2 cursor-pointer hover:shadow-md transition ${cls}` });
       row.innerHTML = `
         <div class="flex items-baseline justify-between mb-1">
-          <div class="font-bold text-base">${escHtml(zh)}${matchTag}${consTag}</div>
+          <div class="font-bold text-base"><span class="ai-zh-name">${escHtml(initialZh)}</span><span class="ai-zh-source">${initialSourceLabel}</span>${consTag}</div>
           <div class="text-sm font-bold ${scoreClsText} whitespace-nowrap ml-2">${scorePct}%</div>
         </div>
         <div class="text-xs italic text-stone-700">${escHtml(r.sci)}</div>
         <div class="text-[10px] text-stone-500 mt-0.5">科 ${familyStr}${aliases ? ` · 別名 ${escHtml(aliases)}` : ''}</div>
       `;
+      const zhSpan = row.querySelector('.ai-zh-name');
+      const sourceSpan = row.querySelector('.ai-zh-source');
+      rowStates[r.sci] = { zhSpan, sourceSpan, zh: initialZh, sourcePri: initialPri, localSp, englishFallback };
+
       row.addEventListener('click', () => {
-        const finalZh = localSp?.zh || zh;
+        const st = rowStates[r.sci];
+        // 取目前已 resolve 的最佳 zh；若還在「⏳ 查中文名…」狀態則 fallback 英文
+        const finalZh = (st.sourcePri >= 1) ? st.zh : (englishFallback || '(無中名)');
         // v2.11.3：onPick 多帶 imageBlob，讓 caller 把這張照片自動加入 tree.photos（一動作雙功能）
         if (onPick) onPick({
           zh: finalZh, sci: r.sci, localSpecies: localSp, aiResult: r,
@@ -296,7 +309,27 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
     });
     // hint
     resultsBox.appendChild(el('div', { class: 'text-[10px] text-stone-500 mt-2 border-t pt-2' },
-      '✓ 字典中 = 已對應 Firestore 224 種；⚠ 字典外 = 套用後請手動編輯字典或自由輸入'));
+      '✓ 字典中 = 已對應 Firestore 224 種；🌐 iNat = iNaturalist 中文名；🔬 LLM = Claude 推論；⚠ 字典外（英文）= 中文查無'));
+
+    // v2.11.16：iNat 中文名查詢 — 字典外候選並行 fetch、resolve 後即時更新標題
+    results.slice(0, 3).forEach(r => {
+      const st = rowStates[r.sci];
+      if (!st || st.sourcePri >= 4) return;   // 字典命中不查
+      lookupChineseName(r.sci).then(zh => {
+        if (zh) {
+          updateZhName(st, zh, 3, '🌐 iNat', 'bg-blue-200 text-blue-900');
+        } else if (st.sourcePri < 1) {
+          // iNat 無中文名 → fallback 英文
+          updateZhName(st, st.englishFallback || '(無中名)', 1,
+            '⚠ 字典外（英文）', 'bg-amber-200 text-amber-900');
+        }
+      }).catch(() => {
+        if (st.sourcePri < 1) {
+          updateZhName(st, st.englishFallback || '(無中名)', 1,
+            '⚠ 字典外（英文）', 'bg-amber-200 text-amber-900');
+        }
+      });
+    });
 
     // v2.11.5：背景 fire LLM enrich（若有 LLM key）
     getEffectiveLlmKey().then(llmKey => {
@@ -322,7 +355,18 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
             const box = detailBoxes[c.sci];
             if (!box) return;
             const native = c.isNative ? '<span class="text-green-700">原生</span>' : '<span class="text-stone-500">非原生</span>';
-            box.innerHTML = `🔬 <b>特徵</b>: ${escHtml(c.characteristics || '—')}<br>📍 <b>棲地</b>: ${escHtml(c.habitat || '—')}（${native}）${c.notes ? `<br>📝 ${escHtml(c.notes)}` : ''}`;
+            // v2.11.16：LLM chineseName — iNat 沒回 / 字典外才用；iNat 已回但與 LLM 不同則在 detail 提示
+            const llmZh = (c.chineseName || '').trim();
+            let xrefHint = '';
+            const st = rowStates[c.sci];
+            if (st && llmZh && /[一-鿿]/.test(llmZh)) {
+              if (st.sourcePri < 2) {
+                updateZhName(st, llmZh, 2, '🔬 LLM', 'bg-purple-200 text-purple-900');
+              } else if (st.sourcePri === 3 && st.zh !== llmZh) {
+                xrefHint = `<br>🔬 LLM 另推：<b>${escHtml(llmZh)}</b>（顯示以 iNat 為準）`;
+              }
+            }
+            box.innerHTML = `🔬 <b>特徵</b>: ${escHtml(c.characteristics || '—')}<br>📍 <b>棲地</b>: ${escHtml(c.habitat || '—')}（${native}）${c.notes ? `<br>📝 ${escHtml(c.notes)}` : ''}${xrefHint}`;
             box.classList.remove('hidden');
           });
         })
@@ -331,6 +375,16 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
           llmTopBox.innerHTML = `<div class="text-[11px] text-amber-700">⚠ LLM 補詳細失敗：${escHtml(e?.message || String(e))}（不影響 PlantNet 結果）</div>`;
         });
     });
+  }
+
+  // v2.11.16：依優先序更新標題的中文名 + source 徽章 — newPri > 現 pri 才更
+  function updateZhName(state, newZh, newPri, sourceLabel, badgeCls) {
+    if (!state || !state.zhSpan || !state.sourceSpan) return;
+    if (newPri <= state.sourcePri) return;
+    state.zh = newZh;
+    state.sourcePri = newPri;
+    state.zhSpan.textContent = newZh;
+    state.sourceSpan.innerHTML = `<span class="text-[10px] ${badgeCls} px-1 rounded ml-1">${sourceLabel}</span>`;
   }
 
   function escHtml(s) {

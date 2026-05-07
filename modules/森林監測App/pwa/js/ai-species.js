@@ -15,7 +15,7 @@
 //   const localSp = matchToLocalSpecies(top[0], allSpecies);
 
 // v2.11.4：API key + Proxy URL 從 user-only localStorage 升級為「Firestore 全域 admin > localStorage user」優先序
-import { fb, isSystemAdmin, state } from './app.js?v=21113';
+import { fb, isSystemAdmin, state } from './app.js?v=21116';
 
 const LS_API_KEY = 'forestmrv.plantnet.apiKey';
 const LS_PROXY_URL = 'forestmrv.plantnet.proxyUrl';   // v2.11.2：CORS proxy URL（如 Cloudflare Worker）
@@ -208,6 +208,62 @@ export async function identifySpecies(imageBlob, opts = {}) {
   return top;
 }
 
+// === v2.11.14：iNaturalist 中文名查詢（PlantNet 字典外 fallback）===
+// PlantNet commonNames 通常只有英文（e.g. "Sea hearse"）；iNat /v1/taxa 可帶 locale=zh-TW 回 preferred_common_name
+//   - 免 API key、CORS open（瀏覽器直連 OK）
+//   - 對台灣常見種覆蓋率高（已驗證 Hernandia nymphaeifolia → 蓮葉桐）
+//   - 模組內 in-memory cache + sessionStorage 持久化（避免重複辨識同一物種重複打 API）
+//   - 失敗（404/timeout/無 zh）一律回 null，caller 自行 fallback
+const INAT_API = 'https://api.inaturalist.org/v1/taxa';
+const SS_INAT_CACHE_PREFIX = 'forestmrv.inat.zhTW.';
+const _inatMemCache = new Map();   // sci → { zh, fetchedAt } | null
+
+export async function lookupChineseName(sci) {
+  if (!sci) return null;
+  const key = sci.trim().toLowerCase();
+  if (_inatMemCache.has(key)) return _inatMemCache.get(key);
+  // sessionStorage cache（同 session 內不重複打）
+  try {
+    const cached = sessionStorage.getItem(SS_INAT_CACHE_PREFIX + key);
+    if (cached !== null) {
+      const v = cached === '' ? null : cached;
+      _inatMemCache.set(key, v);
+      return v;
+    }
+  } catch {}
+
+  const url = `${INAT_API}?q=${encodeURIComponent(sci)}&rank=species&locale=zh-TW&per_page=3`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) {
+      _cacheInat(key, null);
+      return null;
+    }
+    const data = await res.json();
+    // 找學名完全相符的那一筆（iNat search 偶會回相近種）
+    const exact = (data.results || []).find(r => (r.name || '').toLowerCase().trim() === key);
+    const zh = exact?.preferred_common_name || data.results?.[0]?.preferred_common_name || null;
+    // iNat 對沒有 locale 翻譯時 preferred_common_name 會 fallback 給英文 → 用 english_common_name 比對排除
+    const englishFallback = exact?.english_common_name || data.results?.[0]?.english_common_name || null;
+    const finalZh = (zh && zh !== englishFallback && /[一-鿿]/.test(zh)) ? zh : null;
+    _cacheInat(key, finalZh);
+    return finalZh;
+  } catch (e) {
+    console.warn('[iNat zh-TW lookup]', sci, e?.message || e);
+    _cacheInat(key, null);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function _cacheInat(key, value) {
+  _inatMemCache.set(key, value);
+  try { sessionStorage.setItem(SS_INAT_CACHE_PREFIX + key, value || ''); } catch {}
+}
+
 // === 把 AI 結果（latin sci）對應到 Firestore species 224 種 ===
 // 若 sci 完全相符 → 回 species 物件；否則回 null（caller 提示「字典外，請手動輸入」）
 export function matchToLocalSpecies(aiResult, allSpecies) {
@@ -244,6 +300,7 @@ export async function enrichWithLLM(imageBlob, candidates, opts = {}) {
   const systemPrompt = `你是專業的臺灣植物學家，專精於臺灣原生樹種與常見造林樹種的辨識。使用者提供一張植物照片 + Pl@ntNet 已給的 ${top3.length} 個候選學名。
 
 請針對每個候選，依照片實際內容判斷其合理性，給：
+- chineseName: 此物種的繁體中文常用名（**必填**；以臺灣最通用的中文名為準，例如 Hernandia nymphaeifolia → 蓮葉桐、Cinnamomum camphora → 樟樹；若無公認中文名才回空字串，**禁止音譯**或自創名稱）
 - characteristics: 此物種的辨識特徵（葉形、樹皮、樹形等，1-2 句中文）
 - habitat: 臺灣常見海拔/棲地（1 句中文，例如「中海拔 1500-2500m 雲霧帶」）
 - isNative: 是否為臺灣原生種（boolean）
@@ -254,7 +311,7 @@ export async function enrichWithLLM(imageBlob, candidates, opts = {}) {
 - imageQualityReason: 一句中文說明（例如「葉片清晰可見」/「光線過暗無法判斷葉緣」）
 
 回覆**純 JSON**，不加 \\\`\\\`\\\` 包裝：
-{"imageQuality":"good","imageQualityReason":"...","candidates":[{"sci":"...","characteristics":"...","habitat":"...","isNative":true,"notes":""},...]}`;
+{"imageQuality":"good","imageQualityReason":"...","candidates":[{"sci":"...","chineseName":"...","characteristics":"...","habitat":"...","isNative":true,"notes":""},...]}`;
 
   const userPrompt = `候選清單（依 Pl@ntNet 信心由高到低）：\n${candidateList}\n\n請評估照片並給出 JSON。`;
 
