@@ -15,9 +15,9 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast, isSystemAdmin } from './app.js?v=21116';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, LLM_MODELS } from './ai-species.js?v=21116';
-import { loadSpeciesCache } from './species-picker.js?v=21116';
+import { el, toast, isSystemAdmin, isPi } from './app.js?v=21117';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, suggestSpeciesFromAi, LLM_MODELS } from './ai-species.js?v=21117';
+import { loadSpeciesCache } from './species-picker.js?v=21117';
 
 // v2.11.7：加 forceSetup 旗標 — 「編輯全域設定」按鈕走這條，不論 effective 是否滿足都進設定畫面
 export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
@@ -293,6 +293,21 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
         const st = rowStates[r.sci];
         // 取目前已 resolve 的最佳 zh；若還在「⏳ 查中文名…」狀態則 fallback 英文
         const finalZh = (st.sourcePri >= 1) ? st.zh : (englishFallback || '(無中名)');
+
+        // v2.11.17（F1）：auto-suggest 補洞 — 字典外 + iNat/LLM resolved + admin/PI 才寫入 species/
+        //   surveyor 不寫（避免快速辨識造成低品質候選氾濫）；admin 在「⏳ 待補充」filter 1-鍵 verify。
+        //   非阻塞（fire-and-forget）：寫失敗不影響套用流程。
+        if (!localSp && (st.sourcePri === 3 || st.sourcePri === 2) && (isSystemAdmin() || isPi())) {
+          const source = st.sourcePri === 3 ? 'iNat' : 'LLM';
+          suggestSpeciesFromAi({ sci: r.sci, zh: finalZh, family: r.family || null, source })
+            .then(result => {
+              if (result.ok) console.log(`[species suggest] +1 to dict: ${finalZh} / ${r.sci} (verified=false, source=${source})`);
+              else if (result.reason !== 'exists' && result.reason !== 'session-dedup') {
+                console.warn('[species suggest]', result);
+              }
+            });
+        }
+
         // v2.11.3：onPick 多帶 imageBlob，讓 caller 把這張照片自動加入 tree.photos（一動作雙功能）
         if (onPick) onPick({
           zh: finalZh, sci: r.sci, localSpecies: localSp, aiResult: r,

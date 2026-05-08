@@ -15,7 +15,7 @@
 //   const localSp = matchToLocalSpecies(top[0], allSpecies);
 
 // v2.11.4：API key + Proxy URL 從 user-only localStorage 升級為「Firestore 全域 admin > localStorage user」優先序
-import { fb, isSystemAdmin, state } from './app.js?v=21116';
+import { fb, isSystemAdmin, state } from './app.js?v=21117';
 
 const LS_API_KEY = 'forestmrv.plantnet.apiKey';
 const LS_PROXY_URL = 'forestmrv.plantnet.proxyUrl';   // v2.11.2：CORS proxy URL（如 Cloudflare Worker）
@@ -214,9 +214,24 @@ export async function identifySpecies(imageBlob, opts = {}) {
 //   - 對台灣常見種覆蓋率高（已驗證 Hernandia nymphaeifolia → 蓮葉桐）
 //   - 模組內 in-memory cache + sessionStorage 持久化（避免重複辨識同一物種重複打 API）
 //   - 失敗（404/timeout/無 zh）一律回 null，caller 自行 fallback
+//
+// v2.11.17（G）：速率守門 — module-level 串行佇列確保 ≥ 600ms 間距（≤ 100 req/min；iNat free
+//   tier 限 100/min）+ 遇 429 exponential backoff retry（1s → 2s → 4s，最多 3 次），全敗回 null
+//   不擋 UI。
 const INAT_API = 'https://api.inaturalist.org/v1/taxa';
 const SS_INAT_CACHE_PREFIX = 'forestmrv.inat.zhTW.';
-const _inatMemCache = new Map();   // sci → { zh, fetchedAt } | null
+const _inatMemCache = new Map();   // sci → zh string | null
+const INAT_MIN_SPACING_MS = 600;   // ≤ 100 req/min；保守值
+const INAT_MAX_RETRIES = 3;
+let _inatNextSlot = 0;             // 下次允許 fetch 的時間戳（ms）
+
+// v2.11.17：串行排程 — 確保兩次 fetch 至少間隔 INAT_MIN_SPACING_MS
+async function _waitForInatSlot() {
+  const now = Date.now();
+  const wait = Math.max(0, _inatNextSlot - now);
+  _inatNextSlot = Math.max(now, _inatNextSlot) + INAT_MIN_SPACING_MS;
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+}
 
 export async function lookupChineseName(sci) {
   if (!sci) return null;
@@ -233,15 +248,45 @@ export async function lookupChineseName(sci) {
   } catch {}
 
   const url = `${INAT_API}?q=${encodeURIComponent(sci)}&rank=species&locale=zh-TW&per_page=3`;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal });
+
+  // v2.11.17：retry loop 處理 429
+  let backoffMs = 1000;
+  for (let attempt = 0; attempt < INAT_MAX_RETRIES; attempt++) {
+    await _waitForInatSlot();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    let res;
+    try {
+      res = await fetch(url, { signal: ctrl.signal });
+    } catch (e) {
+      console.warn('[iNat zh-TW lookup] fetch failed', sci, e?.message || e);
+      _cacheInat(key, null);
+      clearTimeout(timer);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (res.status === 429) {
+      // Rate limited — exponential backoff + retry（不寫 cache，下次同學名仍會試）
+      console.warn(`[iNat zh-TW lookup] 429 rate limit (attempt ${attempt + 1}/${INAT_MAX_RETRIES}), backoff ${backoffMs}ms`);
+      if (attempt < INAT_MAX_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, backoffMs));
+        backoffMs *= 2;
+        continue;
+      }
+      // 最後一次仍 429 → 放棄、cache null（避免短時間內反覆打）
+      _cacheInat(key, null);
+      return null;
+    }
+
     if (!res.ok) {
       _cacheInat(key, null);
       return null;
     }
-    const data = await res.json();
+
+    let data;
+    try { data = await res.json(); } catch { _cacheInat(key, null); return null; }
     // 找學名完全相符的那一筆（iNat search 偶會回相近種）
     const exact = (data.results || []).find(r => (r.name || '').toLowerCase().trim() === key);
     const zh = exact?.preferred_common_name || data.results?.[0]?.preferred_common_name || null;
@@ -250,18 +295,56 @@ export async function lookupChineseName(sci) {
     const finalZh = (zh && zh !== englishFallback && /[一-鿿]/.test(zh)) ? zh : null;
     _cacheInat(key, finalZh);
     return finalZh;
-  } catch (e) {
-    console.warn('[iNat zh-TW lookup]', sci, e?.message || e);
-    _cacheInat(key, null);
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
+  // 理論上不應到達
+  _cacheInat(key, null);
+  return null;
 }
 
 function _cacheInat(key, value) {
   _inatMemCache.set(key, value);
   try { sessionStorage.setItem(SS_INAT_CACHE_PREFIX + key, value || ''); } catch {}
+}
+
+// === v2.11.17（F1）：把 AI 字典外 + iNat/LLM resolved 的物種補進 species 字典（verified=false）===
+// docId 用 zh（與 import-wizard 一致），verified=false + addedFrom 標 ai-identify-{iNat,LLM}，
+// admin 在「⏳ 待補充」filter 看到 → 1-鍵 verify。已存在則跳過（不覆寫已 verified / 既有資料）。
+// 同 session dedup：相同 (zh, sci) 只寫一次。
+const _suggestedSession = new Set();   // session-level dedup key: `${docId}|${sci}`
+
+export async function suggestSpeciesFromAi({ sci, zh, family, source }) {
+  if (!sci || !zh) return { ok: false, reason: 'missing-data' };
+  if (source !== 'iNat' && source !== 'LLM') return { ok: false, reason: 'bad-source' };
+  // docId 規則跟 import-wizard 對齊：用 zh，禁止 '/' 與保留字 '.'/'..'
+  let docId = String(zh).trim().replace(/\//g, '_');
+  if (!docId) return { ok: false, reason: 'bad-docid-empty' };
+  if (docId === '.' || docId === '..') docId = '_' + docId;
+  const sessionKey = `${docId}|${String(sci).trim()}`;
+  if (_suggestedSession.has(sessionKey)) return { ok: false, reason: 'session-dedup' };
+  _suggestedSession.add(sessionKey);
+
+  try {
+    const ref = fb.doc(fb.db, 'species', docId);
+    const snap = await fb.getDoc(ref);
+    if (snap.exists()) {
+      // 不覆寫既有 doc（不論 verified=true/false） — admin 領域，避免污染
+      return { ok: false, reason: 'exists', docId };
+    }
+    await fb.setDoc(ref, {
+      zh: String(zh).trim(),
+      sci: String(sci).trim(),
+      family: family ? String(family).trim() : null,
+      conservationGrade: null,
+      verified: false,
+      addedFrom: source === 'iNat' ? 'ai-identify-iNat' : 'ai-identify-LLM',
+      addedAt: fb.serverTimestamp(),
+      addedBy: state.user?.uid || null,
+    });
+    return { ok: true, docId };
+  } catch (e) {
+    console.warn('[suggestSpeciesFromAi]', sci, '→', zh, e?.message || e);
+    return { ok: false, reason: 'firestore-error', error: e?.message || String(e) };
+  }
 }
 
 // === 把 AI 結果（latin sci）對應到 Firestore species 224 種 ===

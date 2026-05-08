@@ -171,9 +171,26 @@ service cloud.firestore {
     //   首批用途：import wizard 把未知樹種 seed 進來為 verified=false，PI/admin 後續逐筆審核補學名/保育等級
     //   read：所有登入使用者可查（任一專案匯入時都要比對）
     //   write：僅 systemAdmin（共享字典守門員）
+    //
+    // v2.11.17（F1）：放寬 create — 任何登入者可在嚴格 shape 下建立 verified=false 候選
+    //   （AI 辨識字典外 + iNat/LLM resolved 補洞）；update / delete 仍 admin only（防覆寫已驗證資料）。
+    //   server-side shape 守門：verified=false + addedFrom in {ai-identify-iNat, ai-identify-LLM}
+    //                         + addedBy=自己 uid + zh/sci 為非空字串
+    //   client-side 額外限制：只有 admin / PI 會觸發此寫入（surveyor 不寫，避免低品質候選氾濫）
     match /species/{docId} {
-      allow read:  if isSignedIn();
-      allow write: if isSystemAdmin();
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() && (
+        isSystemAdmin() ||
+        (
+          request.resource.data.verified == false &&
+          request.resource.data.addedFrom in ['ai-identify-iNat', 'ai-identify-LLM'] &&
+          request.resource.data.addedBy == request.auth.uid &&
+          request.resource.data.zh is string && request.resource.data.zh.size() > 0 &&
+          request.resource.data.sci is string && request.resource.data.sci.size() > 0
+        )
+      );
+      allow update: if isSystemAdmin();
+      allow delete: if isSystemAdmin();
 
       // v2.7.11 🆔e：變更歷史 sub-collection — admin 編輯/批次/CSV 匯入時併寫一筆
       //   read：所有登入者可查（追溯誰改了什麼）
