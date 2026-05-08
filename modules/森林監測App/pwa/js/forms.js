@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21117';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21125';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21117';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21125';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21117';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21125';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21117';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21125';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21117';
+import { createSpeciesPicker } from './species-picker.js?v=21125';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21117';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21125';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21117';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21125';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21117';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21125';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -570,6 +570,82 @@ export async function deleteProjectCascade(project) {
 
 // ===== 專案表單 =====
 // v1.5：admin 建空殼 + 指派 PI 的 email；自動填 memberUids、預設 methodology
+// ===== v2.11.19：專案邊界 GeoJSON 上傳 section（給 openProjectForm edit 模式用）=====
+// 三狀態：未動 / 上傳新檔（draft={geojson, srcSystem, ...}）/ 清除（draft='CLEAR'）
+// onChange(draft) → caller form 暫存到 boundaryDraft，submit 時寫入 Firestore
+function buildBoundarySection({ existingBoundary, onChange }) {
+  const wrap = el('div', { class: 'border border-stone-200 rounded p-2 space-y-2 bg-stone-50' });
+  wrap.appendChild(el('div', { class: 'text-sm font-medium' }, '📐 專案邊界（GeoJSON，選填）'));
+  wrap.appendChild(el('div', { class: 'text-xs text-stone-600' },
+    '上傳後地圖分頁會疊加邊界圖層，並自動 zoom 到邊界範圍。支援 Polygon / MultiPolygon、自動偵測 WGS84 / TWD97（EPSG:3826）座標系。'));
+
+  // 狀態顯示區
+  const statusBox = el('div', { class: 'text-xs' });
+  function renderStatus(text, cls = 'text-stone-500') {
+    statusBox.innerHTML = '';
+    statusBox.className = `text-xs ${cls}`;
+    statusBox.textContent = text;
+  }
+
+  if (existingBoundary) {
+    const meta = existingBoundary.type === 'MultiPolygon'
+      ? `MultiPolygon × ${existingBoundary.coordinates.length}`
+      : 'Polygon';
+    renderStatus(`✓ 已上傳：${meta}（重新上傳會覆蓋）`, 'text-green-700');
+  } else {
+    renderStatus('（尚未上傳）', 'text-stone-500');
+  }
+  wrap.appendChild(statusBox);
+
+  // 檔案輸入
+  const fileInput = el('input', {
+    type: 'file',
+    accept: '.geojson,.json,application/geo+json,application/json',
+    class: 'text-xs block w-full',
+  });
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files?.[0];
+    if (!f) return;
+    if (f.size > 1024 * 1024) {
+      renderStatus(`✗ 檔案過大（${(f.size / 1024 / 1024).toFixed(2)} MB），上限 1 MB（Firestore doc 限制）`, 'text-red-700');
+      onChange(null);
+      return;
+    }
+    renderStatus('⏳ 解析中...', 'text-blue-600');
+    try {
+      const text = await f.text();
+      const json = JSON.parse(text);
+      const result = parseProjectBoundaryGeoJson(json, twd97ToWgs84);
+      result.fileName = f.name;
+      const sizeKb = (text.length / 1024).toFixed(1);
+      const summary = `✓ ${f.name}（${result.srcSystem}, ${result.polygonCount} 多邊形 / ${result.ringCount} 環 / ${result.vertexCount} 頂點 / ${sizeKb} KB）— 儲存後生效`;
+      renderStatus(summary, 'text-green-700');
+      onChange(result);
+    } catch (e) {
+      console.error('[boundary GeoJSON]', e);
+      renderStatus(`✗ 解析失敗：${e.message}`, 'text-red-700');
+      onChange(null);
+    }
+  });
+  wrap.appendChild(fileInput);
+
+  // 清除按鈕（只在已有邊界時顯示）
+  if (existingBoundary) {
+    const clearBtn = el('button', {
+      type: 'button',
+      class: 'text-xs px-2 py-1 border border-red-300 text-red-700 rounded hover:bg-red-50',
+    }, '🗑 清除既有邊界（儲存後生效）');
+    clearBtn.addEventListener('click', () => {
+      if (!confirm('確定清除既有專案邊界？\n（清除後地圖將回到 plot 點位定位；可隨時重新上傳）')) return;
+      fileInput.value = '';
+      renderStatus('⚠ 已標記清除（按儲存後寫入 Firestore）', 'text-amber-700');
+      onChange('CLEAR');
+    });
+    wrap.appendChild(clearBtn);
+  }
+  return wrap;
+}
+
 export function openProjectForm(existing = null) {
   // v1.7.1：結構化代碼輸入 — 編輯既有專案時保留原 code（不允許改）
   const isEdit = !!existing;
@@ -630,6 +706,19 @@ export function openProjectForm(existing = null) {
   agencySel.addEventListener('change', updateCodePreview);
   yearInput.addEventListener('change', updateCodePreview);
 
+  // v2.11.19/24：專案邊界 GeoJSON state（只在編輯模式啟用）
+  // null = 未上傳 / 維持現狀；object = 新上傳已 parsed；'CLEAR' = user 按了清除
+  let boundaryDraft = null;
+  // v2.11.24：偵測既有邊界 — 新格式（boundaryGeoJsonStr 字串）優先，舊格式（boundaryGeoJson 物件）fallback
+  //   v2.11.19-23 物件格式從沒成功存過 Firestore，但仍保留 fallback 防 edge case
+  let existingBoundary = null;
+  if (existing?.boundaryGeoJsonStr) {
+    try { existingBoundary = JSON.parse(existing.boundaryGeoJsonStr); }
+    catch { existingBoundary = null; }
+  } else if (existing?.boundaryGeoJson) {
+    existingBoundary = existing.boundaryGeoJson;
+  }
+
   const f = el('form', { class: 'space-y-2' },
     isEdit
       ? el('div', { class: 'field' },
@@ -652,6 +741,11 @@ export function openProjectForm(existing = null) {
         ),
     field({ label: '專案名稱', name: 'name', required: true, value: existing?.name || '', placeholder: '示範林班' }),
     field({ label: '描述', name: 'description', type: 'textarea', value: existing?.description || '' }),
+    // v2.11.19：專案邊界 GeoJSON 上傳（只在編輯模式；新建時無 doc 不能寫）
+    isEdit ? buildBoundarySection({
+      existingBoundary,
+      onChange: (draft) => { boundaryDraft = draft; },   // null | parsed object | 'CLEAR'
+    }) : null,
     // v1.7.0：支援多 PI（comma 或換行分隔多個 email）
     isEdit
       ? null
@@ -671,13 +765,48 @@ export function openProjectForm(existing = null) {
     const fd = new FormData(f);
 
     if (isEdit) {
-      // 編輯：只更新 name / description
+      // 編輯：只更新 name / description（v2.11.19 加 boundaryGeoJson）
+      const updates = {
+        name: fd.get('name').trim(),
+        description: fd.get('description').trim() || ''
+      };
+      // v2.11.19/24：boundary 三種狀態
+      //   null = user 沒動過 boundary 區塊 → 不寫 boundary 欄位
+      //   'CLEAR' = user 按了清除 → 寫 null 移除既有
+      //   parsed object = user 上傳新 GeoJSON → 存 stringified 字串
+      // v2.11.24：FIRESTORE BUG 修 — Firestore array 不能直接含另一個 array（官方限制），
+      //   而 GeoJSON coordinates 是 array-of-array-of-array → Firestore reject。
+      //   解：JSON.stringify 後存單一字串欄位 boundaryGeoJsonStr，讀的時候 JSON.parse 還原。
+      //   舊 boundaryGeoJson 欄位保留 null（v2.11.19-23 從沒人成功存過所以不需 migration）。
+      if (boundaryDraft === 'CLEAR') {
+        updates.boundaryGeoJson = null;
+        updates.boundaryGeoJsonStr = null;
+        updates.boundaryMeta = null;
+        updates.boundaryUpdatedAt = fb.serverTimestamp();
+        updates.boundaryUpdatedBy = state.user.uid;
+      } else if (boundaryDraft && typeof boundaryDraft === 'object') {
+        updates.boundaryGeoJson = null;     // 舊欄位永遠 null
+        updates.boundaryGeoJsonStr = JSON.stringify(boundaryDraft.geojson);
+        updates.boundaryMeta = {
+          srcSystem: boundaryDraft.srcSystem,
+          polygonCount: boundaryDraft.polygonCount,
+          ringCount: boundaryDraft.ringCount,
+          vertexCount: boundaryDraft.vertexCount,
+          bbox: boundaryDraft.bbox,
+          fileName: boundaryDraft.fileName || null,
+        };
+        updates.boundaryUpdatedAt = fb.serverTimestamp();
+        updates.boundaryUpdatedBy = state.user.uid;
+      }
       try {
-        await fb.updateDoc(fb.doc(fb.db, 'projects', existing.id), {
-          name: fd.get('name').trim(),
-          description: fd.get('description').trim() || ''
-        });
-        toast('已更新');
+        await fb.updateDoc(fb.doc(fb.db, 'projects', existing.id), updates);
+        // v2.11.22：state.project + 地圖即時同步 — 重抓 project doc + dispatch event 讓 analytics.renderMap 重繪
+        try {
+          const fresh = await fb.getDoc(fb.doc(fb.db, 'projects', existing.id));
+          if (fresh.exists()) state.project = { id: existing.id, ...fresh.data() };
+        } catch {}
+        window.dispatchEvent(new CustomEvent('forestmrv:project-updated', { detail: { projectId: existing.id } }));
+        toast('已更新' + (boundaryDraft ? '（含邊界）' : ''));
         closeModal();
       } catch (e) { toast('更新失敗：' + e.message); }
       return;
@@ -1940,13 +2069,18 @@ export async function openPlotForm(project, existing = null) {
   // v2.8.4：移除 slopeAspect（坡向）；slopeInput 改為雙軸 — 寬邊坡度 / 長邊坡度
   //         非 rectangle 形狀（circle/square/irregular）只顯示 width 一欄，標示為「坡度」
   //         讀取舊資料：fallback slopeWidthDeg/slopeLengthDeg = slopeDegrees
+  // v2.11.20：D1 — 重新加入 slopeAspect（坡向）作為「選填」欄位 — 純視覺旋轉用，不影響面積/體積計算
+  //          值為朝下坡的方位角（°）：0=N / 90=E / 180=S / 270=W；空白 = 不旋轉，rectangle 預設 N-S 對齊
   const fallbackSlope = existing?.slopeDegrees ?? '';
   const initSlopeWidth  = existing?.slopeWidthDeg  ?? fallbackSlope;
   const initSlopeLength = existing?.slopeLengthDeg ?? fallbackSlope;
+  const initSlopeAspect = (existing?.slopeAspect != null) ? existing.slopeAspect : '';
   const slopeWidthInput = el('input', { type: 'number', step: '0.1', min: '0', max: '90', name: 'slopeWidthDeg',
     placeholder: '0', value: initSlopeWidth, required: 'true' });
   const slopeLengthInput = el('input', { type: 'number', step: '0.1', min: '0', max: '90', name: 'slopeLengthDeg',
     placeholder: '0', value: initSlopeLength, required: 'true' });
+  const slopeAspectInput = el('input', { type: 'number', step: '1', min: '0', max: '360', name: 'slopeAspect',
+    placeholder: '選填，0=北 / 90=東 / 180=南 / 270=西', value: initSlopeAspect });
   const previewBox = el('div', { class: 'bg-stone-50 rounded p-2 text-xs text-stone-700 my-1' });
 
   const areaSelField = el('div', { class: 'field' },
@@ -2114,14 +2248,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21117',
+        href: './img/gps-position-guide.svg?v=21125',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21117',
+          src: './img/gps-position-guide.svg?v=21125',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -2186,6 +2320,14 @@ export async function openPlotForm(project, existing = null) {
       el('span', { style: 'font-size:11px;color:#57534e' }, '　0–90')),
     slopeLengthInput
   );
+  // v2.11.20：D1 — 坡向（朝下坡方位角）— 只給地圖視覺旋轉用，不影響任何計算
+  const slopeAspectField = el('div', { class: 'field' },
+    el('label', { for: 'f-slopeAspect' }, '坡向（°，選填）',
+      el('span', { style: 'font-size:11px;color:#57534e' }, '　0=北 / 90=東 / 180=南 / 270=西')),
+    slopeAspectInput,
+    el('div', { style: 'font-size:11px;color:#0369a1;margin-top:2px' },
+      '🧭 朝下坡方位角；只用於地圖將矩形/方形樣區邊界旋轉到正確方向，不影響面積/體積計算。空白 = N-S 對齊。')
+  );
   // v2.8.5：auto-fill hint — recompute() 會依 shape 切換 display；circle/irregular 沒寬/長故隱藏
   const autofillHint = el('div', { style: 'font-size:11px;color:#0369a1;margin:-4px 0 4px' },
     '✨ 輸入兩邊坡度 → 自動換算寬/長（沿坡距）。若需手動覆蓋，直接編輯寬/長欄位即可。'
@@ -2206,6 +2348,8 @@ export async function openPlotForm(project, existing = null) {
     slopeLengthInput.required = isDualSlopeShape;
     slopeWidthLabel.textContent = isDualSlopeShape ? '寬邊坡度 (°)' : '坡度 (°)';
     autofillHint.style.display = isDualSlopeShape ? '' : 'none';
+    // v2.11.20 D1：坡向只在 rectangle/square/irregular 顯示（circle 圓形旋轉無意義）
+    slopeAspectField.style.display = (shape === 'circle') ? 'none' : '';
 
     if (shape === 'irregular') {
       validateAndPreviewIrregular();
@@ -2338,6 +2482,7 @@ export async function openPlotForm(project, existing = null) {
       slopeLengthField
     ),
     autofillHint,
+    slopeAspectField,        // v2.11.20 D1：坡向（選填，視覺旋轉用）
     el('div', { class: 'field' },
       el('label', {}, '坡度來源'),
       slopeSourceWrap
@@ -2465,7 +2610,15 @@ export async function openPlotForm(project, existing = null) {
       slopeDegrees: slopeFinal,
       slopeWidthDeg,                  // v2.8.4：寬邊坡度
       slopeLengthDeg,                 // v2.8.4：長邊坡度
-      slopeAspect: null,              // v2.8.4：坡向欄位淘汰，新表單不寫入
+      // v2.11.20 D1：坡向重新啟用（選填，純視覺旋轉用）— 空字串 / 非數字 → null
+      slopeAspect: (() => {
+        const raw = (fd.get('slopeAspect') || '').toString().trim();
+        if (!raw) return null;
+        const v = parseFloat(raw);
+        if (!Number.isFinite(v)) return null;
+        // normalize 0-360
+        return ((v % 360) + 360) % 360;
+      })(),
       slopeSource: slopeSourceRaw || null,
       areaHorizontal_m2,
       dimensionType: dimType,

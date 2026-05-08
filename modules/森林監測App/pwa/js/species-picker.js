@@ -12,45 +12,88 @@
 //   form.appendChild(picker.root);
 //   picker.input.addEventListener('input', () => { ... picker.getMatched() ... });
 
-import { fb, el } from './app.js?v=21117';
+import { fb, el } from './app.js?v=21125';
 import { TREES } from './species-dict.js?v=2000';
 
-// ===== Module-level cache（一次 fetch / session）=====
+// ===== Module-level cache =====
+// v2.11.18：getDocs（一次性）→ onSnapshot（即時）— 修正 F1 auto-suggest / admin verify 後新字典條目
+//   不會出現在 picker 下拉的 stale cache 問題（以前要重整整頁才看得到，現在 < 1s 自動更新）。
+//   設計：
+//     - 第一次 loadSpeciesCache() 啟動 onSnapshot 訂閱（單例）
+//     - 每次 snapshot fire 更新 _speciesCache 並通知所有 active picker（_subscribers callback）
+//     - picker 在 createSpeciesPicker 時 subscribe；wrapper DOM 移除後 callback 變 no-op（小 leak 容忍）
 let _speciesCache = null;
-let _cachePromise = null;
+let _cacheReady = null;       // Promise resolved on first snapshot
+let _cacheUnsub = null;       // onSnapshot unsub fn（永久訂閱，整 session 不解）
+const _subscribers = new Set();   // (arr) => void，每次 snapshot 後通知
 
-export async function loadSpeciesCache(force = false) {
-  if (!force && _speciesCache) return _speciesCache;
-  if (!force && _cachePromise) return _cachePromise;
-  _cachePromise = (async () => {
+function _processSpeciesDocs(docs) {
+  // aliasOf entries 不獨立顯示 — 把它們的 zh 補進主 entry 的 aliases
+  const aliasMap = {};
+  docs.filter(d => d.aliasOf).forEach(d => {
+    (aliasMap[d.aliasOf] ||= []).push(d.zh);
+  });
+  const main = docs.filter(d => !d.aliasOf);
+  main.forEach(d => {
+    if (aliasMap[d.zh]) d.aliases = [...(d.aliases || []), ...aliasMap[d.zh]];
+  });
+  // popularityRank asc, null/missing 排到最後
+  main.sort((a, b) => (a.popularityRank ?? 9999) - (b.popularityRank ?? 9999));
+  return main;
+}
+
+function _setupCacheSubscription() {
+  if (_cacheUnsub) return _cacheReady;
+  _cacheReady = new Promise((resolve) => {
+    let firstFired = false;
     try {
-      const snap = await fb.getDocs(fb.collection(fb.db, 'species'));
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // aliasOf entries 不獨立顯示 — 把它們的 zh 補進主 entry 的 aliases
-      const aliasMap = {};
-      docs.filter(d => d.aliasOf).forEach(d => {
-        (aliasMap[d.aliasOf] ||= []).push(d.zh);
-      });
-      const main = docs.filter(d => !d.aliasOf);
-      main.forEach(d => {
-        if (aliasMap[d.zh]) d.aliases = [...(d.aliases || []), ...aliasMap[d.zh]];
-      });
-      // popularityRank asc, null/missing 排到最後
-      main.sort((a, b) => (a.popularityRank ?? 9999) - (b.popularityRank ?? 9999));
-      _speciesCache = main;
-      return main;
+      _cacheUnsub = fb.onSnapshot(fb.collection(fb.db, 'species'),
+        snap => {
+          const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const main = _processSpeciesDocs(docs);
+          _speciesCache = main;
+          if (!firstFired) {
+            firstFired = true;
+            resolve(main);
+          }
+          // 通知所有 active picker — 第二次起每次 snapshot 都通知
+          _subscribers.forEach(cb => {
+            try { cb(main); } catch (e) { console.warn('[species-picker subscriber]', e); }
+          });
+        },
+        err => {
+          console.warn('[species-picker] onSnapshot 失敗，fallback 靜態 TREES', err);
+          _speciesCache = TREES.map((t, i) => ({
+            zh: t.zh, sci: t.sci, conservationGrade: t.cons,
+            popularityRank: i + 1, aliases: [],
+          }));
+          if (!firstFired) {
+            firstFired = true;
+            resolve(_speciesCache);
+          }
+        });
     } catch (e) {
-      console.warn('[species-picker] Firestore 載入失敗，fallback 靜態 TREES', e);
+      console.warn('[species-picker] onSnapshot setup throw, fallback', e);
       _speciesCache = TREES.map((t, i) => ({
         zh: t.zh, sci: t.sci, conservationGrade: t.cons,
         popularityRank: i + 1, aliases: [],
       }));
-      return _speciesCache;
-    } finally {
-      _cachePromise = null;
+      resolve(_speciesCache);
     }
-  })();
-  return _cachePromise;
+  });
+  return _cacheReady;
+}
+
+export async function loadSpeciesCache(force = false) {
+  // v2.11.18：force 參數保留向後相容但已 no-op（onSnapshot 永遠最新）
+  if (_speciesCache) return _speciesCache;
+  return _setupCacheSubscription();
+}
+
+// v2.11.18：picker 訂閱 cache 變化（每次 snapshot 都通知 — 包括 F1 寫入後）
+export function subscribeSpeciesCacheUpdates(cb) {
+  _subscribers.add(cb);
+  return () => _subscribers.delete(cb);
 }
 
 // ===== 7 級分數排序 =====
@@ -156,6 +199,14 @@ export function createSpeciesPicker({
     if (_open) refresh();
     // 載入完成後若已有 value，dispatch 一次 input 讓 caller 抓 metadata
     if (input.value) input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  // v2.11.18：訂閱字典即時更新 — F1 auto-suggest / admin verify / CSV 匯入後 < 1s 反映在下拉
+  //   小 leak 容忍：picker 沒明確 destroy，wrapper DOM 移除後 callback 變 no-op；
+  //   一次表單通常開不到 100 次，500-byte/callback 累積可忽略
+  subscribeSpeciesCacheUpdates(arr => {
+    _all = arr;
+    if (_open) refresh();
   });
 
   function refresh() {

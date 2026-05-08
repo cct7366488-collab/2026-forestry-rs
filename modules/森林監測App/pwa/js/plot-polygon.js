@@ -243,3 +243,95 @@ export function parseGeoJsonPolygon(geojson, plotCenterTwd97, twd97ToWgs84Fn = n
 export function vertsToPxPath(verts, mxToPx, myToPy) {
   return vertsToArrays(verts).map(([x, y]) => [mxToPx(x), myToPy(y)]);
 }
+
+// ===== v2.11.19：專案邊界 GeoJSON 解析（支援 Polygon + MultiPolygon + 多洞 + CRS 自動偵測）=====
+//   與 parseGeoJsonPolygon 不同點：
+//     - 不需 plotCenter（專案邊界是 absolute geographic）
+//     - 保留 MultiPolygon（FMP 常見多個分離林班）
+//     - 保留所有環（外環 + 內環孔洞）
+//     - 一律輸出 WGS84 GeoJSON（Leaflet L.geoJSON 直接吃）
+//   入：geojson 物件、twd97ToWgs84Fn (x, y) => {lng, lat}
+//   出：{ geojson: WGS84 GeoJSON, bbox: [west, south, east, north], srcSystem, polygonCount, ringCount, vertexCount }
+export function parseProjectBoundaryGeoJson(geojson, twd97ToWgs84Fn = null) {
+  if (!geojson) throw new Error('GeoJSON 為空');
+  if (!geojson.type) throw new Error('GeoJSON 缺 type 欄位');
+
+  // 標準化為 MultiPolygon[][][][]：[ poly1, poly2, ... ] / poly = [ ring1, ring2, ... ] / ring = [ [x,y], ... ]
+  let polygons = null;
+  if (geojson.type === 'FeatureCollection') {
+    const polys = [];
+    for (const f of (geojson.features || [])) {
+      const g = f.geometry;
+      if (!g) continue;
+      if (g.type === 'Polygon') polys.push(g.coordinates);
+      else if (g.type === 'MultiPolygon') g.coordinates.forEach(p => polys.push(p));
+    }
+    if (polys.length === 0) throw new Error('FeatureCollection 內無 Polygon / MultiPolygon');
+    polygons = polys;
+  } else if (geojson.type === 'Feature') {
+    const g = geojson.geometry;
+    if (!g) throw new Error('Feature 缺 geometry');
+    if (g.type === 'Polygon') polygons = [g.coordinates];
+    else if (g.type === 'MultiPolygon') polygons = g.coordinates;
+    else throw new Error(`Feature.geometry.type='${g.type}' 不支援（需 Polygon/MultiPolygon）`);
+  } else if (geojson.type === 'Polygon') {
+    polygons = [geojson.coordinates];
+  } else if (geojson.type === 'MultiPolygon') {
+    polygons = geojson.coordinates;
+  } else {
+    throw new Error(`不支援的 GeoJSON type: ${geojson.type}`);
+  }
+
+  // 偵測座標系（TWD97 約 [200000, 400000] × [2400000, 2800000]；WGS84 約 [120, 122] × [22, 25]）
+  // 取首環首點 sample
+  const sample = polygons[0]?.[0]?.[0];
+  if (!Array.isArray(sample) || sample.length < 2) throw new Error('coordinates 元素格式錯誤（需 [x, y]）');
+  const isWgs84 = Math.abs(Number(sample[0])) < 360 && Math.abs(Number(sample[1])) < 90;
+  const srcSystem = isWgs84 ? 'WGS84' : 'TWD97';
+
+  if (!isWgs84 && typeof twd97ToWgs84Fn !== 'function') {
+    throw new Error('TWD97 GeoJSON 須提供 twd97ToWgs84 轉換函式');
+  }
+
+  // 統計 + 座標轉換 + bbox
+  let polygonCount = 0, ringCount = 0, vertexCount = 0;
+  let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+
+  const wgsPolygons = polygons.map(poly => {
+    polygonCount++;
+    return poly.map(ring => {
+      ringCount++;
+      if (!Array.isArray(ring) || ring.length < 3) throw new Error(`環頂點 < 3（poly #${polygonCount}, ring #${ringCount}）`);
+      return ring.map(c => {
+        vertexCount++;
+        const a = Number(c[0]), b = Number(c[1]);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) throw new Error(`coord 非數字：${JSON.stringify(c)}`);
+        let lng, lat;
+        if (isWgs84) { lng = a; lat = b; }
+        else {
+          const w = twd97ToWgs84Fn(a, b);  // (x, y) → {lng, lat}
+          lng = w.lng; lat = w.lat;
+        }
+        if (lng < west) west = lng;
+        if (lng > east) east = lng;
+        if (lat < south) south = lat;
+        if (lat > north) north = lat;
+        return [lng, lat];
+      });
+    });
+  });
+
+  // 輸出標準化 WGS84 GeoJSON
+  const out = polygons.length === 1
+    ? { type: 'Polygon', coordinates: wgsPolygons[0] }
+    : { type: 'MultiPolygon', coordinates: wgsPolygons };
+
+  return {
+    geojson: out,
+    bbox: [west, south, east, north],
+    srcSystem,
+    polygonCount,
+    ringCount,
+    vertexCount,
+  };
+}

@@ -1,13 +1,17 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel } from './app.js?v=21117';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21125';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21117';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21125';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21117';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21125';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21117';
+import { getEquationBadge } from './species-equations.js?v=21125';
+// v2.11.19：irregular plot vertices 轉換用
+import { vertsToArrays } from './plot-polygon.js?v=21125';
+// v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
+import { openProjectForm } from './forms.js?v=21125';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -486,22 +490,187 @@ export function renderQaqcErrorHistograms(realPlots, sampledTrees = [], cfg = DE
 
 // ===== Map =====
 let _map = null;
-let _layerGroup = null;
+let _markerLayer = null;        // plot 圓點 marker layer
+let _plotBoundaryLayer = null;  // v2.11.19：plot 多邊形邊界 layer
+let _projectBoundaryLayer = null; // v2.11.19：project 邊界 layer
 let _mapData = null;  // v2.9.1：cache 給 layer toggle 用，避免每次切著色都重抓 Firestore
 
 export async function renderMap(project) {
   if (_map) { _map.remove(); _map = null; }
-  _map = L.map('map').setView([23.9176, 120.8838], 13);  // 預設蓮華池
+  // v2.11.19：先用蓮華池當 fallback；下面會依 boundary > plots > 蓮華池 優先序 fitBounds
+  _map = L.map('map').setView([23.9176, 120.8838], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap', maxZoom: 19
   }).addTo(_map);
-  _layerGroup = L.layerGroup().addTo(_map);
+  _markerLayer = L.layerGroup().addTo(_map);
+  _plotBoundaryLayer = L.layerGroup().addTo(_map);
+  _projectBoundaryLayer = L.layerGroup().addTo(_map);
 
-  const { plots, trees } = await fetchAllData(project);
-  if (plots.length === 0) { toast('還沒有樣區可顯示'); return; }
+  // v2.11.25：loading indicator + 兩段式 fetch
+  //   舊 fetchAllData 為了算 stems/ha + BA/ha 跑 19 plots × 6 sub-collections = 115 個 SERIAL queries 要 6-12 秒，
+  //   user 看到「先停在蓮華池 6-7 秒才跳到 plot 群」是因為整個 fetch 完才 fitBounds。
+  //   改為：Phase 1 只 fetch plots（1 個 query ~150-300ms）→ 立即 fitBounds + 空 trees skeleton render
+  //         Phase 2 背景 parallel fetch 子集合（~6 個 round-trips）→ 完成後重畫 markers 帶完整密度
+  const mapDiv = document.getElementById('map');
+  mapDiv.style.position = 'relative';
+  let loadingDiv = mapDiv.querySelector('.map-loading-indicator');
+  if (!loadingDiv) {
+    loadingDiv = document.createElement('div');
+    loadingDiv.className = 'map-loading-indicator absolute top-2 left-1/2 -translate-x-1/2 bg-white/95 px-3 py-1.5 rounded shadow-md text-xs text-stone-700 font-medium';
+    loadingDiv.style.cssText = 'z-index:1500;pointer-events:none';
+    mapDiv.appendChild(loadingDiv);
+  }
+  loadingDiv.textContent = '⏳ 載入樣區位置…';
 
-  // v2.9.1：每 plot 預算 stems/ha + BA/ha（layer toggle 用）
-  const plotData = plots.map(p => {
+  const t0 = performance.now();
+  const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
+  const plots = plotsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  console.log(`[map] phase 1 (plots fetch): ${(performance.now() - t0).toFixed(0)}ms (${plots.length} plots)`);
+
+  // 暫時用空 trees 算 plotData — stems/ha = 0 / BA/ha = 0 等密度先顯示為「無資料」灰
+  let plotData = computePlotDataFromTrees(plots, []);
+  _mapData = { project, plotData };
+
+  // v2.11.19：先畫 overlay layers（boundary）— 不受 著色 mode 影響，獨立 toggle
+  renderProjectBoundary();
+  renderPlotBoundaries();
+
+  // v2.11.19：先畫 marker layer（renderMapLayer 內），讓 fitBounds 後 markers 就定位
+  // 初始 layer mode + 綁 radio change（用 .onchange 避免重複 attach 於多次切回 map tab）
+  const initMode = $('input[name="map-layer"]:checked')?.value || 'qa';
+  renderMapLayer(initMode);
+  $$('input[name="map-layer"]').forEach(r => {
+    r.onchange = (e) => renderMapLayer(e.target.value);
+  });
+  // v2.11.19：綁 overlay checkbox change
+  $$('input[name="map-overlay"]').forEach(c => {
+    c.onchange = () => {
+      renderProjectBoundary();
+      renderPlotBoundaries();
+    };
+  });
+  // v2.11.22：綁「編輯專案 / 上傳邊界」按鈕 — admin/PI 可見（HTML data-role-show 處理）；點擊開啟既有的 openProjectForm edit 模式
+  // v2.11.23：加 disabled 防重複點 + 立即文字反饋（form 構建雖快但 user 仍可能感覺有延遲）
+  const editBtn = $('#btn-edit-project-boundary');
+  if (editBtn) {
+    editBtn.onclick = () => {
+      editBtn.disabled = true;
+      const oldText = editBtn.textContent;
+      editBtn.textContent = '⏳ 開啟編輯…';
+      // setTimeout(0) 讓 disabled / textContent 先 paint，再開 modal
+      setTimeout(() => {
+        try { openProjectForm(state.project); }
+        finally {
+          editBtn.disabled = false;
+          editBtn.textContent = oldText;
+        }
+      }, 0);
+    };
+  }
+  // v2.11.22：監聽 project-updated 事件 — 用 state 上的 flag 確保只 attach 一次（避免每次切到 map tab 重複 attach 累積）
+  if (!state.__mapBoundaryListenerAttached) {
+    state.__mapBoundaryListenerAttached = true;
+    window.addEventListener('forestmrv:project-updated', () => {
+      if (state.project && _map) {
+        // 用最新的 state.project 重繪（form submit 處已 refetch 過）
+        renderMap(state.project);
+      }
+    });
+  }
+
+  // v2.11.20/21 ①：auto-zoom 修 — v2.11.20 setTimeout(0) 在 user 端仍失效，改用 double-RAF
+  //   原因：setTimeout(0) 不保證 layout 已 commit；double-requestAnimationFrame 才能
+  //   確保 invalidateSize 看到正確容器尺寸。再加上 valid-coord filter 與 console.log
+  //   fallback 讓 user 端 debug 一目瞭然（若 plotData 全無有效 location 會在 Console
+  //   warn）。
+  const initOverlay = getOverlayState();
+  const doFit = () => {
+    if (!_map) return;     // race：若 user 已切走 tab
+    _map.invalidateSize();
+
+    // 優先 1：專案邊界（v2.11.24：新格式 boundaryGeoJsonStr 字串 / 舊格式 boundaryGeoJson 物件）
+    const hasBoundary = !!(project.boundaryGeoJsonStr || project.boundaryGeoJson);
+    if (hasBoundary && initOverlay.projectBoundary) {
+      const b = _projectBoundaryLayer.getBounds?.();
+      if (b && b.isValid()) {
+        _map.fitBounds(b, { padding: [40, 40], maxZoom: 17 });
+        console.log('[map] fit to project boundary');
+        return;
+      } else if (project.boundaryMeta?.bbox) {
+        const [w, s, e, n] = project.boundaryMeta.bbox;
+        _map.fitBounds([[s, w], [n, e]], { padding: [40, 40], maxZoom: 17 });
+        console.log('[map] fit to project boundary bbox');
+        return;
+      }
+    }
+
+    // 優先 2：plot 點位（過濾 invalid coord）
+    const pts = plotData
+      .map(d => d.anchorLatLng || [d.lat, d.lng])
+      .filter(p => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    if (pts.length === 0) {
+      console.warn('[map] 無有效 plot location/anchor — 留 default view（蓮華池）。' +
+        ` plotData=${plotData.length}, plots=${plots.length}。可能 plot.location 全空或 anchor 推導失敗。`);
+      return;
+    }
+    if (pts.length === 1) {
+      _map.setView(pts[0], 16);   // 單點：setView zoom 16（不要太貼近）
+      console.log('[map] setView to single plot at zoom 16');
+    } else {
+      _map.fitBounds(pts, { padding: [40, 40], maxZoom: 17 });
+      console.log(`[map] fit to ${pts.length} plot points`);
+    }
+  };
+  // double-RAF：第一個 RAF 等 layout，第二個 RAF 等下一幀渲染後容器尺寸 settled
+  requestAnimationFrame(() => requestAnimationFrame(doFit));
+
+  if (plots.length === 0) toast('尚無樣區可顯示，但若已上傳專案邊界仍會顯示');
+
+  // v2.11.25 PHASE 2 背景跑：parallel fetch 所有子集合 → 完成後重畫 markers 帶完整 stems/ha BA/ha
+  //   ~6 round-trips（19 plots × 6 子集合 = 114 queries 平行 fire）
+  //   完成前 markers 已顯示但密度為 0；完成後重畫補上正確密度色階
+  loadingDiv.textContent = '⏳ 載入立木統計（密度/BA）…';
+  fetchSubCollectionsParallel(project, plots).then(({ trees }) => {
+    console.log(`[map] phase 2 (sub-collections, parallel): ${(performance.now() - t0).toFixed(0)}ms total (${trees.length} trees)`);
+    if (!_map) return;   // user 已切走 tab
+    plotData = computePlotDataFromTrees(plots, trees);
+    _mapData = { project, plotData };
+    renderMapLayer(initMode);   // 重畫 markers 帶完整密度
+    if (loadingDiv) loadingDiv.remove();
+  }).catch(e => {
+    console.warn('[map] phase 2 failed', e);
+    if (loadingDiv) {
+      loadingDiv.textContent = '⚠ 立木統計載入失敗（位置已顯示）';
+      setTimeout(() => loadingDiv?.remove(), 3000);
+    }
+  });
+}
+
+// v2.11.25：phase 2 helper — parallel 抓所有 plots 的子集合（trees 給密度計算用，其他保留給未來擴充）
+async function fetchSubCollectionsParallel(project, plots) {
+  const subColls = ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'];
+  const tasks = [];
+  for (const p of plots) {
+    for (const sub of subColls) {
+      tasks.push(
+        fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', p.id, sub))
+          .then(snap => ({ kind: sub, plot: p, snap }))
+          .catch(() => null)
+      );
+    }
+  }
+  const results = await Promise.all(tasks);
+  const buckets = { trees: [], regeneration: [], understory: [], soilCons: [], wildlife: [], harvest: [] };
+  for (const r of results) {
+    if (!r) continue;
+    r.snap.forEach(d => buckets[r.kind].push({ id: d.id, plotId: r.plot.id, plotCode: r.plot.code, ...d.data() }));
+  }
+  return { trees: buckets.trees, regen: buckets.regeneration, ...buckets };
+}
+
+// v2.11.25：plotData 計算 helper — 拆出來 phase 1 / 2 都用
+function computePlotDataFromTrees(plots, trees) {
+  const data = plots.map(p => {
     if (!p.location) return null;
     const lat = p.location.latitude || p.location._lat;
     const lng = p.location.longitude || p.location._long;
@@ -514,21 +683,192 @@ export async function renderMap(project) {
     const baHa = areaH > 0 ? ba / areaH * 10000 : 0;
     return { p, lat, lng, tCount, ba, stemsHa, baHa };
   }).filter(Boolean);
+  // 預先算 boundary ring + SW 錨點
+  data.forEach(d => {
+    const derived = derivePlotBoundaryAndAnchorLatLng(d);
+    d.ring = derived?.ring || null;
+    d.anchorLatLng = derived?.anchor || null;
+  });
+  return data;
+}
 
-  _mapData = { project, plotData };
+// v2.11.21 ②(b)：popup HTML helper — marker 與 polygon 都掛同一份；user 點哪都能看到
+function buildPlotPopupHTML(d, projectId) {
+  const surveyorLabel = isReviewer() ? anonName(d.p.createdBy) : userLabel(d.p.createdBy, '—');
+  const shapeLabel = ({ circle: '圓', square: '方', rectangle: '矩', irregular: '不規則' })[d.p.shape] || '方';
+  const irregLabel = d.p.shape === 'irregular' && Array.isArray(d.p.plotDimensions?.vertices)
+    ? ' · ' + d.p.plotDimensions.vertices.length + '頂點' : '';
+  const slopeLabel = Number.isFinite(d.p.slopeDegrees) && d.p.slopeDegrees > 0
+    ? ` · 坡 ${d.p.slopeDegrees.toFixed(0)}°` : '';
+  const aspectLabel = (d.p.shape === 'rectangle' || d.p.shape === 'square')
+    ? (Number.isFinite(d.p.slopeAspect)
+       ? ` · 坡向 ${Math.round(d.p.slopeAspect)}°`
+       : ' · ⚠ 無坡向（邊界 N-S 對齊）')
+    : '';
+  return `
+    <strong>${d.p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${d.p.qaStatus || 'pending'}</span><br>
+    ${d.p.forestUnit || ''} · ${shapeLabel} ${d.p.area_m2 ? Math.round(d.p.area_m2) : '?'}m²${irregLabel}${slopeLabel}${aspectLabel}<br>
+    立木 <b>${d.tCount}</b> 株 · 密度 <b>${d.stemsHa.toFixed(0)}</b> 株/ha · BA <b>${d.baHa.toFixed(1)}</b> m²/ha<br>
+    調查者：${surveyorLabel}<br>
+    <a href="#/p/${projectId}/plot/${d.p.id}">→ 開啟樣區</a>
+  `;
+}
 
-  // 初始 layer mode + 綁 radio change（用 .onchange 避免重複 attach 於多次切回 map tab）
-  const initMode = $('input[name="map-layer"]:checked')?.value || 'qa';
-  renderMapLayer(initMode);
-  $$('input[name="map-layer"]').forEach(r => {
-    r.onchange = (e) => renderMapLayer(e.target.value);
+// v2.11.19：抓兩個 overlay checkbox 狀態
+function getOverlayState() {
+  return {
+    plotBoundary: $('input[name="map-overlay"][value="plot-boundary"]')?.checked || false,
+    projectBoundary: $('input[name="map-overlay"][value="project-boundary"]')?.checked || false,
+  };
+}
+
+// v2.11.19/24：把 project boundary 畫到 _projectBoundaryLayer（已是 WGS84 標準化過）
+//   v2.11.24：新格式 boundaryGeoJsonStr（JSON.stringify）優先 / 舊格式 boundaryGeoJson 物件 fallback
+function renderProjectBoundary() {
+  if (!_projectBoundaryLayer || !_mapData) return;
+  _projectBoundaryLayer.clearLayers();
+  const { project } = _mapData;
+  const overlay = getOverlayState();
+  if (!overlay.projectBoundary) return;
+  // v2.11.24：parse stringified GeoJSON（新格式）；fallback 舊物件格式
+  let boundaryGeoJson = null;
+  if (project.boundaryGeoJsonStr) {
+    try { boundaryGeoJson = JSON.parse(project.boundaryGeoJsonStr); }
+    catch (e) { console.warn('[map] boundaryGeoJsonStr parse failed', e); return; }
+  } else if (project.boundaryGeoJson) {
+    boundaryGeoJson = project.boundaryGeoJson;
+  }
+  if (!boundaryGeoJson) return;
+  try {
+    const layer = L.geoJSON(boundaryGeoJson, {
+      style: {
+        color: '#1d4ed8',          // 深藍邊
+        weight: 3,
+        opacity: 0.85,
+        fillColor: '#3b82f6',      // 淺藍填充
+        fillOpacity: 0.10,
+        dashArray: '8, 4',
+      },
+    });
+    _projectBoundaryLayer.addLayer(layer);
+    // 暴露 getBounds 給 caller
+    _projectBoundaryLayer.getBounds = () => layer.getBounds();
+  } catch (e) {
+    console.warn('[map] project boundary render failed', e);
+  }
+}
+
+// v2.11.19/20/21：把每個 plot 的邊界畫到 _plotBoundaryLayer（用預先算好的 d.ring）
+//   v2.11.21 ②(b)：polygon 也 bindPopup 同樣的 rich info — user 點面即可（不用再點點）
+function renderPlotBoundaries() {
+  if (!_plotBoundaryLayer || !_mapData) return;
+  _plotBoundaryLayer.clearLayers();
+  const overlay = getOverlayState();
+  if (!overlay.plotBoundary) return;
+  const { project, plotData } = _mapData;
+  plotData.forEach(d => {
+    if (!d.ring || d.ring.length < 3) return;
+    const poly = L.polygon(d.ring, {
+      color: '#15803d',          // 森林綠邊
+      weight: 1.5,
+      opacity: 0.9,
+      fillColor: '#22c55e',
+      fillOpacity: 0.15,
+    }).bindPopup(buildPlotPopupHTML(d, project.id));
+    _plotBoundaryLayer.addLayer(poly);
   });
 }
 
+// v2.11.19/20：依 plot shape 推導 { ring, anchor }
+//   ring = 邊界多邊形（[lat, lng] 陣列）；anchor = 樣區起點 SW 角（[lat, lng]）
+//   邏輯：先在 local TWD97 m 算出環頂點（相對 plot 中心），找 SW 角（min(x+y) 的 vertex），再轉回 WGS84
+//   - irregular: plotDimensions.vertices = [{x, y}, ...]（local m）直接用；SW = min(x+y) vertex
+//   - circle: 32-邊近似圓，r = √(area / π)；SW 取 (-r/√2, -r/√2)（圓心朝西南半徑點）
+//   - square: 4 角，邊長 = √area，N-S 對齊；SW = (-h, -h)
+//   - rectangle: 4 角；長/寬從 plotDimensions or 預設 25×20；slopeAspect 把 Y 軸從北轉到坡向；SW = (-hx, -hy) 經旋轉
+//   v2.11.20 ②(c)：marker 改放 SW 角而非 plot 中心（學理上的「樣區起點」），點縮小到 r=4
+function derivePlotBoundaryAndAnchorLatLng(d) {
+  const p = d.p;
+  const cx = d.lng, cy = d.lat;
+  // plot center TWD97（給 local m → abs TWD97 → WGS84 用）
+  const center97 = wgs84ToTwd97(cx, cy);
+  if (!center97 || !Number.isFinite(center97.x) || !Number.isFinite(center97.y)) return null;
+
+  let localRing = null;  // [[x_m, y_m], ...]（相對 plot center）
+  let localAnchor = null;
+
+  if (p.shape === 'irregular' && Array.isArray(p.plotDimensions?.vertices) && p.plotDimensions.vertices.length >= 3) {
+    localRing = vertsToArrays(p.plotDimensions.vertices);
+    // SW 角：找最小 (x+y) 的 vertex（即「最西南」實際頂點）
+    let minSum = Infinity, swIdx = 0;
+    localRing.forEach(([x, y], i) => {
+      const s = x + y;
+      if (s < minSum) { minSum = s; swIdx = i; }
+    });
+    localAnchor = localRing[swIdx];
+  } else {
+    const areaH = Number.isFinite(p.areaHorizontal_m2) ? p.areaHorizontal_m2
+                : Number.isFinite(p.area_m2) ? p.area_m2 : 0;
+    if (areaH <= 0) return null;
+
+    if (p.shape === 'circle') {
+      const r = Math.sqrt(areaH / Math.PI);
+      localRing = [];
+      const N = 32;
+      for (let i = 0; i < N; i++) {
+        const t = (i / N) * 2 * Math.PI;
+        localRing.push([r * Math.cos(t), r * Math.sin(t)]);
+      }
+      // 圓的「SW」沒有實際角，取圓周朝西南方向那點
+      localAnchor = [-r / Math.SQRT2, -r / Math.SQRT2];
+    } else if (p.shape === 'rectangle') {
+      // X = 沿等高線（短軸 / contour）、Y = 沿坡（長軸 / slope）— 對應紙漿廠 SOP
+      // 預設 0.05 ha → 25 m × 20 m（X=25 沿等高、Y=20 沿坡）
+      const dim = p.plotDimensions || {};
+      const lenX = Number.isFinite(dim.lengthX) ? dim.lengthX : Math.sqrt(areaH * 1.25);
+      const lenY = Number.isFinite(dim.lengthY) ? dim.lengthY : (areaH / lenX);
+      const hx = lenX / 2, hy = lenY / 2;
+      // 4 corners 在未旋轉軸：左下 / 右下 / 右上 / 左上
+      const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]];
+      // v2.11.20 D2：slopeAspect 為 null 表 N-S 對齊（不旋轉）；有值才旋轉
+      const aspect = Number.isFinite(p.slopeAspect) ? p.slopeAspect : 0;
+      const rad = -aspect * Math.PI / 180;   // 順時針旋轉用負角
+      const cosA = Math.cos(rad), sinA = Math.sin(rad);
+      const rotate = ([x, y]) => [x * cosA - y * sinA, x * sinA + y * cosA];
+      localRing = corners.map(rotate);
+      // SW 角 = 旋轉後的 [-hx, -hy]
+      localAnchor = rotate([-hx, -hy]);
+    } else {
+      // square 或未知 shape
+      const side = Math.sqrt(areaH);
+      const h = side / 2;
+      const corners = [[-h, -h], [h, -h], [h, h], [-h, h]];
+      // square 也支援 slopeAspect 旋轉
+      const aspect = Number.isFinite(p.slopeAspect) ? p.slopeAspect : 0;
+      const rad = -aspect * Math.PI / 180;
+      const cosA = Math.cos(rad), sinA = Math.sin(rad);
+      const rotate = ([x, y]) => [x * cosA - y * sinA, x * sinA + y * cosA];
+      localRing = corners.map(rotate);
+      localAnchor = rotate([-h, -h]);
+    }
+  }
+
+  // local m → abs TWD97 → WGS84
+  const toLatLng = ([dx, dy]) => {
+    const w = twd97ToWgs84(center97.x + dx, center97.y + dy);
+    return [w.lat, w.lng];
+  };
+  return {
+    ring: localRing.map(toLatLng),
+    anchor: localAnchor ? toLatLng(localAnchor) : null,
+  };
+}
+
 // v2.9.1：依 mode 重畫 markers + legend（不重抓 data）
+// v2.11.19：_layerGroup 改名為 _markerLayer（plot 圓點）；boundary 走獨立 layer 不在這裡管
 function renderMapLayer(mode) {
-  if (!_mapData || !_layerGroup || !_map) return;
-  _layerGroup.clearLayers();
+  if (!_mapData || !_markerLayer || !_map) return;
+  _markerLayer.clearLayers();
   const { project, plotData } = _mapData;
 
   // 決定著色函式 + legend HTML
@@ -564,32 +904,23 @@ function renderMapLayer(mode) {
       `　<span style="color:#a8a29e">⬤</span> 無資料`;
   }
 
-  const points = [];
   plotData.forEach(d => {
-    points.push([d.lat, d.lng]);
     const dotColor = getColor(d);
-    const surveyorLabel = isReviewer() ? anonName(d.p.createdBy) : userLabel(d.p.createdBy, '—');
-    const shapeLabel = ({ circle: '圓', square: '方', rectangle: '矩', irregular: '不規則' })[d.p.shape] || '方';
-    const irregLabel = d.p.shape === 'irregular' && Array.isArray(d.p.plotDimensions?.vertices)
-      ? ' · ' + d.p.plotDimensions.vertices.length + '頂點' : '';
-    const slopeLabel = Number.isFinite(d.p.slopeDegrees) && d.p.slopeDegrees > 0
-      ? ` · 坡 ${d.p.slopeDegrees.toFixed(0)}°` : '';
-    const marker = L.circleMarker([d.lat, d.lng], {
-      radius: 8,
+    // v2.11.20 ②(c) C1：marker 改放 SW 角錨點（樣區起點），fallback plot 中心
+    const markerPos = d.anchorLatLng || [d.lat, d.lng];
+    // v2.11.21 ②(a)：marker r=5 → r=3（再縮小，user 反映只要能辨識位置即可）
+    // v2.11.21 ②(b)：marker 與 polygon 都 bindPopup 同樣的 rich info（資訊應掛在面，user 點哪都行）
+    const marker = L.circleMarker(markerPos, {
+      radius: 3,
       color: d.p.insideBoundary === false ? '#dc2626' : dotColor,
       fillColor: dotColor,
-      fillOpacity: 0.75,
-      weight: 2
-    }).bindPopup(`
-      <strong>${d.p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${d.p.qaStatus || 'pending'}</span><br>
-      ${d.p.forestUnit || ''} · ${shapeLabel} ${d.p.area_m2 ? Math.round(d.p.area_m2) : '?'}m²${irregLabel}${slopeLabel}<br>
-      立木 <b>${d.tCount}</b> 株 · 密度 <b>${d.stemsHa.toFixed(0)}</b> 株/ha · BA <b>${d.baHa.toFixed(1)}</b> m²/ha<br>
-      調查者：${surveyorLabel}<br>
-      <a href="#/p/${project.id}/plot/${d.p.id}">→ 開啟樣區</a>
-    `);
-    _layerGroup.addLayer(marker);
+      fillOpacity: 0.95,
+      weight: 1.5
+    }).bindPopup(buildPlotPopupHTML(d, project.id));
+    _markerLayer.addLayer(marker);
   });
-  if (points.length > 0) _map.fitBounds(points, { padding: [40, 40] });
+  // v2.11.19：fitBounds 移到 renderMap 統一處理（boundary > plots > 蓮華池 優先序）— 此處不再 fitBounds
+  //   避免切著色 mode（QA/density/BA）時意外 reset zoom，user 體驗更穩定
 
   // 更新 legend
   const legendBox = $('#map-legend');

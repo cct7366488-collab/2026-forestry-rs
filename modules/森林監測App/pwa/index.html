@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21117">
+  <link rel="stylesheet" href="style.css?v=21125">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.17</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.25</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -63,7 +63,7 @@
 <main id="app" class="max-w-5xl mx-auto px-4 py-6"></main>
 
 <!-- ===== Toast ===== -->
-<div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 hidden bg-stone-900 text-white px-4 py-2 rounded-lg shadow-lg z-50"></div>
+<div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 hidden bg-stone-900 text-white px-4 py-2 rounded-lg shadow-lg z-[2100]"></div>
 
 <!-- ===== View Templates ===== -->
 
@@ -391,11 +391,21 @@
 
     <section data-tab-content="map" class="hidden">
       <!-- v2.9.1：圖層切換（QA 狀態 / stems ha 密度 / BA 密度）-->
-      <div id="map-layer-toggle" class="bg-white rounded-lg shadow p-2 mb-2 flex items-center gap-3 text-xs flex-wrap">
-        <span class="text-stone-500">著色依據：</span>
-        <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="qa" checked> QA 狀態（pending / verified / flagged / rejected）</label>
-        <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="density"> 立木密度（株/ha）</label>
-        <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="ba"> 斷面積密度（m²/ha）</label>
+      <!-- v2.11.19：加 2 個 checkbox 切「樣區邊界」/「專案邊界」overlay -->
+      <!-- v2.11.22：加「上傳專案邊界」入口按鈕（admin/PI 才看得到，補 v2.11.19 漏掉的入口）-->
+      <div id="map-layer-toggle" class="bg-white rounded-lg shadow p-2 mb-2 text-xs space-y-1.5">
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="text-stone-500">著色依據：</span>
+          <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="qa" checked> QA 狀態（pending / verified / flagged / rejected）</label>
+          <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="density"> 立木密度（株/ha）</label>
+          <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="ba"> 斷面積密度（m²/ha）</label>
+        </div>
+        <div class="flex items-center gap-3 flex-wrap pt-1.5 border-t border-stone-100">
+          <span class="text-stone-500">疊加圖層：</span>
+          <label class="cursor-pointer flex items-center gap-1"><input type="checkbox" name="map-overlay" value="plot-boundary"> 📐 樣區邊界</label>
+          <label class="cursor-pointer flex items-center gap-1"><input type="checkbox" name="map-overlay" value="project-boundary" checked> 🗺️ 專案邊界（如已上傳）</label>
+          <button id="btn-edit-project-boundary" class="hidden ml-auto border border-blue-300 text-blue-700 hover:bg-blue-50 px-2 py-0.5 rounded text-xs" data-role-show="pi,admin">✏️ 編輯專案 / 上傳邊界 GeoJSON</button>
+        </div>
       </div>
       <div id="map" class="h-[500px] rounded-lg shadow"></div>
       <div id="map-legend" class="bg-white rounded-lg shadow p-2 mt-2 text-xs hidden"></div>
@@ -603,8 +613,9 @@
 </template>
 
 <!-- Modal 殼 -->
-<div id="modal-backdrop" class="hidden fixed inset-0 bg-black/40 z-40"></div>
-<div id="modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+<!-- v2.11.23：z-index 從 z-40/z-50 升到 z-[1900]/z-[2000] — 修正在地圖分頁開 modal 被 Leaflet panes (z=400) 與控制鈕 (z=1000) 遮住的 bug -->
+<div id="modal-backdrop" class="hidden fixed inset-0 bg-black/40 z-[1900]"></div>
+<div id="modal" class="hidden fixed inset-0 z-[2000] flex items-center justify-center p-4">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
     <div class="flex justify-between items-center px-4 py-3 border-b">
       <h3 id="modal-title" class="font-semibold"></h3>
@@ -615,6 +626,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21117"></script>
+<script type="module" src="js/app.js?v=21125"></script>
 </body>
 </html>

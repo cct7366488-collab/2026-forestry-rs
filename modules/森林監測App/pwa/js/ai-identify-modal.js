@@ -15,9 +15,9 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast, isSystemAdmin, isPi } from './app.js?v=21117';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, suggestSpeciesFromAi, LLM_MODELS } from './ai-species.js?v=21117';
-import { loadSpeciesCache } from './species-picker.js?v=21117';
+import { el, toast, isSystemAdmin, isPi } from './app.js?v=21125';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, suggestSpeciesFromAi, LLM_MODELS } from './ai-species.js?v=21125';
+import { loadSpeciesCache } from './species-picker.js?v=21125';
 
 // v2.11.7：加 forceSetup 旗標 — 「編輯全域設定」按鈕走這條，不論 effective 是否滿足都進設定畫面
 export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
@@ -297,14 +297,17 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
         // v2.11.17（F1）：auto-suggest 補洞 — 字典外 + iNat/LLM resolved + admin/PI 才寫入 species/
         //   surveyor 不寫（避免快速辨識造成低品質候選氾濫）；admin 在「⏳ 待補充」filter 1-鍵 verify。
         //   非阻塞（fire-and-forget）：寫失敗不影響套用流程。
+        // v2.11.18（H）：成功後延遲 toast 提示「已加入字典」— user 看得到回饋
+        let suggestPromise = null;
         if (!localSp && (st.sourcePri === 3 || st.sourcePri === 2) && (isSystemAdmin() || isPi())) {
           const source = st.sourcePri === 3 ? 'iNat' : 'LLM';
-          suggestSpeciesFromAi({ sci: r.sci, zh: finalZh, family: r.family || null, source })
+          suggestPromise = suggestSpeciesFromAi({ sci: r.sci, zh: finalZh, family: r.family || null, source })
             .then(result => {
               if (result.ok) console.log(`[species suggest] +1 to dict: ${finalZh} / ${r.sci} (verified=false, source=${source})`);
               else if (result.reason !== 'exists' && result.reason !== 'session-dedup') {
                 console.warn('[species suggest]', result);
               }
+              return result;
             });
         }
 
@@ -313,8 +316,24 @@ export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
           zh: finalZh, sci: r.sci, localSpecies: localSp, aiResult: r,
           imageBlob: _imageBlob,
         });
-        toast(`✓ AI 套用：${finalZh}（信心 ${scorePct}%）+ 照片已入立木紀錄`, 3000);
+        toast(`✓ AI 套用：${finalZh}（信心 ${scorePct}%）+ 照片已入立木紀錄`, 3500);
         close();
+
+        // v2.11.18（H）：F1 結果第二段 toast — 略晚於主 toast 結束，避免互相蓋掉
+        if (suggestPromise) {
+          suggestPromise.then(result => {
+            setTimeout(() => {
+              if (result?.ok) {
+                toast(`📚 已加入樹種字典「⏳ 待補充」清單 — admin 標已驗證後即正式收錄`, 4000);
+              } else if (result?.reason === 'exists') {
+                toast(`📚 字典中已有「${finalZh}」— 無需重複新增`, 3000);
+              } else if (result?.reason === 'firestore-error') {
+                // 真錯才提示（permission-denied 等）；session-dedup / bad-source 等是預期 skip 不提
+                toast(`⚠ 字典補洞失敗：${result?.error || 'unknown'}`, 4000);
+              }
+            }, 3700);
+          }).catch(() => {});
+        }
       });
       // v2.11.5：detail box 在 row 下方 — LLM enrich 完後填內容
       const detail = el('div', { class: 'text-[11px] text-stone-600 px-2 py-1 border-l-2 border-stone-200 ml-2 hidden' });
