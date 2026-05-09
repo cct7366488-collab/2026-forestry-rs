@@ -1,4 +1,4 @@
-// ===== ai-identify-modal.js — v2.11.0 AI 樹種辨識 modal =====
+﻿// ===== ai-identify-modal.js — v2.11.0 AI 樹種辨識 modal =====
 // 用法：
 //   import { openAiIdentifyModal } from './ai-identify-modal.js';
 //   openAiIdentifyModal({
@@ -15,13 +15,20 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast, isSystemAdmin, isPi } from './app.js?v=21125';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, suggestSpeciesFromAi, LLM_MODELS } from './ai-species.js?v=21125';
-import { loadSpeciesCache } from './species-picker.js?v=21125';
+import { el, toast, isSystemAdmin, isPi } from './app.js?v=21126';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, suggestSpeciesFromAi, LLM_MODELS } from './ai-species.js?v=21126';
+import { loadSpeciesCache } from './species-picker.js?v=21126';
 
 // v2.11.7：加 forceSetup 旗標 — 「編輯全域設定」按鈕走這條，不論 effective 是否滿足都進設定畫面
+// v2.11.26：z-index z-50 → z-[2050]（蓋過 #modal z-[2000]，否則 AI modal 被新立木 modal 蓋住）+ dedup 防重複點累積
 export async function openAiIdentifyModal({ onPick, forceSetup = false } = {}) {
-  const wrap = el('div', { class: 'fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto' });
+  // v2.11.26：dedup — 已開啟的 AI modal 直接 return，避免按鈕快速連點累積多個 wrap
+  if (document.querySelector('[data-ai-identify-modal]')) return;
+
+  const wrap = el('div', {
+    class: 'fixed inset-0 bg-black/50 z-[2050] flex items-start justify-center p-4 overflow-y-auto',
+    'data-ai-identify-modal': '1',
+  });
   const card = el('div', { class: 'bg-white rounded-lg shadow-lg p-4 max-w-md w-full my-8' });
   wrap.appendChild(card);
   document.body.appendChild(wrap);

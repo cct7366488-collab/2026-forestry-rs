@@ -1,7 +1,8 @@
-// Service Worker — App Shell 快取（離線可開）
+﻿// Service Worker — App Shell 快取（離線可開）
 // 注意：Firestore 自己有 offline persistence，這裡只快取 App 殼。
 
-const CACHE = 'forest-monitor-v2.11.25';  // v2.11.25：地圖 auto-zoom 從 6-7s 縮到 ~300ms — root cause：fetchAllData 跑 19 plots × 6 子集合 = 115 個 SERIAL Firestore queries 才 fitBounds。改兩段式 fetch：Phase 1 只 fetch plots（1 個 query）→ 立即 fitBounds + skeleton markers；Phase 2 背景 parallel fetch 所有子集合（~6 round-trips）→ 完成後重畫 markers 帶完整 stems/ha BA/ha。地圖角落加 loading indicator「⏳ 載入樣區位置… → 載入立木統計…」讓 user 看得到 progress。?v=21124 -> ?v=21125 全 13 檔。
+const CACHE = 'forest-monitor-v2.11.26';  // v2.11.26：新立木表單「📸 AI 辨識」按鈕修 — 3 連雷：(1) ai-identify-modal wrap z-50 < #modal z-[2000] → AI modal 被新立木 modal 蓋住看不到，user 重複按累積多個 bg-black/50 → 螢幕慢慢變暗；改 z-[2050]。(2) 沒 dedup → 重複點累積多個 wrap；加 [data-ai-identify-modal] querySelector 守門。(3) species-picker input listener 不分 e.isTrusted → forms.js onPick 後 dispatchEvent('input') 也誤開 dropdown panel，全螢幕物種清單蓋住表單，user 看似「跳到字典畫面」；改 synthetic event 只 refresh _filtered 不 openPanel。?v=21125 -> ?v=21126 全 13 檔。
+// v2.11.25：地圖 auto-zoom 從 6-7s 縮到 ~300ms — Phase 1 只 fetch plots → 立即 fitBounds，Phase 2 背景 parallel fetch 子集合。
 // v2.11.24：Firestore array-of-array 限制修 — boundaryGeoJson 改用 stringify 存 boundaryGeoJsonStr 字串。
 // v2.11.23：地圖分頁 modal z-index 修 + 按鈕 click feedback。
 // v2.11.22：地圖分頁加「✏️ 編輯專案 / 上傳邊界 GeoJSON」按鈕入口 — 補 v2.11.19 邊界上傳 UI 從沒入口可進的問題。(本版發現 modal 被 Leaflet 蓋住的 z-index bug → v2.11.23 修)

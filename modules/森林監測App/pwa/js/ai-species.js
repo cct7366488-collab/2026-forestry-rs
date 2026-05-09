@@ -1,4 +1,4 @@
-// ===== ai-species.js — v2.11.0 AI 樹種辨識（線上 Pl@ntNet API） =====
+﻿// ===== ai-species.js — v2.11.0 AI 樹種辨識（線上 Pl@ntNet API） =====
 // 使用 Pl@ntNet 免費 API：https://my-api.plantnet.org/v2/identify
 //   - free tier 500 req/day/key
 //   - 全球 ~40,000 種維管束植物（含台灣常見種）
@@ -15,7 +15,7 @@
 //   const localSp = matchToLocalSpecies(top[0], allSpecies);
 
 // v2.11.4：API key + Proxy URL 從 user-only localStorage 升級為「Firestore 全域 admin > localStorage user」優先序
-import { fb, isSystemAdmin, state } from './app.js?v=21125';
+import { fb, isSystemAdmin, state } from './app.js?v=21126';
 
 const LS_API_KEY = 'forestmrv.plantnet.apiKey';
 const LS_PROXY_URL = 'forestmrv.plantnet.proxyUrl';   // v2.11.2：CORS proxy URL（如 Cloudflare Worker）

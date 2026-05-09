@@ -1,17 +1,17 @@
-// ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
+﻿// ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21125';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21126';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21125';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21126';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21125';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21126';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21125';
+import { getEquationBadge } from './species-equations.js?v=21126';
 // v2.11.19：irregular plot vertices 轉換用
-import { vertsToArrays } from './plot-polygon.js?v=21125';
+import { vertsToArrays } from './plot-polygon.js?v=21126';
 // v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
-import { openProjectForm } from './forms.js?v=21125';
+import { openProjectForm } from './forms.js?v=21126';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -506,7 +506,7 @@ export async function renderMap(project) {
   _plotBoundaryLayer = L.layerGroup().addTo(_map);
   _projectBoundaryLayer = L.layerGroup().addTo(_map);
 
-  // v2.11.25：loading indicator + 兩段式 fetch
+  // v2.11.26：loading indicator + 兩段式 fetch
   //   舊 fetchAllData 為了算 stems/ha + BA/ha 跑 19 plots × 6 sub-collections = 115 個 SERIAL queries 要 6-12 秒，
   //   user 看到「先停在蓮華池 6-7 秒才跳到 plot 群」是因為整個 fetch 完才 fitBounds。
   //   改為：Phase 1 只 fetch plots（1 個 query ~150-300ms）→ 立即 fitBounds + 空 trees skeleton render
@@ -626,7 +626,7 @@ export async function renderMap(project) {
 
   if (plots.length === 0) toast('尚無樣區可顯示，但若已上傳專案邊界仍會顯示');
 
-  // v2.11.25 PHASE 2 背景跑：parallel fetch 所有子集合 → 完成後重畫 markers 帶完整 stems/ha BA/ha
+  // v2.11.26 PHASE 2 背景跑：parallel fetch 所有子集合 → 完成後重畫 markers 帶完整 stems/ha BA/ha
   //   ~6 round-trips（19 plots × 6 子集合 = 114 queries 平行 fire）
   //   完成前 markers 已顯示但密度為 0；完成後重畫補上正確密度色階
   loadingDiv.textContent = '⏳ 載入立木統計（密度/BA）…';
@@ -646,7 +646,7 @@ export async function renderMap(project) {
   });
 }
 
-// v2.11.25：phase 2 helper — parallel 抓所有 plots 的子集合（trees 給密度計算用，其他保留給未來擴充）
+// v2.11.26：phase 2 helper — parallel 抓所有 plots 的子集合（trees 給密度計算用，其他保留給未來擴充）
 async function fetchSubCollectionsParallel(project, plots) {
   const subColls = ['trees', 'regeneration', 'understory', 'soilCons', 'wildlife', 'harvest'];
   const tasks = [];
@@ -668,7 +668,7 @@ async function fetchSubCollectionsParallel(project, plots) {
   return { trees: buckets.trees, regen: buckets.regeneration, ...buckets };
 }
 
-// v2.11.25：plotData 計算 helper — 拆出來 phase 1 / 2 都用
+// v2.11.26：plotData 計算 helper — 拆出來 phase 1 / 2 都用
 function computePlotDataFromTrees(plots, trees) {
   const data = plots.map(p => {
     if (!p.location) return null;

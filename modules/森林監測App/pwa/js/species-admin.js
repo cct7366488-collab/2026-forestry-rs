@@ -1,4 +1,4 @@
-// ===== species-admin.js — admin 樹種字典管理 (v2.7.11) =====
+﻿// ===== species-admin.js — admin 樹種字典管理 (v2.7.11) =====
 // 動機：v2.7.4 import wizard 自動 seed verified=false 後，admin 原本要去 Firestore Console
 //       手動補學名 / 保育等級 / promote verified=true。本模組提供 in-app 管理 UI。
 // 路徑：top-level `species/{docId}` (rules: read 任一登入者 / write systemAdmin)
@@ -12,7 +12,7 @@
 //   🆔d CSV bulk import：上傳 CSV → 預覽 → setDoc(merge:true) 平行寫入
 //   🆔e 變更歷史：每次儲存寫一筆到 species/{id}/history sub-collection + modal 檢視
 
-import { fb, $, $$, el, toast, state } from './app.js?v=21125';
+import { fb, $, $$, el, toast, state } from './app.js?v=21126';
 
 const CONS_GRADES = ['', 'I', 'II', 'III'];  // '' = 無保育級
 const BATCH_OP_LIMIT = 450;  // Firestore writeBatch 上限 500，預留 buffer

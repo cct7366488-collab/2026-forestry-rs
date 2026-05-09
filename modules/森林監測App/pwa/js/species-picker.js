@@ -1,4 +1,4 @@
-// ===== species-picker.js — v2.10.5 樹種搜尋下拉組件 =====
+﻿// ===== species-picker.js — v2.10.5 樹種搜尋下拉組件 =====
 // 取代原生 <datalist>，支援：
 //   - 從 Firestore species/{} 動態載入（v2.10 enriched schema：224 種）
 //   - Fuzzy 搜尋：中文 / 學名 / 別名 / 科 / 屬 7 級分數排序
@@ -12,7 +12,7 @@
 //   form.appendChild(picker.root);
 //   picker.input.addEventListener('input', () => { ... picker.getMatched() ... });
 
-import { fb, el } from './app.js?v=21125';
+import { fb, el } from './app.js?v=21126';
 import { TREES } from './species-dict.js?v=2000';
 
 // ===== Module-level cache =====
@@ -329,7 +329,11 @@ export function createSpeciesPicker({
   }
 
   input.addEventListener('focus', openPanel);
-  input.addEventListener('input', () => {
+  // v2.11.26：synthetic input（e.isTrusted=false）不開 panel — 修 AI 辨識 setValue 後 forms.js
+  //   dispatchEvent('input') 觸發 updateConsWarn/updateCalc 之餘，picker 也誤開 dropdown，
+  //   全螢幕物種清單蓋住表單，user 看起來像「跳到字典畫面」。
+  input.addEventListener('input', (e) => {
+    if (!e.isTrusted) { refresh(); return; }
     if (!_open) openPanel();
     else refresh();
   });

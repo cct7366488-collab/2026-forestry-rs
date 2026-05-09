@@ -1,4 +1,4 @@
-// ===== import-wizard.js — Excel 批次匯入雛形（v2.5.0-prototype）=====
+﻿// ===== import-wizard.js — Excel 批次匯入雛形（v2.5.0-prototype）=====
 // 5 步驟 wizard：選檔 → 樣區對應 → 欄位對應 → 樹種/狀態碼比對 → 預覽
 // ⚠ 雛形階段：最後一步僅 DRY-RUN，不會真的寫入 Firestore
 // 設計依據：林業保育署永久樣區格式（中華紙漿臺東廠 19 樣區為樣本）
@@ -8,9 +8,9 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=21125';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=21126';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=21125';
+import { TREES } from './species-dict.js?v=21126';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
