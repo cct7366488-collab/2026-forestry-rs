@@ -51,8 +51,14 @@ service cloud.firestore {
     }
 
     // ===== Users =====
+    // v2.11.27：read 對所有登入者開放（避免 PI 無法 query /users by email 加成員）
+    //   修前：只允許 uid==auth.uid || isSystemAdmin → PI 加成員 query 整批被擋 → client catch
+    //     在誤導為「目前的角色無法變更成員」；同時 PI 看成員清單名字也 silently fail
+    //   修後：所有登入者可 read /users（email / displayName / systemRole）
+    //     ForestMRV 為內部教學工具、user 都是同單位老師學生、email 互寄本就公開 → 隱私風險低
+    //   write 維持只能改自己
     match /users/{uid} {
-      allow read:  if isSignedIn() && (request.auth.uid == uid || isSystemAdmin());
+      allow read:  if isSignedIn();
       allow write: if isSignedIn() && request.auth.uid == uid;
     }
 

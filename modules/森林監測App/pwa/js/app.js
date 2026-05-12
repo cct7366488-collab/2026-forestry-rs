@@ -1,4 +1,4 @@
-﻿// ===== app.js — v1.5 主程式：5 角色 + Lock + QA + memberUids =====
+// ===== app.js — v1.5 主程式：5 角色 + Lock + QA + memberUids =====
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
@@ -15,18 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21126";
-import * as forms from "./forms.js?v=21126";
-import * as analytics from "./analytics.js?v=21126";
-import * as importWizard from "./import-wizard.js?v=21126";
-import { renderTreeDistribution } from "./distribution.js?v=21126";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21126";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=21127";
+import * as forms from "./forms.js?v=21127";
+import * as analytics from "./analytics.js?v=21127";
+import * as importWizard from "./import-wizard.js?v=21127";
+import { renderTreeDistribution } from "./distribution.js?v=21127";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21127";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21126";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21126";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21127";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21127";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21126";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21127";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -359,7 +359,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21126');
+    const m = await import('./migration-v2715.js?v=21127');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -381,7 +381,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21126');
+    const m = await import('./migration-v2715.js?v=21127');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -2099,6 +2099,36 @@ async function renderMyFlagged() {
   }
 }
 
+// v2.11.27：踢出專案成員（保留他建的子集合資料 — plot / tree / regen 等都還在）
+//   權限規則（client + rules 雙層）：
+//     admin：可移除任何人（含其他 PI；不可移除自己）
+//     PI：可移除 surveyor / reviewer；不可移除自己、不可移除其他 PI
+//   不刪資料原則：被踢出者的 createdBy 還在子集合裡，他若被加回（同 email → 同 uid）權限自動恢復
+async function removeMember(uid, label, role, roleLabel) {
+  if (!confirm(
+    `確定將「${label}」（${roleLabel}）從本專案移除？\n\n` +
+    `• 他將無法再讀寫此專案資料\n` +
+    `• 他先前已建立的樣區 / 立木 / 其他紀錄都會保留\n` +
+    `• 之後若想加回來，直接用同 email 加成員即可（uid 不變 → 舊資料權限自動恢復）`
+  )) return;
+  try {
+    const newMembers = { ...state.project.members };
+    delete newMembers[uid];
+    const newMemberUids = Object.keys(newMembers);
+    await updateDoc(doc(db, 'projects', state.project.id), {
+      members: newMembers,
+      memberUids: newMemberUids
+    });
+    state.project.members = newMembers;
+    state.project.memberUids = newMemberUids;
+    toast(`已移除：${label}`);
+    renderSettings();
+  } catch (err) {
+    console.error('移除成員失敗:', err);
+    toast('移除失敗：' + err.message);
+  }
+}
+
 async function renderSettings() {
   const list = $('#member-list');
   list.innerHTML = '';
@@ -2110,9 +2140,22 @@ async function renderSettings() {
       if (us.exists()) label = `${us.data().displayName} (${us.data().email})`;
     } catch {}
     const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員' }[role] || role;
-    list.appendChild(el('div', { class: 'flex justify-between' },
+    // v2.11.27：移除按鈕的顯示條件
+    const isSelf = uid === state.user.uid;
+    const canRemove = !isSelf && (isSystemAdmin() || (isPi() && role !== 'pi'));
+    const rightCol = el('div', { class: 'flex gap-3 items-center' },
+      el('span', { class: 'text-stone-500' }, roleLabel),
+      canRemove
+        ? el('button', {
+            class: 'text-red-600 hover:text-red-800 text-xs underline',
+            title: `移除「${label}」`,
+            onClick: (e) => { e.preventDefault(); removeMember(uid, label, role, roleLabel); }
+          }, '✕ 移除')
+        : null
+    );
+    list.appendChild(el('div', { class: 'flex justify-between items-center' },
       el('span', {}, label),
-      el('span', { class: 'text-stone-500' }, roleLabel)
+      rightCol
     ));
   }
   // 加成員（v1.7.1.2：加 try/catch 顯示錯誤；admin 自動將自己升為 pi 防呆）

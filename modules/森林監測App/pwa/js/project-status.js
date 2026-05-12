@@ -1,4 +1,4 @@
-﻿// ===== project-status.js — v2.7 階段 3：Reviewer 完成審查 =====
+// ===== project-status.js — v2.7 階段 3：Reviewer 完成審查 =====
 // 6 狀態：created → planning → active → review → verified → archived
 // 觸發點：
 //   methodology 第一次儲存 → created → planning
@@ -9,7 +9,7 @@
 //   reviewer 完成審查（v2.7）       → review → verified（保留 Lock，autoLockReason='reviewer-approved'）
 //   admin 結案                       → verified → archived（封存按鈕，已實作於 forms.archiveProject）
 
-import { fb, state } from './app.js?v=21126';
+import { fb, state } from './app.js?v=21127';
 
 export const STATUS = {
   CREATED:  'created',

@@ -1,10 +1,10 @@
-﻿// ===== migration-v2715.js — 樣區幾何 schema 升級批次標記工具（admin only）=====
+// ===== migration-v2715.js — 樣區幾何 schema 升級批次標記工具（admin only）=====
 //
 // 目的：把既有 plots 補上 v2.7.15 新增欄位（slopeDegrees / dimensionType /
 // areaHorizontal_m2 / migrationPending=true），標記為「待補登」狀態。
 //
 // 觸發方式（v2.7.15）：admin 手動在 console 呼叫
-//   const m = await import('./js/migration-v2715.js?v=21126');
+//   const m = await import('./js/migration-v2715.js?v=21127');
 //   await m.dryRun('PROJECT_ID');                    // 看影響哪些樣區
 //   await m.markPending('PROJECT_ID', { execute: true });  // 真的寫入
 //
@@ -15,8 +15,8 @@
 //   - 只動 plotShape='circle'|'square' 的舊資料；rectangle 已是新 schema，跳過
 //   - 寫入時用 batch（一次最多 500 doc，超過分批）
 
-import { fb } from './app.js?v=21126';
-import { MIGRATION_DEFAULTS, computeAreaHorizontal } from './plot-geometry.js?v=21126';
+import { fb } from './app.js?v=21127';
+import { MIGRATION_DEFAULTS, computeAreaHorizontal } from './plot-geometry.js?v=21127';
 
 const { db, collection, getDocs, doc, writeBatch } = fb;
 

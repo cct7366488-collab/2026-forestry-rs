@@ -1,4 +1,4 @@
-﻿// ===== species-picker.js — v2.10.5 樹種搜尋下拉組件 =====
+// ===== species-picker.js — v2.10.5 樹種搜尋下拉組件 =====
 // 取代原生 <datalist>，支援：
 //   - 從 Firestore species/{} 動態載入（v2.10 enriched schema：224 種）
 //   - Fuzzy 搜尋：中文 / 學名 / 別名 / 科 / 屬 7 級分數排序
@@ -12,7 +12,7 @@
 //   form.appendChild(picker.root);
 //   picker.input.addEventListener('input', () => { ... picker.getMatched() ... });
 
-import { fb, el } from './app.js?v=21126';
+import { fb, el } from './app.js?v=21127';
 import { TREES } from './species-dict.js?v=2000';
 
 // ===== Module-level cache =====
