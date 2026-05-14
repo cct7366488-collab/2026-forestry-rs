@@ -273,3 +273,119 @@ export function normalizePlotOnRead(plot) {
   }
   return out;
 }
+
+// ===== v2.11.29：plot detail 地圖 — 邊界角點 + 立木座標 helper =====
+
+/**
+ * 計算樣區邊界角點 → WGS84 lat/lng 陣列（給 Leaflet polygon 用）
+ *
+ *   rectangle / square：plot.locationTWD97（中心）+ plotDimensions.{width,length} + 坡度雙軸 cos 校正
+ *                       + slopeAspect 旋轉（長軸對齊下坡方向；預設 0=長軸朝 N，與表單預設一致）
+ *   circle：以 areaHorizontal_m2 反推水平半徑，32 點近似
+ *   irregular：plotDimensions.vertices（local m 相對中心）直接平移，不做 cos 與旋轉
+ *              （vertices 假設為使用者輸入的水平 m，與 GeoJSON 上傳一致）
+ *
+ * @param {Object} plot - 含 locationTWD97 / shape / plotDimensions / slope* / dimensionType
+ * @param {Function} twd97ToWgs84Fn - 注入避免循環依賴（app.js 提供）
+ * @returns {Array<[number, number]>} - [[lat, lng], ...] 給 L.polygon；無法計算回 []
+ */
+export function computePlotCorners(plot, twd97ToWgs84Fn) {
+  if (!plot?.locationTWD97
+      || !Number.isFinite(plot.locationTWD97.x)
+      || !Number.isFinite(plot.locationTWD97.y)) return [];
+  const cx = plot.locationTWD97.x;
+  const cy = plot.locationTWD97.y;
+  const shape = plot.shape || 'rectangle';
+
+  const project = (lx, ly) => {
+    const w = twd97ToWgs84Fn(cx + lx, cy + ly);
+    return [w.lat, w.lng];
+  };
+
+  if (shape === 'irregular') {
+    const verts = plot.plotDimensions?.vertices;
+    if (!Array.isArray(verts) || verts.length < 3) return [];
+    return verts.map(v => {
+      const lx = Number(v.x);
+      const ly = Number(v.y);
+      return (Number.isFinite(lx) && Number.isFinite(ly)) ? project(lx, ly) : null;
+    }).filter(Boolean);
+  }
+
+  if (shape === 'circle') {
+    const area = plot.areaHorizontal_m2 ?? plot.area_m2 ?? null;
+    if (!Number.isFinite(area) || area <= 0) return [];
+    const r = Math.sqrt(area / Math.PI);
+    const corners = [];
+    const N = 32;
+    for (let i = 0; i < N; i++) {
+      const a = (2 * Math.PI * i) / N;
+      corners.push(project(r * Math.cos(a), r * Math.sin(a)));
+    }
+    return corners;
+  }
+
+  // rectangle / square
+  const dims = plot.plotDimensions || {};
+  const w = Number(dims.width);
+  const l = Number(dims.length);
+  if (!Number.isFinite(w) || !Number.isFinite(l) || w <= 0 || l <= 0) return [];
+  const slopeW = plot.slopeWidthDeg ?? plot.slopeDegrees ?? 0;
+  const slopeL = plot.slopeLengthDeg ?? plot.slopeDegrees ?? 0;
+  const dimType = plot.dimensionType || 'horizontal';
+  // 沿坡距 → 水平投影
+  const horiz = localToHorizontal2D(w, l, slopeW, slopeL, dimType);
+  const hw = horiz.x / 2;
+  const hl = horiz.y / 2;
+
+  // slopeAspect 旋轉（bearing °；0=N 順時針）
+  //   把 local 座標系（+Y=N）旋轉 -aspect，使 Y 軸對齊 aspect 方向
+  const aspectDeg = Number.isFinite(plot.slopeAspect) ? plot.slopeAspect : 0;
+  const aspectRad = aspectDeg * DEG2RAD;
+  const cosA = Math.cos(aspectRad);
+  const sinA = Math.sin(aspectRad);
+  const rotateProject = (lx, ly) => {
+    const rx = lx * cosA + ly * sinA;
+    const ry = -lx * sinA + ly * cosA;
+    return project(rx, ry);
+  };
+
+  return [
+    rotateProject(-hw, -hl),
+    rotateProject( hw, -hl),
+    rotateProject( hw,  hl),
+    rotateProject(-hw,  hl)
+  ];
+}
+
+/**
+ * 立木位置 → WGS84 [lat, lng]（給 Leaflet marker 用）
+ *   優先順序：tree.location (GeoPoint) → tree.locationTWD97 → plot 中心 + localX/Y
+ *
+ * @returns {[number, number] | null}
+ */
+export function treeToWgs84(tree, plot, twd97ToWgs84Fn) {
+  if (!tree) return null;
+  // 1. tree.location（GeoPoint）— offset/GPS 兩種模式都會存
+  if (tree.location) {
+    const lat = tree.location.latitude ?? tree.location._lat;
+    const lng = tree.location.longitude ?? tree.location._long;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng];
+  }
+  // 2. tree.locationTWD97
+  if (tree.locationTWD97
+      && Number.isFinite(tree.locationTWD97.x)
+      && Number.isFinite(tree.locationTWD97.y)) {
+    const w = twd97ToWgs84Fn(tree.locationTWD97.x, tree.locationTWD97.y);
+    return [w.lat, w.lng];
+  }
+  // 3. fallback：plot 中心 + localX/Y（舊資料）
+  if (Number.isFinite(tree.localX_m) && Number.isFinite(tree.localY_m)
+      && Number.isFinite(plot?.locationTWD97?.x) && Number.isFinite(plot?.locationTWD97?.y)) {
+    const absX = plot.locationTWD97.x + tree.localX_m;
+    const absY = plot.locationTWD97.y + tree.localY_m;
+    const w = twd97ToWgs84Fn(absX, absY);
+    return [w.lat, w.lng];
+  }
+  return null;
+}

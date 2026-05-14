@@ -15,18 +15,19 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21128";
-import * as forms from "./forms.js?v=21128";
-import * as analytics from "./analytics.js?v=21128";
-import * as importWizard from "./import-wizard.js?v=21128";
-import { renderTreeDistribution } from "./distribution.js?v=21128";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21128";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=21129";
+import * as forms from "./forms.js?v=21129";
+import * as analytics from "./analytics.js?v=21129";
+import * as importWizard from "./import-wizard.js?v=21129";
+import { renderTreeDistribution } from "./distribution.js?v=21129";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21129";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21129";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21128";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21128";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21129";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21129";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21128";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21129";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -359,7 +360,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21128');
+    const m = await import('./migration-v2715.js?v=21129');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -381,7 +382,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21128');
+    const m = await import('./migration-v2715.js?v=21129');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -2359,6 +2360,9 @@ async function renderPlotDetail(root, projectId, plotId) {
   root.appendChild(tpl);
   $('[data-back-to-project]').setAttribute('href', `#/p/${projectId}`);
 
+  // v2.11.29：plot detail 地圖 — 先宣告 hoisted handle，subtab 切到 map 才 lazy-init Leaflet
+  let ensureTreeMapInitialized = () => {};
+
   const loc = state.plot.location;
   const t97 = state.plot.locationTWD97;
   bindData(root, 'plot', {
@@ -2441,6 +2445,8 @@ async function renderPlotDetail(root, projectId, plotId) {
     $(`[data-subtab-content="${t}"]`).classList.remove('hidden');
     // v2.6.2：切到 distribution 時重 render（hidden → visible 後容器寬度才正確）
     if (t === 'distribution') rerenderDistribution();
+    // v2.11.29：切到 map 時 lazy-init / invalidateSize（Leaflet 在 hidden 時抓不到尺寸）
+    if (t === 'map') ensureTreeMapInitialized();
   }));
 
   // v2.3.4：reroute 後恢復原 sub-tab（避免每次 markQA 跳回預設）
@@ -2530,9 +2536,38 @@ async function renderPlotDetail(root, projectId, plotId) {
     });
   }
 
+  // v2.11.29：plot detail 地圖 lazy-init handle（subtab click 才建 Leaflet 實例）
+  let _treeMapHandle = null;
+  let _lastTreesArr = [];
+  ensureTreeMapInitialized = () => {
+    if (!_treeMapHandle) {
+      const host = $('#plot-detail-map-host');
+      if (!host) return;
+      _treeMapHandle = initTreeMap({
+        container: host,
+        plot: state.plot,
+        project: state.project,
+        canEdit: canCollect() && !isLocked(),
+        onTreeClick: (t) => forms.openTreeForm(state.project, state.plot, { id: t.id, ...t })
+      });
+      // 套用當前 trees snapshot
+      _treeMapHandle?.updateTrees(_lastTreesArr);
+    }
+    // 每次切回都 invalidateSize（hidden→visible 後容器尺寸才對）
+    _treeMapHandle?.invalidateSize();
+  };
+  // 換頁時 cleanup Leaflet（onTreeClick 等 closure 持有 Leaflet 物件）
+  state.unsubscribers.push(() => { _treeMapHandle?.destroy(); _treeMapHandle = null; });
+
   const treesRef = collection(db, 'projects', projectId, 'plots', plotId, 'trees');
   const unsubT = onSnapshot(query(treesRef, orderBy('treeNum', 'asc')), snap => {
     renderTreeList(snap, projectId, plotId);
+    // v2.11.29：推給地圖（即使地圖尚未初始化，先存到 _lastTreesArr）
+    _lastTreesArr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _treeMapHandle?.updateTrees(_lastTreesArr);
+    // 同步 map subtab tree count badge
+    const mapCountEl = $('#map-tree-count');
+    if (mapCountEl) mapCountEl.textContent = `（${_lastTreesArr.length} 株）`;
   });
   state.unsubscribers.push(unsubT);
 

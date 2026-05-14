@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21128">
+  <link rel="stylesheet" href="style.css?v=21129">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.28</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.29</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -491,6 +491,7 @@
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
       <a href="#" data-subtab="overview" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">📊 樣區概況</a>
       <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌳 立木調查</a>
+      <a href="#" data-subtab="map" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🗺️ 樣區地圖</a>
       <a href="#" data-subtab="distribution" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">📍 立木分布</a>
       <a href="#" data-subtab="regen" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌱 自然更新</a>
       <a href="#" data-subtab="understory" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600 hidden">🌿 地被植物</a>
@@ -536,6 +537,17 @@
       </div>
       <div id="tree-summary" class="bg-white rounded-lg shadow p-3 mb-3 text-sm grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
       <div id="tree-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+    </section>
+
+    <!-- v2.11.29：plot detail 地圖（樣區邊界 + 立木 marker + drag-to-edit）-->
+    <section data-subtab-content="map" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-semibold">🗺️ 樣區地圖 <span id="map-tree-count" class="text-sm text-stone-500"></span></h2>
+      </div>
+      <p class="text-xs text-stone-500 mb-2">
+        樣區邊界 + 所有立木在實地的位置。Marker 顏色按 QA 狀態（綠已審 / 黃待審 / 紅退回），實心=GPS、空心=皮尺。Hover 看詳情，PI/surveyor/admin 可點「✏️ 編輯位置」拖移微調。
+      </p>
+      <div id="plot-detail-map-host"></div>
     </section>
 
     <!-- v2.6.2：立木分布散布圖（樣區內 X/Y 視覺化）-->
@@ -626,6 +638,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21128"></script>
+<script type="module" src="js/app.js?v=21129"></script>
 </body>
 </html>
