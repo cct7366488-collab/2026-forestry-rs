@@ -15,18 +15,18 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21127";
-import * as forms from "./forms.js?v=21127";
-import * as analytics from "./analytics.js?v=21127";
-import * as importWizard from "./import-wizard.js?v=21127";
-import { renderTreeDistribution } from "./distribution.js?v=21127";   // v2.6.2：立木分布散布圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21127";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=21128";
+import * as forms from "./forms.js?v=21128";
+import * as analytics from "./analytics.js?v=21128";
+import * as importWizard from "./import-wizard.js?v=21128";
+import { renderTreeDistribution } from "./distribution.js?v=21128";   // v2.6.2：立木分布散布圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21128";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21127";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21127";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21128";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21128";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21127";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21128";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -359,7 +359,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21127');
+    const m = await import('./migration-v2715.js?v=21128');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -381,7 +381,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21127');
+    const m = await import('./migration-v2715.js?v=21128');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -2701,6 +2701,21 @@ function renderTreeList(snap, projectId, plotId) {
     const xyText = (Number.isFinite(t.localX_m) && Number.isFinite(t.localY_m))
       ? `${t.localX_m.toFixed(1)}, ${t.localY_m.toFixed(1)}`
       : '—';
+    // v2.11.28：定位來源 badge
+    //   📐 offset = 皮尺 X/Y（傳統，舊資料無 positionSource 也視為 offset）
+    //   📍 GPS    = 立木直接 GPS 量測；若 GPS 精度 >10m 加 ⚠ 標示
+    //   ✋ 已微調 = 之後在地圖頁長壓拖移過（Commit 2 才會用，先佔位）
+    const posSrc = t.positionSource || 'offset';
+    let posBadge = '<span title="皮尺偏移 X/Y" style="font-size:11px;color:#1e40af">📐</span>';
+    if (posSrc === 'gps') {
+      const acc = Number.isFinite(t.gpsAccuracy_m) ? t.gpsAccuracy_m : null;
+      const accNote = acc != null ? `（GPS ±${Math.round(acc)}m）` : '（GPS）';
+      const accWarn = (acc != null && acc > 10) ? ' ⚠' : '';
+      posBadge = `<span title="GPS 直接量測 ${accNote}" style="font-size:11px;color:#047857">📍${accWarn}</span>`;
+    }
+    if (t.manuallyAdjusted === true) {
+      posBadge += ' <span title="在地圖頁長壓微調過位置" style="font-size:11px;color:#7c3aed">✋</span>';
+    }
     return el('tr', {
       onclick: () => {
         if (isLocked()) return toast('資料已 Lock');
@@ -2712,7 +2727,7 @@ function renderTreeList(snap, projectId, plotId) {
       speciesCell,
       el('td', {}, (t.dbh_cm || 0).toFixed(1)),
       el('td', {}, (t.height_m || 0).toFixed(1)),
-      el('td', { class: 'text-xs text-stone-600 font-mono' }, xyText),  // v2.5
+      el('td', { class: 'text-xs text-stone-600 font-mono', html: `${posBadge} ${xyText}` }),  // v2.5 + v2.11.28 badge
       el('td', {}, el('span', { class: `badge badge-${v}` }, vlabel)),
       el('td', {}, (t.volume_m3 || 0).toFixed(3))
     );
@@ -2722,7 +2737,7 @@ function renderTreeList(snap, projectId, plotId) {
       el('tr', {},
         el('th', {}, '#'), el('th', {}, '樹種 / QA'),
         el('th', {}, 'DBH (cm)'), el('th', {}, 'H (m)'),
-        el('th', {}, 'X, Y (m)'),  // v2.5
+        el('th', {}, '位置 (X, Y m)'),  // v2.5 + v2.11.28 加定位來源 badge
         el('th', {}, '活力'), el('th', {}, '材積 (m³)')
       )
     ),
