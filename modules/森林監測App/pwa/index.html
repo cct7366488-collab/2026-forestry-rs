@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21131">
+  <link rel="stylesheet" href="style.css?v=21132">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.31</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.32</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -432,11 +432,14 @@
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="font-semibold mb-2">🔑 登入狀態（出工前檢查）</h3>
         <div id="auth-status" class="text-sm space-y-1"></div>
-        <div class="flex gap-2 items-center mt-3">
+        <div class="flex gap-2 items-center mt-3 flex-wrap">
           <button id="btn-refresh-token" class="bg-forest-700 text-white px-3 py-1 rounded text-sm">🔄 立即重新整理登入</button>
-          <span class="text-xs text-stone-500">出工前一刻按一次，token 重新計時 1 小時、refresh token 永久有效</span>
+          <button id="btn-preflight-check" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded text-sm">🚀 完整出工檢查</button>
+          <span class="text-xs text-stone-500">出工前一刻按一次</span>
         </div>
-        <p class="text-xs text-stone-500 mt-2">⚠️ 山區離線使用前提：(1) 在有網路處先完整登入過一次、(2) 出發前 5 分鐘按上方按鈕 refresh、(3) 若 3-6 小時離線後 token 過期，回駐地連網會自動換新（不必擔心資料遺失）。</p>
+        <!-- v2.11.32 (J-5)：出工 pre-flight 5 項檢查結果 -->
+        <div id="preflight-result" class="mt-3 space-y-1"></div>
+        <p class="text-xs text-stone-500 mt-2">⚠️ 山區離線使用前提：(1) 在有網路處先完整登入過一次、(2) 出發前按「🚀 完整出工檢查」確認 5 項全綠、(3) 若 3-6 小時離線後 token 過期，回駐地連網會自動換新（不必擔心資料遺失）。</p>
       </div>
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="font-semibold mb-2">成員與角色</h3>
@@ -650,6 +653,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21131"></script>
+<script type="module" src="js/app.js?v=21132"></script>
 </body>
 </html>

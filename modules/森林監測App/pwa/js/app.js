@@ -15,19 +15,19 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21131";
-import * as forms from "./forms.js?v=21131";
-import * as analytics from "./analytics.js?v=21131";
-import * as importWizard from "./import-wizard.js?v=21131";
-import { renderTreeDistribution } from "./distribution.js?v=21131";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21131";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21131";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=21132";
+import * as forms from "./forms.js?v=21132";
+import * as analytics from "./analytics.js?v=21132";
+import * as importWizard from "./import-wizard.js?v=21132";
+import { renderTreeDistribution } from "./distribution.js?v=21132";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21132";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21132";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21131";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21131";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21132";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21132";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21131";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21132";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -361,7 +361,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21131');
+    const m = await import('./migration-v2715.js?v=21132');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -383,7 +383,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21131');
+    const m = await import('./migration-v2715.js?v=21132');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -2153,6 +2153,107 @@ async function removeMember(uid, label, role, roleLabel) {
   }
 }
 
+// v2.11.32 (J-5)：出工 pre-flight checklist — 5 項本機檢查（全部不需要網路）
+// 設計目的：PI / 教練在出工前一刻一鍵確認所有設備就緒，避免到山上才發現 cache 沒備好 / token 已過期
+async function runPreflightCheck() {
+  const box = $('#preflight-result');
+  if (!box) return;
+  box.innerHTML = '<div class="text-stone-500 text-sm">⏳ 檢查中...</div>';
+  const results = [];
+
+  // 檢查 1：登入狀態 + token 剩餘
+  if (state.user) {
+    const expMin = state.tokenExpiresAt instanceof Date
+      ? Math.round((state.tokenExpiresAt.getTime() - Date.now()) / 60000)
+      : null;
+    if (expMin == null) {
+      results.push({ ok: true, label: '已登入（token 剩餘時間無法取得 — 出工前按 🔄 refresh 一次保險）' });
+    } else if (expMin > 30) {
+      results.push({ ok: true, label: `已登入（${state.user.email}，token 剩 ${expMin} 分鐘）` });
+    } else if (expMin > 0) {
+      results.push({ ok: true, warn: true, label: `已登入但 token 即將過期（剩 ${expMin} 分鐘）— 出工前先按「🔄 立即重新整理登入」` });
+    } else {
+      results.push({ ok: true, warn: true, label: `已登入但 token 已過期（${-expMin} 分鐘前）— 連網即自動續期，不影響本機操作` });
+    }
+  } else {
+    results.push({ ok: false, label: '尚未登入 — 請先登入再出工（離線無法首次登入）' });
+  }
+
+  // 檢查 2：Service Worker 啟動
+  if (navigator.serviceWorker?.controller) {
+    results.push({ ok: true, label: 'Service Worker 已啟動（離線可開 app）' });
+  } else if ('serviceWorker' in navigator) {
+    results.push({ ok: false, label: 'Service Worker 尚未啟動 — 請連網重整一次頁面（Ctrl+R）' });
+  } else {
+    results.push({ ok: false, label: '此瀏覽器不支援 Service Worker — 離線無法使用' });
+  }
+
+  // 檢查 3：App cache（JS / HTML / CSS 是否預備妥）
+  try {
+    const cacheNames = await caches.keys();
+    const myCache = cacheNames.find(n => n.startsWith('forest-monitor-v'));
+    if (!myCache) {
+      results.push({ ok: false, label: 'App cache 尚未建立 — 請連網重整一次（讓 Service Worker 把 JS 預下載）' });
+    } else {
+      const cache = await caches.open(myCache);
+      const keys = await cache.keys();
+      const jsCount = keys.filter(r => /\.js(\?|$)/.test(r.url) && r.url.includes('/js/')).length;
+      const htmlIn = keys.some(r => /\/(index\.html)?(\?|$)/.test(r.url));
+      const cssIn = keys.some(r => r.url.includes('style.css'));
+      const ok = jsCount >= 15 && htmlIn && cssIn;
+      results.push({
+        ok,
+        label: ok
+          ? `App cache 完整（${myCache}：${jsCount} 支 JS + HTML + CSS）`
+          : `App cache 不完整（只有 ${jsCount} 支 JS、HTML=${htmlIn}、CSS=${cssIn}）— 請連網重整`
+      });
+    }
+  } catch (e) {
+    results.push({ ok: false, label: 'Cache 檢查失敗：' + (e?.message || e) });
+  }
+
+  // 檢查 4：Firestore offline persistence — 試讀 user doc confirm
+  try {
+    if (state.user) {
+      const cached = await getDoc(doc(db, 'users', state.user.uid));
+      if (cached.exists()) {
+        results.push({ ok: true, label: 'Firestore 離線持久化已啟用（本機 cache 可讀）' });
+      } else {
+        results.push({ ok: true, warn: true, label: 'Firestore 持久化已啟用但 user doc 未 cache（首次登入後再檢查一次）' });
+      }
+    } else {
+      results.push({ ok: true, warn: true, label: 'Firestore 持久化已啟用（登入後可完整測試）' });
+    }
+  } catch (e) {
+    results.push({ ok: false, label: 'Firestore 持久化檢查失敗：' + (e?.message || e) });
+  }
+
+  // 檢查 5：當前專案是否載入（出工前提醒先點進專案）
+  if (state.project) {
+    results.push({ ok: true, label: `已開啟專案「${state.project.name || state.project.id}」（plots / trees 將 onSnapshot 自動建立 cache）` });
+  } else {
+    results.push({ ok: true, warn: true, label: '目前未在專案內 — 出工前請先點開要調查的專案，讓 onSnapshot 預載 plots / trees' });
+  }
+
+  // 渲染
+  const lines = results.map(r => {
+    const icon = r.ok ? (r.warn ? '⚠️' : '✅') : '❌';
+    const cls = r.ok ? (r.warn ? 'text-amber-700' : 'text-emerald-700') : 'text-red-700';
+    return `<div class="${cls} text-xs leading-relaxed">${icon} ${r.label}</div>`;
+  }).join('');
+  const allGreen = results.every(r => r.ok && !r.warn);
+  const anyRed = results.some(r => !r.ok);
+  let summary;
+  if (allGreen) {
+    summary = '<div class="text-emerald-700 font-semibold text-sm mt-2 bg-emerald-50 border border-emerald-300 rounded px-2 py-1">✅ 5 項全綠 — 可放心出工</div>';
+  } else if (anyRed) {
+    summary = '<div class="text-red-700 font-semibold text-sm mt-2 bg-red-50 border border-red-300 rounded px-2 py-1">❌ 有失敗項目 — 請先連網處理，否則離線會卡住</div>';
+  } else {
+    summary = '<div class="text-amber-700 font-semibold text-sm mt-2 bg-amber-50 border border-amber-300 rounded px-2 py-1">⚠️ 有警示但可出工 — 建議先處理黃色項目</div>';
+  }
+  box.innerHTML = lines + summary;
+}
+
 // v2.11.30：登入狀態 + token 剩餘有效期 UI（出工前檢查用）
 function renderAuthStatus() {
   const box = $('#auth-status');
@@ -2209,6 +2310,21 @@ async function renderSettings() {
       } finally {
         refreshBtn.disabled = false;
         refreshBtn.textContent = orig;
+      }
+    });
+  }
+  // v2.11.32 (J-5)：出工 pre-flight 檢查按鈕
+  const preflightBtn = $('#btn-preflight-check');
+  if (preflightBtn && !preflightBtn._bound) {
+    preflightBtn._bound = true;
+    preflightBtn.addEventListener('click', async () => {
+      const orig = preflightBtn.textContent;
+      preflightBtn.disabled = true;
+      preflightBtn.textContent = '⏳ 檢查中...';
+      try { await runPreflightCheck(); }
+      finally {
+        preflightBtn.disabled = false;
+        preflightBtn.textContent = orig;
       }
     });
   }
