@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21130';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21131';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21130';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21131';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21130';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21131';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21130';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21131';
 import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=2000';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
 import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=2000';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21130';
+import { createSpeciesPicker } from './species-picker.js?v=21131';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21130';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21131';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21130';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21131';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21130';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21131';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -2248,14 +2248,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21130',
+        href: './img/gps-position-guide.svg?v=21131',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21130',
+          src: './img/gps-position-guide.svg?v=21131',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -2949,28 +2949,83 @@ export async function openTreeForm(project, plot, existing = null) {
     gpsBtnTree.textContent = '📍 重新定位';
   }
 
+  // v2.11.31 (J-1)：手動輸入 / 退回皮尺 兩條 fallback 的旗標 — submit 時決定 manuallyAdjusted
+  // 編輯既有 manually-adjusted 樹 → 預設保留 true（除非 user 重抓 GPS 才 reset）
+  let treeGpsManualEntry = !!existing?.manuallyAdjusted;
+
   gpsBtnTree.addEventListener('click', () => {
     if (!navigator.geolocation) {
-      gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 此裝置不支援 Geolocation API</span>';
+      gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 此裝置不支援 Geolocation API。請改用下方「✏️ 手動輸入座標」或「📐 退回皮尺 X/Y」。</span>';
+      treeManualEntryDetails?.setAttribute('open', '');  // 自動展開手動輸入
       return;
     }
     gpsBtnTree.disabled = true;
     gpsBtnTree.textContent = '⏳ 定位中...';
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        try { applyTreeGpsResult(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy); }
+        try {
+          treeGpsManualEntry = false;     // v2.11.31：GPS 量測成功 → 覆蓋手動標記
+          applyTreeGpsResult(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+        }
         catch (e) { console.error('[tree GPS apply]', e); }
         finally { gpsBtnTree.disabled = false; }
       },
       (err) => {
         const hint = { 1: '權限被拒 — 網址列 🔒→「位置」改允許→重整', 2: '無法定位 — 隱私權設定或無網路', 3: '逾時 — 訊號不佳' }[err.code] || err.message;
-        gpsStatusTree.innerHTML = `<span class="text-red-700">❌ GPS 失敗 (code ${err.code})：${hint}</span>`;
+        gpsStatusTree.innerHTML = `<span class="text-red-700">❌ GPS 失敗 (code ${err.code})：${hint}</span><br><span class="text-stone-600 text-[11px]">→ 用下方「✏️ 手動輸入座標」或「📐 退回皮尺 X/Y」</span>`;
+        treeManualEntryDetails?.setAttribute('open', '');  // v2.11.31：GPS 失敗自動展開手動輸入
         gpsBtnTree.disabled = false;
         gpsBtnTree.textContent = '📍 抓取目前位置';
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   });
+
+  // ===== v2.11.31 (路 J-1)：GPS 模式手動 fallback — 兩條 escape =====
+  // (1) 手填 lat/lng — 無 GPS 訊號但有座標來源（Google Maps 離線 / 紙本地圖）
+  // (2) 退回皮尺 X/Y — GPS 完全無訊號緊急用，本棵樹改用 plot 原點 + 皮尺定位
+  // 路 J-1 設計：野外山區 3-6 hr 離線 + 無 GPS 也能完整新增立木，避免「卡死無法操作」
+  const treeManualLatInput = el('input', {
+    type: 'number', step: '0.000001', placeholder: '緯度 lat',
+    style: 'width:130px;border:1px solid #d6d3d1;border-radius:4px;padding:4px 6px;font-size:13px'
+  });
+  const treeManualLngInput = el('input', {
+    type: 'number', step: '0.000001', placeholder: '經度 lng',
+    style: 'width:130px;border:1px solid #d6d3d1;border-radius:4px;padding:4px 6px;font-size:13px'
+  });
+  const treeApplyManualBtn = el('button', {
+    type: 'button',
+    class: 'bg-stone-200 hover:bg-stone-300 text-stone-800 px-3 py-1 rounded text-xs font-medium'
+  }, '套用');
+  treeApplyManualBtn.addEventListener('click', () => {
+    const lat = parseFloat(treeManualLatInput.value);
+    const lng = parseFloat(treeManualLngInput.value);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 緯度 / 經度必填且為數字</span>';
+      return;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 座標超出範圍（lat -90~90 / lng -180~180）</span>';
+      return;
+    }
+    const outOfTaiwan = (lat < 21 || lat > 26 || lng < 119 || lng > 123);
+    treeGpsManualEntry = true;
+    applyTreeGpsResult(lat, lng, null);  // accuracy=null → 不顯示 ±Nm
+    const taiwanWarn = outOfTaiwan
+      ? '<br><span class="text-amber-700 text-[11px]">⚠ 座標不在台灣範圍（21-26°N / 119-123°E），仍套用</span>'
+      : '';
+    gpsStatusTree.innerHTML += ` <span class="text-amber-700 text-[11px]">✋ 手動輸入</span>${taiwanWarn}`;
+  });
+  const treeManualEntryDetails = el('details', { class: 'mt-2' },
+    el('summary', { class: 'cursor-pointer text-xs text-blue-700 hover:text-blue-900' },
+      '✏️ 無 GPS 訊號？手動輸入座標（lat / lng）'),
+    el('div', { class: 'flex flex-wrap gap-2 items-center mt-2' },
+      el('span', { class: 'text-xs' }, 'lat:'), treeManualLatInput,
+      el('span', { class: 'text-xs' }, 'lng:'), treeManualLngInput,
+      treeApplyManualBtn),
+    el('div', { class: 'text-xs text-stone-500 mt-1' },
+      '小技巧：Google Maps（含離線地圖）長按位置 → 出現座標 → 複製貼上。lat 在前、lng 在後。或從紙本地圖讀。手動輸入會標記 ✋（manuallyAdjusted=true）。')
+  );
 
   // 編輯既有 GPS-mode 樹：還原顯示
   if (Number.isFinite(initGpsLat) && Number.isFinite(initGpsLng) && initPosSource === 'gps') {
@@ -2985,7 +3040,8 @@ export async function openTreeForm(project, plot, existing = null) {
       '站到立木正下方按「抓取目前位置」。精度 >10m 會警示；可之後在地圖頁長壓 marker 微調。'),
     el('div', { class: 'flex items-center gap-2 flex-wrap' }, gpsBtnTree),
     gpsStatusTree,
-    gpsLngInput, gpsLatInput, gpsAccInput
+    gpsLngInput, gpsLatInput, gpsAccInput,
+    treeManualEntryDetails               // v2.11.31 (J-1)：手動輸入 lat/lng fallback
   );
 
   // ===== mixed 模式：每棵樹的來源切換 =====
@@ -3015,12 +3071,53 @@ export async function openTreeForm(project, plot, existing = null) {
       offsetBlock.style.display = currentPosSource === 'offset' ? '' : 'none';
       gpsBlock.style.display = currentPosSource === 'gps' ? '' : 'none';
     } else if (plotPosMode === 'gps') {
-      offsetBlock.style.display = 'none';
-      gpsBlock.style.display = '';
+      // v2.11.31 (J-1)：允許 per-tree 切到 offset（緊急 fallback，野外 GPS 完全無訊號時）
+      offsetBlock.style.display = currentPosSource === 'offset' ? '' : 'none';
+      gpsBlock.style.display = currentPosSource === 'gps' ? '' : 'none';
     } else {
       offsetBlock.style.display = '';
       gpsBlock.style.display = 'none';
     }
+  }
+
+  // ===== v2.11.31 (路 J-1)：plot.positionMode='gps' 時的「退回皮尺」緊急 escape =====
+  // 加在 gpsBlock 與 offsetBlock 底部，user 可在兩個區塊之間切換
+  if (plotPosMode === 'gps') {
+    const fallbackToOffsetBtn = el('button', {
+      type: 'button',
+      class: 'bg-amber-600 hover:bg-amber-700 text-white text-xs px-3 py-1 rounded mt-2'
+    }, '切換為皮尺 X/Y 輸入');
+    fallbackToOffsetBtn.addEventListener('click', () => {
+      currentPosSource = 'offset';
+      applyPosVisibility();
+      toast('已切換為皮尺 X/Y 模式（僅本棵樹）');
+    });
+    const fallbackToOffsetDetails = el('details', { class: 'mt-1' },
+      el('summary', { class: 'cursor-pointer text-xs text-amber-700 hover:text-amber-900' },
+        '📐 退回皮尺 X/Y 模式（GPS 完全無訊號緊急用）'),
+      el('div', { class: 'text-xs text-amber-700 mt-2' },
+        '本棵樹定位來源將被標記為「皮尺」（positionSource=offset），與樣區 GPS 模式設定不一致 — 資料層級可接受、為定位精度註記。'),
+      fallbackToOffsetBtn
+    );
+    gpsBlock.appendChild(fallbackToOffsetDetails);
+
+    const backToGpsBtn = el('button', {
+      type: 'button',
+      class: 'bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1 rounded mt-2'
+    }, '切換回 GPS 量測');
+    backToGpsBtn.addEventListener('click', () => {
+      currentPosSource = 'gps';
+      applyPosVisibility();
+      toast('已切換回 GPS 量測模式');
+    });
+    const backToGpsDetails = el('details', { class: 'mt-1' },
+      el('summary', { class: 'cursor-pointer text-xs text-emerald-700 hover:text-emerald-900' },
+        '📍 切換回 GPS 量測模式'),
+      el('div', { class: 'text-xs text-stone-600 mt-2' },
+        '改回 GPS 取點（樣區設定為 GPS 模式，本棵樹原本走 fallback 才會看到此選項）。'),
+      backToGpsBtn
+    );
+    offsetBlock.appendChild(backToGpsDetails);
   }
 
   // v2.3.3：個體編號 — prefix（plot.code-）+ 序號 input + 即時預覽
@@ -3213,7 +3310,9 @@ export async function openTreeForm(project, plot, existing = null) {
       positionSource,                   // v2.11.28：'offset' | 'gps'
       gpsAccuracy_m,                    // v2.11.28：GPS 模式才有值
       fixedAt,                          // v2.11.28：GPS 取點時間
-      manuallyAdjusted: existing?.manuallyAdjusted ?? false,  // v2.11.28：保留欄位給 Commit 2 地圖長壓微調
+      // v2.11.31 (J-1)：GPS-mode 樹的「手動標記」— 來源：(a) 表單手填 lat/lng；(b) 編輯既有已 manually-adjusted 樹；(c) 地圖長壓微調（已存欄位）
+      // offset 模式不適用 manuallyAdjusted 概念（皮尺本來就是手動定位），一律 false
+      manuallyAdjusted: positionSource === 'gps' ? treeGpsManualEntry : false,
       ...m,
       updatedAt: fb.serverTimestamp()
     };
