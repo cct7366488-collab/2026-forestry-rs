@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21129">
+  <link rel="stylesheet" href="style.css?v=21130">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.29</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.30</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -426,6 +426,18 @@
     </section>
 
     <section data-tab-content="settings" class="hidden space-y-4">
+      <!-- v2.11.30：登入狀態（離線野外調查 pre-flight check）— 顯示 token 剩餘有效期，
+           讓 PI/教練在出工前確認所有成員設備都「token 還夠用」+ 必要時手動 refresh。
+           離線野外調查的 token 機制請參考工作筆記路 J（離線野外調查強化）。-->
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-2">🔑 登入狀態（出工前檢查）</h3>
+        <div id="auth-status" class="text-sm space-y-1"></div>
+        <div class="flex gap-2 items-center mt-3">
+          <button id="btn-refresh-token" class="bg-forest-700 text-white px-3 py-1 rounded text-sm">🔄 立即重新整理登入</button>
+          <span class="text-xs text-stone-500">出工前一刻按一次，token 重新計時 1 小時、refresh token 永久有效</span>
+        </div>
+        <p class="text-xs text-stone-500 mt-2">⚠️ 山區離線使用前提：(1) 在有網路處先完整登入過一次、(2) 出發前 5 分鐘按上方按鈕 refresh、(3) 若 3-6 小時離線後 token 過期，回駐地連網會自動換新（不必擔心資料遺失）。</p>
+      </div>
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="font-semibold mb-2">成員與角色</h3>
         <div id="member-list" class="text-sm space-y-1"></div>
@@ -638,6 +650,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21129"></script>
+<script type="module" src="js/app.js?v=21130"></script>
 </body>
 </html>

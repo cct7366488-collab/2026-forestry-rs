@@ -15,19 +15,19 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21129";
-import * as forms from "./forms.js?v=21129";
-import * as analytics from "./analytics.js?v=21129";
-import * as importWizard from "./import-wizard.js?v=21129";
-import { renderTreeDistribution } from "./distribution.js?v=21129";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21129";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21129";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=21130";
+import * as forms from "./forms.js?v=21130";
+import * as analytics from "./analytics.js?v=21130";
+import * as importWizard from "./import-wizard.js?v=21130";
+import { renderTreeDistribution } from "./distribution.js?v=21130";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21130";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21130";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21129";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21129";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21130";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21130";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21129";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21130";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -45,7 +45,8 @@ export const state = {
   userDoc: null,
   project: null,
   plot: null,
-  unsubscribers: []
+  unsubscribers: [],
+  tokenExpiresAt: null   // v2.11.30：Firebase ID token 到期時間（從 getIdTokenResult().expirationTime）— 設定頁顯示「剩餘 N 分鐘 / 已過期」
 };
 
 // v2.9.2 #7：debug 入口 — DevTools 可直接 `__debug.state`（避免污染全域命名空間）
@@ -360,7 +361,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21129');
+    const m = await import('./migration-v2715.js?v=21130');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -382,7 +383,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21129');
+    const m = await import('./migration-v2715.js?v=21130');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -576,6 +577,22 @@ window.addEventListener('online', updateOnlineStatus);
 window.addEventListener('offline', updateOnlineStatus);
 updateOnlineStatus();
 
+// v2.11.30：上線即 force refresh ID token — 野外調查 3-6 hr offline 回駐地時，
+// 主動跟 Google 換新 ID token（refresh token 永久有效、換完 ID token 又新鮮 1 小時），
+// 避免 SDK 內部 race condition 把 stale token 帶進待 sync 的 Firestore queue。
+// 也順手 refresh state.tokenExpiresAt 給設定頁顯示。
+window.addEventListener('online', async () => {
+  if (!auth.currentUser) return;
+  try {
+    await auth.currentUser.getIdToken(true);
+    const res = await auth.currentUser.getIdTokenResult();
+    state.tokenExpiresAt = res.expirationTime ? new Date(res.expirationTime) : null;
+    if (typeof window.__onTokenRefreshed === 'function') window.__onTokenRefreshed();
+  } catch (e) {
+    console.warn('[auth] reconnect token refresh failed:', e?.code || e?.message || e);
+  }
+});
+
 // ===== Service Worker（v2.9.3：加「新版可用」橫幅）=====
 // 流程：新 SW install 完進 waiting → updatefound 偵測到 → 顯示橫幅 → user click → postMessage
 //       SKIP_WAITING → SW activate → controllerchange → 自動 reload。對手機 PWA 友善（不用記
@@ -654,8 +671,14 @@ onAuthStateChanged(auth, async (user) => {
     } else {
       state.userDoc = usnap.data();
     }
+    // v2.11.30：登入後立刻記下 token 到期時間 — 給設定頁「🔑 登入有效至」顯示
+    try {
+      const res = await user.getIdTokenResult();
+      state.tokenExpiresAt = res.expirationTime ? new Date(res.expirationTime) : null;
+    } catch { state.tokenExpiresAt = null; }
   } else {
     state.userDoc = null;
+    state.tokenExpiresAt = null;
   }
   renderTopnav();
   route();
@@ -2130,7 +2153,66 @@ async function removeMember(uid, label, role, roleLabel) {
   }
 }
 
+// v2.11.30：登入狀態 + token 剩餘有效期 UI（出工前檢查用）
+function renderAuthStatus() {
+  const box = $('#auth-status');
+  if (!box) return;
+  const u = state.user;
+  if (!u) { box.innerHTML = '<span class="text-stone-500">尚未登入</span>'; return; }
+  const exp = state.tokenExpiresAt;
+  const online = navigator.onLine;
+  const lines = [];
+  lines.push(`<div>👤 <b>${u.displayName || u.email}</b> <span class="text-stone-500">(${u.email})</span></div>`);
+  lines.push(`<div>${online ? '🟢' : '🔴'} 目前 ${online ? '線上' : '離線'}</div>`);
+  if (exp instanceof Date && !isNaN(exp)) {
+    const now = new Date();
+    const diffMin = Math.round((exp.getTime() - now.getTime()) / 60000);
+    const dateStr = `${exp.getFullYear()}/${String(exp.getMonth()+1).padStart(2,'0')}/${String(exp.getDate()).padStart(2,'0')} ${String(exp.getHours()).padStart(2,'0')}:${String(exp.getMinutes()).padStart(2,'0')}`;
+    let cls = 'text-emerald-700';
+    let icon = '✅';
+    let msg = `剩 ${diffMin} 分鐘`;
+    if (diffMin <= 0) { cls = 'text-stone-500'; icon = '⌛'; msg = `已過期 ${-diffMin} 分鐘前`; }
+    else if (diffMin < 15) { cls = 'text-red-600 font-semibold'; icon = '🟥'; msg = `剩 ${diffMin} 分鐘（建議立刻 refresh）`; }
+    else if (diffMin < 30) { cls = 'text-amber-600 font-semibold'; icon = '🟧'; msg = `剩 ${diffMin} 分鐘（建議 refresh）`; }
+    lines.push(`<div class="${cls}">${icon} 登入有效至：<span class="font-mono">${dateStr}</span> ｜ ${msg}</div>`);
+    if (diffMin <= 0) {
+      lines.push('<div class="text-xs text-stone-500">⚠️ token 已過期 — 連網即可自動續期（refresh token 永久有效），或按下方按鈕手動 refresh</div>');
+    }
+  } else {
+    lines.push('<div class="text-stone-500">🔑 登入有效期：無法取得（首次連網後會顯示）</div>');
+  }
+  box.innerHTML = lines.join('');
+}
+
 async function renderSettings() {
+  // v2.11.30：先渲染登入狀態區（出工前檢查）+ 綁 refresh 按鈕
+  renderAuthStatus();
+  // 把全域 hook 指向 renderAuthStatus，online listener refresh 後可即時更新 UI
+  window.__onTokenRefreshed = renderAuthStatus;
+  const refreshBtn = $('#btn-refresh-token');
+  if (refreshBtn && !refreshBtn._bound) {
+    refreshBtn._bound = true;
+    refreshBtn.addEventListener('click', async () => {
+      if (!state.user) return;
+      if (!navigator.onLine) { toast('目前離線，無法 refresh token — 請先連網'); return; }
+      const orig = refreshBtn.textContent;
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = '⏳ refresh 中…';
+      try {
+        await state.user.getIdToken(true);
+        const res = await state.user.getIdTokenResult();
+        state.tokenExpiresAt = res.expirationTime ? new Date(res.expirationTime) : null;
+        toast('✅ 登入已重新整理，可放心離線 1 小時');
+        renderAuthStatus();
+      } catch (e) {
+        toast('refresh 失敗：' + (e?.message || e));
+      } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = orig;
+      }
+    });
+  }
+
   const list = $('#member-list');
   list.innerHTML = '';
   const members = state.project.members || {};
