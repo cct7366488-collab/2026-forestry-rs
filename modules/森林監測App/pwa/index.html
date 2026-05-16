@@ -53,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21139">
+  <link rel="stylesheet" href="style.css?v=21140">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -66,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.39</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.40</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -567,6 +567,9 @@
       </div>
     </div>
 
+    <!-- I-2（v2.11.40）：複查期別 banner（renderPlotDetail 動態填入；隱含第一期亦顯示以提供入口）-->
+    <div id="plot-period-banner" class="hidden"></div>
+
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
       <a href="#" data-subtab="overview" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">📊 樣區概況</a>
       <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌳 立木調查</a>
@@ -717,6 +720,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21139"></script>
+<script type="module" src="js/app.js?v=21140"></script>
 </body>
 </html>

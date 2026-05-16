@@ -49,6 +49,13 @@ service cloud.firestore {
           && (!('slopeDegrees' in d) || d.slopeDegrees == null || (d.slopeDegrees is number && d.slopeDegrees >= 0 && d.slopeDegrees <= 90))
           && (!('slopeAspect' in d) || d.slopeAspect == null || (d.slopeAspect is number && d.slopeAspect >= 0 && d.slopeAspect <= 360));
     }
+    // I-2（v2.11.40）：複查期別欄位驗證（寬鬆 — 欄位不存在則跳過，向後相容既有 plot）
+    //   periods 為物件陣列（繞過 Firestore array-of-array 限制）；currentPeriod 為期序數字或 null
+    //   深層內容（每期 seq/label/openedAt…）不在 rules 檢，留 client 端保證
+    function validPlotPeriodFields(d) {
+      return (!('periods' in d) || d.periods is list)
+          && (!('currentPeriod' in d) || d.currentPeriod == null || d.currentPeriod is number);
+    }
     // 同樣的 enum 也套到 methodology（project doc 內）
     function validMethodologyGeomFields(d) {
       let m = d.get('methodology', {});
@@ -119,22 +126,31 @@ service cloud.firestore {
         // v2.7.8：拿掉 || isSystemAdmin() — canCollect 已 include
         // v2.7.15：plot 幾何欄位 enum 驗證（shape / dimensionType / slopeSource / slopeDegrees / slopeAspect）
         allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId)
-                      && validPlotGeomFields(request.resource.data);
+                      && validPlotGeomFields(request.resource.data)
+                      && validPlotPeriodFields(request.resource.data);
 
         // v1.7.1.3：systemAdmin god view，跨任何專案角色限制
         // v2.7.15：同 create 套 plot 幾何欄位 enum 驗證
         // v2.7.17：reviewer 可寫 qaqc 子結構（與既有 PI/surveyor 寫權限平行）
         //   - 既有路徑（PI/admin/surveyor）：須 !isLocked（防止鎖定後 surveyor 仍能改）
         //   - reviewer 路徑：允許 isLocked 狀態（鎖定是擋 surveyor 的，不擋查證）；diff 只能是 qaqc + updatedAt
+        // I-2（v2.11.40）：複查期別後門 — 第三條 OR。動機：複查本質發生於第一期全 verified
+        //   + 專案 auto-Lock 之後，現行 PI/surveyor/admin 路徑要求 !isLocked → 鎖定後無法開新一期
+        //   （即記憶 project_resurvey_workflow_gap 核心缺口 iii「verified 後無回頭路」）。
+        //   比照 reviewer-qaqc 後門 pattern：不檢 isLocked，但 diff 僅限 periods/currentPeriod/
+        //   updatedAt，授權僅 admin/pi（surveyor 不得在鎖定後開期 — 期別是管理決策）。
         allow update: if isSignedIn()
-                      && validPlotGeomFields(request.resource.data) && (
+                      && validPlotGeomFields(request.resource.data)
+                      && validPlotPeriodFields(request.resource.data) && (
           (!isLocked(projectId) && (
             isSystemAdmin() ||
             isPi(projectId) ||
             (isSurveyor(projectId) && (isOwner() || resource.data.get('assignedTo', null) == request.auth.uid))
           )) ||
           (isReviewer(projectId)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt']))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt'])) ||
+          ((isSystemAdmin() || isPi(projectId))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['periods', 'currentPeriod', 'updatedAt']))
         );
 
         allow delete: if isSignedIn() && (
