@@ -8,9 +8,11 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=21140';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=21141';
+// I-1（v2.11.41）：批次匯入也 write-through 當期 measurement 歷史快照（共用 forms 純函式 builder）
+import { buildMeasurementSnapshot } from './forms.js?v=21141';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=21140';
+import { TREES } from './species-dict.js?v=21141';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
@@ -1102,10 +1104,13 @@ async function handleRealImport() {
 
     // ===== 4. 收集所有 tree write ops（pre-allocate doc IDs，分桶到 batch）=====
     const treeOps = [];   // { ref, doc, sourceSheet, sourceRow, treeCode, plotCode }
+    const measOps = [];   // I-1：{ ref, doc } — 當期 measurement 歷史快照（追加性、失敗不阻斷匯入）
     for (const item of r.payload) {
       const plotId = result.plotCodeToId[item.plot.code];
       if (!plotId) continue;
       const treesRef = fb.collection(fb.db, 'projects', W.project.id, 'plots', plotId, 'trees');
+      // I-1：匯入屬該樣區當期（既有 plot 無 currentPeriod → 第一期）
+      const importPeriodId = Number(item.plot?.currentPeriod) || 1;
       const existingCodes = existingTreeCodesByPlotId.get(plotId) || new Set();
       for (const t of item.trees) {
         if (!t.treeCode) {
@@ -1170,6 +1175,14 @@ async function handleRealImport() {
         // pre-allocate doc id（fb.doc(ref) 會回 DocumentReference with auto id），給 batch.set 用
         const ref = fb.doc(treesRef);
         treeOps.push({ ref, doc: treeDoc, sourceSheet: t._sourceSheet, sourceRow: t._sourceRow, treeCode: t.treeCode, plotCode: item.plot.code });
+        // I-1：同步 pre-allocate 當期 measurement 快照（doc id = periodId）
+        measOps.push({
+          ref: fb.doc(fb.db, 'projects', W.project.id, 'plots', plotId, 'trees', ref.id, 'measurements', String(importPeriodId)),
+          doc: {
+            ...buildMeasurementSnapshot(treeDoc, { periodId: importPeriodId, recordedBy: state.user.uid, source: 'import' }),
+            recordedAt: fb.serverTimestamp()
+          }
+        });
       }
     }
 
@@ -1217,6 +1230,29 @@ async function handleRealImport() {
         }
       })
     );
+
+    // ===== 5b. I-1：寫入當期 measurement 歷史快照（追加性 — 失敗只記 log，絕不阻斷匯入）=====
+    if (measOps.length) {
+      W.importProgress.message = `寫入 measurement 歷史快照 ${measOps.length} 筆...`;
+      render();
+      const measBatches = Math.ceil(measOps.length / WRITE_BATCH_SIZE);
+      await Promise.all(
+        Array.from({ length: measBatches }, async (_, bi) => {
+          const ops = measOps.slice(bi * WRITE_BATCH_SIZE, bi * WRITE_BATCH_SIZE + WRITE_BATCH_SIZE);
+          const batch = fb.writeBatch(fb.db);
+          ops.forEach(op => batch.set(op.ref, op.doc));
+          try {
+            await batch.commit();
+          } catch (e) {
+            console.warn(`[I-1 import measurement batch ${bi}] 整桶失敗，退回逐筆`, e);
+            for (const op of ops) {
+              try { await fb.setDoc(op.ref, op.doc); }
+              catch (e2) { console.warn('[I-1 import measurement]', op.ref?.path, e2); }
+            }
+          }
+        })
+      );
+    }
 
     // ===== 6. 樹種字典 seed（未知樹種寫到 top-level species/{docId}，verified=false）=====
     //   path：`species/{slug}` — Rules `match /species/{docId}` 限定 systemAdmin 寫入

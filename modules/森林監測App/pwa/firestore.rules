@@ -185,6 +185,24 @@ service cloud.firestore {
             (isSurveyor(projectId) && isOwner())
           );
         }
+
+        // ===== I-1（v2.11.41）：立木逐期歷史測值子集合（永久樣區複查地基）=====
+        // 通用 match /{subColl}/{docId} 只比對單層 → 深層 trees/{id}/measurements/{periodId}
+        //   預設 deny，必須顯式 match。語意：append-only 歷史，client 不可刪（審計完整性）。
+        //   - read：成員可讀（同 trees）
+        //   - create：canCollect + willOwn（snapshot.createdBy==auth）+ !isLocked（同 trees 採集）
+        //   - update：未鎖定時 admin/pi/或本人 surveyor（修正「當期」measurement；關閉期凍結由 client 控）
+        //   - delete：一律 false（歷史不可從 client 銷毀；如需回收用 owner-token backfill --undo）
+        // ⚠ 已知後續缺口 I-2b：第一期 verified→專案 auto-Lock 後，第二期採集（建立 period≥2
+        //   measurement / tree）仍被 !isLocked 擋；需「期別感知的專案/樣區重啟」設計，另案處理。
+        match /trees/{treeId}/measurements/{periodId} {
+          allow read:   if isSignedIn() && canRead(projectId);
+          allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId);
+          allow update: if isSignedIn() && !isLocked(projectId) && (
+            isSystemAdmin() || isPi(projectId) || (isSurveyor(projectId) && isOwner())
+          );
+          allow delete: if false;
+        }
       }
 
       // ===== 收穫採取許可（v2.11.33 / 擴充 v2.11.34）=====

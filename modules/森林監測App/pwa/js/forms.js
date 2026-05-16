@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21140';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21141';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21140';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21141';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21140';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21141';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21140';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21140';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21141';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21141';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21140';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21141';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21140';
+import { createSpeciesPicker } from './species-picker.js?v=21141';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21140';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21141';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21140';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21141';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21140';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21141';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -519,6 +519,75 @@ export async function openNewPeriod(project, plot) {
   } catch (e) {
     console.error('openNewPeriod failed:', e);
     toast('開啟新一期失敗：' + e.message);
+  }
+}
+
+// ===== I-1（v2.11.41）：立木逐期歷史測值保留（永久樣區複查地基）=====
+// 架構（reader-safe 完整版 A）：tree 文件維持「最新一期快照」（所有既有 reader 零遷移）；
+//   每次存檔同時 write-through 一筆 `trees/{treeId}/measurements/{periodId}` 逐期歷史。
+//   → 第二期立木調查覆蓋 tree 快照前，前一期已先被保留為 measurement doc（前提：backfill
+//     已為既有立木補建 period-1 measurement；backfill 由 scripts/backfill-i1-measurements.mjs
+//     一次性離線執行，owner token 繞 rules 可處理 locked 專案）。
+// measurement doc = 該期測值/位置/即算碳量快照 + 去正規化身分（treeCode 為跨期 join key），
+//   讓未來 ΔC（I-6 / AR-TMS）以 collectionGroup 直接查、且不需重算（存當期 equation 結果）。
+// ⚠ 已知限制（非本契約缺口）：tree-map 位置拖移微調本輪不寫穿（屬位置精修非測值事件，
+//   tree 快照仍即時更新、reader 不受影響，將於下次表單存檔或 backfill 一併納入）。
+
+/** 純函式：由 tree 資料組出單期 measurement 快照（forms / import / backfill 共用單一真相）。
+ *  不含 recordedAt（caller 自行附 serverTimestamp 或 Date，保持本函式純粹）。 */
+export function buildMeasurementSnapshot(t, { periodId, recordedBy, source }) {
+  return {
+    periodId: Number(periodId) || 1,
+    // 身分（去正規化 — 跨期 collectionGroup 查詢 / 單檔可讀；treeCode 為 join key）
+    treeCode: t?.treeCode ?? null,
+    treeNum: t?.treeNum ?? null,
+    speciesZh: t?.speciesZh ?? null,
+    speciesSci: t?.speciesSci ?? null,
+    // 每期測值
+    dbh_cm: t?.dbh_cm ?? null,
+    height_m: t?.height_m ?? null,
+    branchHeight_m: t?.branchHeight_m ?? null,
+    vitality: t?.vitality ?? null,
+    pestSymptoms: Array.isArray(t?.pestSymptoms) ? t.pestSymptoms : [],
+    marking: t?.marking ?? null,
+    notes: t?.notes ?? null,
+    // 位置（GPS 模式為每期；快照供完整重建）
+    localX_m: t?.localX_m ?? null,
+    localY_m: t?.localY_m ?? null,
+    locationTWD97: t?.locationTWD97 ?? null,
+    location: t?.location ?? null,
+    positionSource: t?.positionSource ?? null,
+    gpsAccuracy_m: t?.gpsAccuracy_m ?? null,
+    manuallyAdjusted: t?.manuallyAdjusted ?? false,
+    // 即算碳量（存當期 equation 結果 → ΔC 不需重算、且不受日後係數變更影響）
+    basalArea_m2: t?.basalArea_m2 ?? null,
+    volume_m3: t?.volume_m3 ?? null,
+    biomass_kg: t?.biomass_kg ?? null,
+    carbon_kg: t?.carbon_kg ?? null,
+    co2_kg: t?.co2_kg ?? null,
+    // meta
+    source: source || 'tree-form',
+    recordedBy: recordedBy ?? null,
+    createdBy: recordedBy ?? null   // rules willOwn() on measurement create
+  };
+}
+
+/** 存檔同時 write-through 當期 measurement（doc id = periodId；同期覆寫＝修正當期、新期＝歷史）。
+ *  失敗只 warn 不阻斷主存檔（純加性 plumbing，絕不可回歸既有 UX）。 */
+export async function writeTreeMeasurementSnapshot(project, plot, treeId, treeData, source = 'tree-form') {
+  try {
+    const period = currentPlotPeriod(plot);
+    const periodId = Number(period?.seq) || 1;
+    const snap = {
+      ...buildMeasurementSnapshot(treeData, { periodId, recordedBy: state.user.uid, source }),
+      recordedAt: fb.serverTimestamp()
+    };
+    await fb.setDoc(
+      fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', treeId, 'measurements', String(periodId)),
+      snap
+    );
+  } catch (e) {
+    console.warn('[I-1 measurement write-through]', e);
   }
 }
 
@@ -2356,14 +2425,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21140',
+        href: './img/gps-position-guide.svg?v=21141',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21140',
+          src: './img/gps-position-guide.svg?v=21141',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -3444,6 +3513,8 @@ export async function openTreeForm(project, plot, existing = null) {
         const ref = await fb.addDoc(colRef, data);
         treeId = ref.id;
       }
+      // I-1（v2.11.41）：write-through 當期 measurement 歷史快照（覆寫 tree 前先保留）
+      await writeTreeMeasurementSnapshot(project, plot, treeId, data, 'tree-form');
       if (treePhotoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (treePhotoUp.count > 0) submitBtn.textContent = '上傳照片中...';
         const photos = await treePhotoUp.commit({
