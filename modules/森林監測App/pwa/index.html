@@ -53,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21142">
+  <link rel="stylesheet" href="style.css?v=21143">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -66,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.42</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.43</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -617,6 +617,14 @@
         <h2 class="text-lg font-semibold">立木列表 <span id="tree-count" class="text-sm text-stone-500"></span></h2>
         <button id="btn-new-tree" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新立木</button>
       </div>
+      <!-- I-3（v2.11.43）：樹牌號碼跳轉 — 複查現場面對數十棵立木免捲列表，輸入樹牌號秒跳編輯 -->
+      <div id="tree-jump-bar" class="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 flex items-center gap-2 hidden" data-role-show="pi,surveyor,admin">
+        <span class="text-sm font-medium text-blue-900 whitespace-nowrap">🔖 樹牌跳轉</span>
+        <input id="tree-jump-input" type="text" inputmode="numeric" autocomplete="off"
+          placeholder="輸入樹牌號（如 12 或完整 PLOT-012）"
+          class="flex-1 min-w-0 border rounded px-2 py-1.5 text-sm">
+        <button id="tree-jump-go" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm whitespace-nowrap">跳轉</button>
+      </div>
       <div id="tree-summary" class="bg-white rounded-lg shadow p-3 mb-3 text-sm grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
       <div id="tree-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
     </section>
@@ -720,6 +728,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21142"></script>
+<script type="module" src="js/app.js?v=21143"></script>
 </body>
 </html>

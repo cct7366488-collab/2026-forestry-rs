@@ -15,21 +15,21 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21142";
-import * as forms from "./forms.js?v=21142";
-import * as analytics from "./analytics.js?v=21142";
-import * as importWizard from "./import-wizard.js?v=21142";
+import { firebaseConfig } from "../firebase-config.js?v=21143";
+import * as forms from "./forms.js?v=21143";
+import * as analytics from "./analytics.js?v=21143";
+import * as importWizard from "./import-wizard.js?v=21143";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21142";
-import { renderTreeDistribution } from "./distribution.js?v=21142";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21142";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21142";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21143";
+import { renderTreeDistribution } from "./distribution.js?v=21143";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21143";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21143";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21142";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21142";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21143";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21143";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21142";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21143";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -367,7 +367,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21142');
+    const m = await import('./migration-v2715.js?v=21143');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -389,7 +389,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21142');
+    const m = await import('./migration-v2715.js?v=21143');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -2703,6 +2703,36 @@ async function renderPlotDetail(root, projectId, plotId) {
   $('#btn-new-tree').addEventListener('click', () => {
     if (isLocked()) return toast('資料已 Lock');
     forms.openTreeForm(state.project, state.plot);
+  });
+
+  // I-3（v2.11.43）：樹牌號碼跳轉 — 查當前 onSnapshot 的 _lastTreesArr（即時、零額外 fetch）
+  //   秒開該樹編輯表單（複查現場走到樹牌 N → 輸入 N → 直接改 DBH/H 存檔，I-1 寫穿當期歷史）
+  const jumpToTree = () => {
+    const input = $('#tree-jump-input');
+    const raw = (input?.value || '').trim();
+    if (!raw) return;
+    if (isLocked()) return toast('資料已 Lock（如需複查請先「開啟新一期」重啟採集）');
+    const arr = _lastTreesArr || [];
+    const numIn = parseInt(raw, 10);
+    const rawUp = raw.toUpperCase();
+    const isPureNum = Number.isFinite(numIn) && /^\d+$/.test(raw);
+    let t = null;
+    if (isPureNum) t = arr.find(x => Number(x.treeNum) === numIn);
+    if (!t) {
+      const pad = isPureNum ? String(numIn).padStart(3, '0') : null;
+      t = arr.find(x => (x.treeCode || '').toUpperCase() === rawUp)
+        || (pad ? arr.find(x => (x.treeCode || '').toUpperCase().endsWith('-' + pad)) : null);
+    }
+    if (!t) {
+      toast(`查無樹牌號「${raw}」（本樣區 ${arr.length} 株；如為新增請用「＋ 新立木」）`);
+      return;
+    }
+    input.value = '';
+    forms.openTreeForm(state.project, state.plot, { id: t.id, ...t });
+  };
+  $('#tree-jump-go')?.addEventListener('click', jumpToTree);
+  $('#tree-jump-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); jumpToTree(); }
   });
   $('#btn-new-regen').addEventListener('click', () => {
     if (isLocked()) return toast('資料已 Lock');
