@@ -21,7 +21,13 @@ service cloud.firestore {
     function isPi(pid)            { return userRole(pid) == 'pi'; }
     function isSurveyor(pid)      { return userRole(pid) == 'surveyor'; }
     function isReviewer(pid)      { return userRole(pid) == 'reviewer'; }
+    // v2.11.33：林業保育署臺中分署採收審核者（外部主管機關角色，比照 reviewer 受限寫法）
+    function isHarvestAuthority(pid) { return userRole(pid) == 'harvest_authority'; }
     function isMember(pid)        { return userRole(pid) != null; }
+    // v2.11.34：收穫量登錄 — 取父許可單 doc（判斷狀態與許可單擁有者）
+    function harvestPermitDoc(pid, pmid) {
+      return get(/databases/$(database)/documents/projects/$(pid)/harvestPermits/$(pmid)).data;
+    }
     // v2.7.8：canCollect 加 isSystemAdmin（與 canRead 風格一致）
     //   修前：plot 子集合 create（trees/regeneration/understory/...）只允許 isPi || isSurveyor
     //   修後：admin god view 不需自己是 PI 也能透過 import wizard 寫入立木與其他子集合
@@ -163,6 +169,78 @@ service cloud.firestore {
             (isSurveyor(projectId) && isOwner())
           );
         }
+      }
+
+      // ===== 收穫採取許可（v2.11.33 / 擴充 v2.11.34）=====
+      // 土肉桂葉片採收行政流程電子化：林農申請 → 林保署核准（生許可文號）→ 收穫量登錄 → 結案
+      //   read：專案成員 + admin（林農看自己 / 分署看全部，UI 端再分流）
+      //   create：canCollect（pi/surveyor/admin = 林農端）+ willOwn + 初始 status draft|submitted
+      //   update (A) 申請人/PI/admin：僅 draft|revision 時可改，目標 draft|submitted（補正再送）
+      //   update (B) harvest_authority（分署）：僅 submitted|under_review、只能改狀態+審核欄位+許可文號
+      //              （比照 reviewer QAQC 的 affectedKeys().hasOnly 受限寫法，不可動申請內容）
+      //   update (C) v2.11.34 申請人/PI/admin 採收期：approved|harvesting → harvesting|completed
+      //              只能改 status / 採收期時戳 / totalLogged_kg（不可回頭改申請或核准內容）
+      //   不受 isLocked 連動：許可流程是獨立行政程序，與研究資料 Lock 無關
+      match /harvestPermits/{permitId} {
+        allow read: if isSignedIn() && canRead(projectId);
+
+        allow create: if isSignedIn() && canCollect(projectId) && willOwn()
+                      && request.resource.data.status in ['draft', 'submitted'];
+
+        allow update: if isSignedIn() && (
+          ((isOwner() || isPi(projectId) || isSystemAdmin())
+            && resource.data.get('status', 'draft') in ['draft', 'revision']
+            && request.resource.data.status in ['draft', 'submitted'])
+          ||
+          (isHarvestAuthority(projectId)
+            && resource.data.get('status', 'draft') in ['submitted', 'under_review']
+            && request.resource.data.status in ['under_review', 'approved', 'rejected', 'revision']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'status', 'reviewedBy', 'reviewedAt', 'reviewComment',
+                'approvedAmount_kg', 'validFrom', 'validUntil',
+                'permitNo', 'permitSeq', 'updatedAt'
+              ]))
+          ||
+          ((isOwner() || isPi(projectId) || isSystemAdmin())
+            && resource.data.get('status', 'draft') in ['approved', 'harvesting']
+            && request.resource.data.status in ['harvesting', 'completed']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'status', 'harvestingStartedAt', 'completedAt', 'totalLogged_kg', 'updatedAt'
+              ]))
+        );
+
+        allow delete: if isSignedIn() && (
+          isSystemAdmin() ||
+          isPi(projectId) ||
+          (isOwner() && resource.data.get('status', 'draft') == 'draft')
+        );
+
+        // ===== 收穫量登錄（v2.11.34）=====
+        //   read：專案成員 + admin（分署查核需可讀）
+        //   write：許可單擁有者 / PI / admin，且僅在父許可單 approved|harvesting 時
+        //          （harvest_authority 不寫 logs — 分署只審核，不代登錄）
+        match /logs/{logId} {
+          allow read: if isSignedIn() && canRead(projectId);
+
+          allow create: if isSignedIn() && canCollect(projectId) && willOwn()
+            && harvestPermitDoc(projectId, permitId).get('status', 'draft') in ['approved', 'harvesting']
+            && (harvestPermitDoc(projectId, permitId).createdBy == request.auth.uid
+                || isPi(projectId) || isSystemAdmin());
+
+          allow update, delete: if isSignedIn()
+            && harvestPermitDoc(projectId, permitId).get('status', 'draft') in ['approved', 'harvesting']
+            && (isOwner() || isPi(projectId) || isSystemAdmin());
+        }
+      }
+
+      // ===== 許可文號流水號計數器（v2.11.34）=====
+      // 法定許可文號不可重號 → 用 Firestore transaction 原子遞增（解 treeCode 非原子同類問題）
+      //   read：專案成員 + admin　write：核准者（分署）/ PI / admin（核准當下交易遞增）
+      match /counters/{counterId} {
+        allow read:  if isSignedIn() && canRead(projectId);
+        allow write: if isSignedIn() && (
+          isHarvestAuthority(projectId) || isPi(projectId) || isSystemAdmin()
+        );
       }
     }
 

@@ -29,7 +29,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21132">
+  <link rel="stylesheet" href="style.css?v=21137">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +42,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.32</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.37</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -243,6 +243,11 @@
       <a href="#" data-tab="map" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">地圖</a>
       <!-- v2.7.17：審查（QAQC）— reviewer / admin 才看到 -->
       <a href="#" data-tab="qaqc" data-role-show="reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">🔍 審查（QAQC） <span id="qaqc-progress-pill" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
+      <!-- v2.11.33：土肉桂葉片採收許可電子化 — 林農端「採收申請」/ 分署端「採收審核」 -->
+      <a href="#" data-tab="harvestapply" data-role-show="pi,surveyor,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">🌿 採收申請</a>
+      <a href="#" data-tab="harvestreview" data-role-show="harvest_authority,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">📋 採收審核 <span id="harvestreview-count" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
+      <!-- v2.11.37：林業合作社唯讀彙整（掌握申請資訊 + 共同銷售收穫彙整）-->
+      <a href="#" data-tab="coop" data-role-show="coop,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">📊 採收彙整</a>
       <a href="#" data-tab="export" data-role-show="pi,reviewer" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">匯出</a>
       <a href="#" data-tab="settings" data-role-show="pi,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設定</a>
     </nav>
@@ -450,6 +455,8 @@
             <option value="surveyor">調查員</option>
             <option value="pi">主持人</option>
             <option value="reviewer">審查委員</option>
+            <option value="harvest_authority">採收審核（林保署）</option>
+            <option value="coop">林業合作社</option>
           </select>
           <!-- v1.7.0：dataManager 角色已移除（PI 一肩扛 QA 與資料管理）。舊資料自動 migrate -->
 
@@ -473,6 +480,30 @@
         <button id="btn-import-excel" class="bg-blue-600 text-white px-4 py-2 rounded text-sm">📥 從 Excel 匯入樣區資料</button>
         <p class="text-xs text-stone-500 mt-2">支援林保署永久樣區格式（每張工作表為一個樣區）。雛形階段僅 DRY-RUN 不會實際寫入，方便檢視欄位對應流程。</p>
       </div>
+    </section>
+
+    <!-- v2.11.33：土肉桂葉片採收許可（林農端）— 申請 / 草稿 / 送出 -->
+    <section data-tab-content="harvestapply" class="hidden space-y-3">
+      <div class="flex justify-between items-center flex-wrap gap-2">
+        <h2 class="text-lg font-semibold">🌿 土肉桂葉片採收申請</h2>
+        <button id="btn-new-permit" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor,admin">＋ 新採收申請</button>
+      </div>
+      <p class="text-xs text-stone-500">採收受林業保育署臺中分署控管：須先提出申請，核准後始得採收。送出後待分署審核，核准前可存草稿並編輯。</p>
+      <div id="harvestapply-list"></div>
+    </section>
+
+    <!-- v2.11.33：土肉桂葉片採收許可（分署端）— 核准 / 駁回 / 要求補件 -->
+    <section data-tab-content="harvestreview" class="hidden space-y-3">
+      <h2 class="text-lg font-semibold">📋 採收申請審核（林業保育署臺中分署）</h2>
+      <p class="text-xs text-stone-500">審核者僅能核准／要求補件／駁回，不可變更申請內容（權限由 Firestore 規則鎖定）。</p>
+      <div id="harvestreview-list"></div>
+    </section>
+
+    <!-- v2.11.37：林業合作社唯讀彙整 — 專區總覽 + 依林農收穫彙整（共同銷售）-->
+    <section data-tab-content="coop" class="hidden space-y-3">
+      <h2 class="text-lg font-semibold">📊 採收彙整（林業合作社）</h2>
+      <p class="text-xs text-stone-500">合作社為唯讀觀察者：掌握各林農申請與收穫資訊、供共同銷售規劃；無核准或編輯權（權限由 Firestore 規則天然鎖定）。僅顯示已送出（含）以後的案件。</p>
+      <div id="coop-view"></div>
     </section>
   </div>
 </template>
@@ -653,6 +684,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21132"></script>
+<script type="module" src="js/app.js?v=21137"></script>
 </body>
 </html>

@@ -9,25 +9,27 @@ import {
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, writeBatch,
-  query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup
+  query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21132";
-import * as forms from "./forms.js?v=21132";
-import * as analytics from "./analytics.js?v=21132";
-import * as importWizard from "./import-wizard.js?v=21132";
-import { renderTreeDistribution } from "./distribution.js?v=21132";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21132";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21132";   // v2.7.10：admin 樹種字典管理
+import { firebaseConfig } from "../firebase-config.js?v=21137";
+import * as forms from "./forms.js?v=21137";
+import * as analytics from "./analytics.js?v=21137";
+import * as importWizard from "./import-wizard.js?v=21137";
+// v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
+import * as harvestPermits from "./harvest-permits.js?v=21137";
+import { renderTreeDistribution } from "./distribution.js?v=21137";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21137";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21137";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21132";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21132";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21137";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21137";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21132";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21137";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -68,6 +70,10 @@ export function isPi() { return projectRole() === 'pi'; }
 export function isDataManager() { return false; }
 export function isSurveyor() { return projectRole() === 'surveyor'; }
 export function isReviewer() { return projectRole() === 'reviewer'; }
+// v2.11.33：林業保育署臺中分署採收審核者（外部主管機關角色）
+export function isHarvestAuthority() { return projectRole() === 'harvest_authority'; }
+// v2.11.37：林業合作社（唯讀觀察者 — 掌握申請資訊 + 共同銷售收穫彙整；無核准/寫入權，rules 天然唯讀）
+export function isCoop() { return projectRole() === 'coop'; }
 // v1.7.1.3：system admin 不管專案角色是什麼，都享 PI 權限（god view）
 export function canQA() { return isPi() || isSystemAdmin(); }
 export function canCollect() { return isPi() || isSurveyor() || isSystemAdmin(); }
@@ -129,7 +135,7 @@ export const DEFAULT_METHODOLOGY = {
 export const fb = {
   app, db, auth, storage,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, writeBatch,
-  query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup,
+  query, where, orderBy, onSnapshot, serverTimestamp, GeoPoint, collectionGroup, runTransaction,
   storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 };
 
@@ -361,7 +367,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21132');
+    const m = await import('./migration-v2715.js?v=21137');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -383,7 +389,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21132');
+    const m = await import('./migration-v2715.js?v=21137');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -852,7 +858,7 @@ async function renderProjects(root) {
 
     const renderCard = (data, isArchived) => {
       const role = data.members?.[state.user.uid] || (isSystemAdmin() ? 'admin' : '?');
-      const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', admin: '系統管理者' }[role] || role;
+      const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', harvest_authority: '採收審核（林保署）', coop: '林業合作社', admin: '系統管理者' }[role] || role;
       // v2.3：status badge（archived 用 archivedBadge 表示，其他狀態都顯示）
       const statusVal = isArchived ? STATUS.ARCHIVED : (data.status || STATUS.ACTIVE);
       const statusBadge = el('span', { html: statusBadgeHTML(statusVal) });
@@ -1074,6 +1080,9 @@ async function renderProjectHome(root, projectId) {
     if (tab === 'pending') renderPending();
     if (tab === 'myflagged') renderMyFlagged();
     if (tab === 'qaqc') renderQaqc(state.project);  // v2.7.17：reviewer QAQC
+    if (tab === 'harvestapply') harvestPermits.renderHarvestApply(state.project);   // v2.11.33：林農端採收申請
+    if (tab === 'harvestreview') harvestPermits.renderHarvestReview(state.project); // v2.11.33：分署端採收審核
+    if (tab === 'coop') harvestPermits.renderCoopView(state.project);              // v2.11.37：合作社唯讀彙整
     if (tab === 'settings') renderSettings();
   }));
 
@@ -2338,7 +2347,7 @@ async function renderSettings() {
       const us = await getDoc(doc(db, 'users', uid));
       if (us.exists()) label = `${us.data().displayName} (${us.data().email})`;
     } catch {}
-    const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員' }[role] || role;
+    const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', harvest_authority: '採收審核（林保署）', coop: '林業合作社' }[role] || role;
     // v2.11.27：移除按鈕的顯示條件
     const isSelf = uid === state.user.uid;
     const canRemove = !isSelf && (isSystemAdmin() || (isPi() && role !== 'pi'));
