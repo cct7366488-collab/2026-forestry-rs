@@ -204,6 +204,11 @@ service cloud.firestore {
           ((isOwner() || isPi(projectId) || isSystemAdmin())
             && resource.data.get('status', 'draft') in ['approved', 'harvesting']
             && request.resource.data.status in ['harvesting', 'completed']
+            // v2.11.39 (G1)：結案（→completed）伺服器層硬擋零回報 — 必須已有回報累計
+            //   totalLogged_kg > 0。連帶堵掉「approved 直接跳 completed 跳過 harvesting」
+            //   （首筆回報才會 approved→harvesting，故 totalLogged_kg>0 必經回報）。
+            && (request.resource.data.status != 'completed'
+                || resource.data.get('totalLogged_kg', 0) > 0)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                 'status', 'harvestingStartedAt', 'completedAt', 'totalLogged_kg', 'updatedAt'
               ]))

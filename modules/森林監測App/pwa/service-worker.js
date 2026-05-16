@@ -24,7 +24,21 @@
 // v2.11.35（歷史）：HOTFIX — harvest-permits.js 頂層 destructure fb 循環 import TDZ → 白畫面；改 lazy bindFb()。
 // v2.11.34（歷史）：土肉桂採收許可全鏈路（文號 transaction / 收穫登錄 / 許可單列印 / 結案）。
 // v2.11.33（歷史）：收穫採取許可 P1 vertical slice — 新增 harvestPermits 子集合 + 角色 harvest_authority。
-const CACHE = 'forest-monitor-v2.11.37';  // v2.11.37：林業合作社唯讀彙整（見上方註解）；以下為歷史
+// v2.11.38：🚨 修 iOS PWA 卡死死鎖（5/20 demo 風險）。事故：iPhone 安裝版卡 v2.11.34、無更新橫幅、
+//   重整無效、白畫面。根因鏈：(1) fetch 為 cache-first → 開 app 吐快取舊殼 + 預快取 ?v=21134 整串 JS；
+//   (2) 該串正是 v2.11.35 修掉的循環 import TDZ 白畫面版；(3) install 不 skipWaiting，新 SW 只能等
+//   橫幅點擊；(4) 橫幅 + SW 註冊 + controllerchange→reload 全在 app.js（ESM graph），module 一崩就全
+//   不執行 → 無逃生口。三管齊下：(A) install 加 self.skipWaiting() 讓修好的 SW 立即接管；(B) 導航
+//   請求改 network-first（線上一定拿最新殼 → 最新 ?v= JS），離線才退快取（野外離線仍可開）；
+//   (C) index.html 加 module graph 外的 inline SW 引導（崩了也會跑、自動 reload）。
+//   僅 SW 內容變更即觸發全裝置 SW 更新生命週期，CACHE 改名讓 activate 清掉中毒舊快取。
+// v2.11.39：採收回報及結案全鏈路 — 新「🌾 採收回報及結案」分頁（renderHarvestReport）；
+//   G1 結案閘門 client + firestore.rules 雙擋零回報結案；G2 未回報紅幅明示「一定要回報」；
+//   G3 合作社彙整並列「申請量 / 已回報 / 達成率」。本版 harvest-permits.js / app.js /
+//   index.html 內容已改 → 依規則 A 全檔 ?v= lockstep 21137 -> 21139（js/*.js + index.html）
+//   + JS_VERSION 21137 -> 21139，避免 v2.10.2 ESM 雙實例雷。併入上述 v2.11.38 iOS 死鎖修
+//   一次乾淨部署。
+const CACHE = 'forest-monitor-v2.11.39';  // v2.11.39：採收回報及結案 + 併 v2.11.38 死鎖修；以下歷史
 // v2.11.32（歷史）：路 J-4 + J-5 合 ship — (J-4) SHELL 補回所有 19 支 JS 預快取（與 index.html / app.js import 一致 ?v=21132，解決 v2.10.2 雙實例雷）。動機：新裝置 / 新成員直接帶到山上訓練（駐地無 wifi）情境，原本 SHELL 只快取 HTML/CSS → JS 沒 cache → 離線開 app 黑屏；現在 install event 一次 addAll 全 JS、保證離線可開。(J-5) 設定頁加「🚀 完整出工檢查」按鈕 + 5 項本機檢查（不需網路）：(1) 登入狀態 + token 剩餘分鐘、(2) Service Worker 已啟動、(3) App cache 完整（JS+HTML+CSS）、(4) Firestore 離線持久化試讀 user doc confirm、(5) 已開啟專案（plots/trees 透過 onSnapshot 預載 cache）。結果 inline 顯示 ✅綠/⚠️黃/❌紅、summary 一句話結論（5 項全綠可放心出工 / 紅項先連網處理 / 黃項可出工但建議）。順手修 species-dict.js / code-tables.js 在 forms.js / species-picker.js 用 ?v=2000 vs import-wizard 用 ?v=21131 ESM 雙 module 不一致（3 處）。SW cache v2.11.31 -> v2.11.32，?v=21131 -> ?v=21132 全 14 檔（48 處）+ ?v=2000 -> ?v=21132（3 處）。路 J 全 5 項 ship 完成。
 // v2.11.31：路 J-1 立木 GPS 模式手動 fallback — 野外山區 GPS 完全無訊號（3-6 hr 離線常見情境）時兩條 escape：(1) 手動輸入 lat/lng（gpsBlock 內加 <details>「✏️ 無 GPS 訊號？手動輸入座標」、套用按鈕驗證 Taiwan 範圍 21-26°N/119-123°E、超範圍黃警仍套、套用後 ✋ 標記、treeGpsManualEntry flag）；(2) 退回皮尺 X/Y 模式（plotPosMode='gps' 才顯示「📐 退回皮尺 X/Y 模式（GPS 完全無訊號緊急用）」amber details、按鈕切換 currentPosSource='offset' + 顯示 offsetBlock + 隱藏 gpsBlock；offsetBlock 對應加「📍 切換回 GPS 量測模式」emerald details 反向切回）。submit 時 manuallyAdjusted=treeGpsManualEntry（gps 模式）/false（offset），覆寫舊邏輯。applyPosVisibility 改成 gps 模式也尊重 currentPosSource（之前 hardcoded 隱藏 offsetBlock）。GPS 失敗自動展開手動輸入 details。編輯既有 manually-adjusted 樹預設 treeGpsManualEntry=true 保留標記；GPS 重抓成功 reset false。SW cache v2.11.30 -> v2.11.31，?v=21130 -> ?v=21132 全 14 檔。
 // v2.11.30：離線野外調查強化（路 J 起手）— Auth ID token 上線即 force refresh（window.online listener 主動跟 Google 換新 token，避免野外 3-6 hr 離線回駐地 SDK 內部 race 把 stale token 帶進 sync queue）+ 設定頁加「🔑 登入狀態」區塊（顯示登入有效至 / 剩餘分鐘、剩 <30 min 黃 / <15 min 紅 + 「🔄 立即重新整理登入」按鈕讓 PI 在出工前一刻把 token 計時器歸零、延長下個離線 window 1 hr）。state 加 tokenExpiresAt 欄位、onAuthStateChanged 內 getIdTokenResult 後寫入。研究結論：Firebase Auth refresh token free tier 永久有效、ID token 1 hr SDK 自動 refresh（要網路），Firestore offline persistence 用 cached auth 不重驗 token → 3-6 hr 離線寫入仍排 queue、上線 sync 時自動補。本版 patch 是防禦性 + UX 透明化、不必改 Firebase Console。SW cache v2.11.29 -> v2.11.30，?v=21129 -> ?v=21132 全 14 檔。後續路 J-1 GPS 模式手動 fallback / J-4 SW 預快取 JS / J-5 出工 pre-flight 全項待續。
@@ -60,7 +74,7 @@ const CACHE = 'forest-monitor-v2.11.37';  // v2.11.37：林業合作社唯讀彙
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21137';
+const JS_VERSION = '21139';
 const SHELL = [
   './',
   './index.html',
@@ -92,9 +106,11 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
-  // v2.9.3：拿掉 self.skipWaiting() — 改由 client 收到「新版可用」橫幅後 user click 觸發 SKIP_WAITING
-  // 動機：手機 PWA 沒 pull-to-refresh，cache-first SW 導致使用者要 reload 兩次才看到新版。改成 user 控制
-  // 何時 activate，避免在表單填一半時被靜默更新打斷。
+  // v2.11.38：恢復 self.skipWaiting()。v2.9.3 曾為「避免表單填一半被打斷」拿掉，但實證
+  //   代價是「中毒舊版卡死、逃生口在崩潰 JS 裡 → 永久白畫面」遠比偶爾中斷重整嚴重（5/20 demo
+  //   現場卡死 = 開天窗）。skipWaiting + activate clients.claim + inline controllerchange→reload
+  //   → 修好的 SW 不必靠崩潰中的橫幅就能自己接管。
+  self.skipWaiting();
   e.waitUntil(
     caches.open(CACHE).then(c => c.addAll(SHELL).catch(() => {}))
   );
@@ -122,7 +138,26 @@ self.addEventListener('fetch', e => {
       url.hostname.includes('firestore.googleapis.com')) {
     return;
   }
-  // App shell：cache first，再背景更新
+  // v2.11.38：導航（HTML 文件）改 network-first — 線上一定拿最新殼（→最新 ?v= JS），
+  //   離線才退快取殼。直接打破「cache-first 釘住中毒舊殼」死鎖；野外離線開 app 仍可用。
+  const isNav = e.request.mode === 'navigate' ||
+    (e.request.method === 'GET' && (e.request.destination === 'document' ||
+      (e.request.headers.get('accept') || '').includes('text/html')));
+  if (isNav) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res && res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() =>
+        caches.match(e.request).then(c => c || caches.match('./index.html') || caches.match('./'))
+      )
+    );
+    return;
+  }
+  // 其餘資產（?v= 版號化 JS / CSS / manifest）：cache-first + 背景更新（stale-while-revalidate）
   e.respondWith(
     caches.match(e.request).then(cached => {
       const fetchPromise = fetch(e.request).then(res => {

@@ -6,6 +6,30 @@
   <meta name="theme-color" content="#15803d">
   <title>ForestMRV 智慧森林監測平臺</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- v2.11.38：crash-proof SW 引導 — 刻意置於 ESM module graph 之外的傳統 inline script。
+       app.js（含原 SW 註冊/更新橫幅/controllerchange→reload）一旦因循環 import 等崩潰，
+       整個 module graph 不執行 → 舊版死鎖無逃生口（5/20 事故根因）。此處獨立註冊 + 週期
+       reg.update() + 一次性 controllerchange→reload，配合 SW install skipWaiting，
+       即使 app.js 全崩，修好的 SW 仍能自動接管並把頁面重載到最新版。本腳本全程 try/catch，
+       絕不讓自己崩頁。與 app.js 內重複註冊同一 URL 為冪等（回傳同一 registration）。 -->
+  <script>
+  (function () {
+    try {
+      if (!('serviceWorker' in navigator)) return;
+      var reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (reloaded) return;          // 每次頁面載入只重載一次，避免迴圈
+        reloaded = true;
+        location.reload();
+      });
+      navigator.serviceWorker.register('./service-worker.js').then(function (reg) {
+        try { reg.update(); } catch (e) {}
+        setInterval(function () { try { reg.update(); } catch (e) {} }, 15 * 60 * 1000);
+      }).catch(function () {});
+    } catch (e) { /* 引導腳本本身永不崩頁 */ }
+  })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%F0%9F%8C%B2%3C/text%3E%3C/svg%3E">
 
   <!-- Tailwind CSS (CDN) -->
@@ -29,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21137">
+  <link rel="stylesheet" href="style.css?v=21139">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -42,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.37</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.39</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -245,6 +269,8 @@
       <a href="#" data-tab="qaqc" data-role-show="reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">🔍 審查（QAQC） <span id="qaqc-progress-pill" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
       <!-- v2.11.33：土肉桂葉片採收許可電子化 — 林農端「採收申請」/ 分署端「採收審核」 -->
       <a href="#" data-tab="harvestapply" data-role-show="pi,surveyor,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">🌿 採收申請</a>
+      <!-- v2.11.39：採收回報及結案 — 林農端核准後填報實際採收量並結案（流程：申請→審核→回報及結案→彙整）-->
+      <a href="#" data-tab="harvestreport" data-role-show="pi,surveyor,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">🌾 採收回報及結案</a>
       <a href="#" data-tab="harvestreview" data-role-show="harvest_authority,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">📋 採收審核 <span id="harvestreview-count" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
       <!-- v2.11.37：林業合作社唯讀彙整（掌握申請資訊 + 共同銷售收穫彙整）-->
       <a href="#" data-tab="coop" data-role-show="coop,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">📊 採收彙整</a>
@@ -488,8 +514,15 @@
         <h2 class="text-lg font-semibold">🌿 土肉桂葉片採收申請</h2>
         <button id="btn-new-permit" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor,admin">＋ 新採收申請</button>
       </div>
-      <p class="text-xs text-stone-500">採收受林業保育署臺中分署控管：須先提出申請，核准後始得採收。送出後待分署審核，核准前可存草稿並編輯。</p>
+      <p class="text-xs text-stone-500">採收受林業保育署臺中分署控管：須先提出申請，核准後始得採收。送出後待分署審核，核准前可存草稿並編輯。核准後請至「🌾 採收回報及結案」分頁填報實際採收量。</p>
       <div id="harvestapply-list"></div>
+    </section>
+
+    <!-- v2.11.39：土肉桂葉片採收許可（林農端）— 核准後填報實際採收量、回報完畢並結案 -->
+    <section data-tab-content="harvestreport" class="hidden space-y-3">
+      <h2 class="text-lg font-semibold">🌾 採收回報及結案</h2>
+      <p class="text-xs text-stone-500">核准後在此填報「實際採收量」（可分批多次），系統即時對照核准量。實際採收量全數回報完畢後「✅ 回報完畢並結案」；結案後資料固定，供分署查核與合作社彙整（回報為法定義務，未回報不可結案）。</p>
+      <div id="harvestreport-list"></div>
     </section>
 
     <!-- v2.11.33：土肉桂葉片採收許可（分署端）— 核准 / 駁回 / 要求補件 -->
@@ -684,6 +717,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21137"></script>
+<script type="module" src="js/app.js?v=21139"></script>
 </body>
 </html>

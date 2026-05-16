@@ -42,7 +42,7 @@ for i, sl in enumerate(pr.slides, 1):
 
 joined = '\n'.join(alltext)
 print('\n===== 4 必含項檢查 =====')
-for k in ['申請公文', '林產物採取申請函', '受文者', '申請表單', '欄位', '許可文號', '林保中-土肉桂採葉', '合作社', '已實現鮮葉', '168']:
+for k in ['申請公文', '林產物採取申請函', '受文者', '申請表單', '欄位', '許可文號', '林保中-土肉桂採葉', '合作社', '已回報', '達成率', '168']:
     print(('  OK ' if k in joined else '  MISSING ') + k)
 print('\n===== placeholder 掃描 =====')
 import re
