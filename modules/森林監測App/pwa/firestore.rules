@@ -193,8 +193,11 @@ service cloud.firestore {
         //   - create：canCollect + willOwn（snapshot.createdBy==auth）+ !isLocked（同 trees 採集）
         //   - update：未鎖定時 admin/pi/或本人 surveyor（修正「當期」measurement；關閉期凍結由 client 控）
         //   - delete：一律 false（歷史不可從 client 銷毀；如需回收用 owner-token backfill --undo）
-        // ⚠ 已知後續缺口 I-2b：第一期 verified→專案 auto-Lock 後，第二期採集（建立 period≥2
-        //   measurement / tree）仍被 !isLocked 擋；需「期別感知的專案/樣區重啟」設計，另案處理。
+        // I-2b（v2.11.42，已解）：第一期 verified→專案 auto-Lock 後第二期採集本被 !isLocked 擋；
+        //   forms.openNewPeriod 改為「開新一期＝重啟採集」：PI/admin 同步把專案降回 status=active
+        //   / locked=false（project update 對 PI/admin 本無 isLocked 閘），並先存 periodVerifications
+        //   期別查證簿保留「第 N-1 期曾查證」。專案解鎖後本 create 規則 !isLocked 即放行第二期。
+        //   第 N-1 期測值已凍結（下方 delete:false）→ 重啟採集 MRV 安全。
         match /trees/{treeId}/measurements/{periodId} {
           allow read:   if isSignedIn() && canRead(projectId);
           allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId);

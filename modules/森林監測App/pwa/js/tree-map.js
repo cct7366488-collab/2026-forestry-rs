@@ -9,8 +9,8 @@
 //   - 拖移 offset 樹會自動轉 gps + manuallyAdjusted=true（✋ badge 才會亮）
 //   - 權限：canEdit=true 才顯示編輯按鈕（PI / admin / surveyor）
 
-import { fb, el, toast, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21141';
-import { computePlotCorners, treeToWgs84 } from './plot-geometry.js?v=21141';
+import { fb, el, toast, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21142';
+import { computePlotCorners, treeToWgs84 } from './plot-geometry.js?v=21142';
 
 // 模組級單例（SPA 同時只有一個 plot detail 開啟）
 let _map = null;

@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21141';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21142';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21141';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21142';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21141';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21142';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21141';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21141';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21142';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21142';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21141';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21142';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21141';
+import { createSpeciesPicker } from './species-picker.js?v=21142';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21141';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21142';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21141';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21142';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21141';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21142';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -444,28 +444,43 @@ export function currentPlotPeriod(plot) {
   return periods.find(p => p.seq === cur) || periods[periods.length - 1];
 }
 
-/** 開啟新一期複查：append 一筆期別、把前一期標 closedAt、currentPeriod 指向新期 */
+/** 開啟新一期複查（I-2 期別模型 + I-2b 重啟採集）：
+ *  - append 一筆期別、把前一期標 closedAt、currentPeriod 指向新期；
+ *  - 若專案目前 locked（第 N-1 期已 verified+鎖）→ 同步重啟採集：先把該期查證狀態
+ *    存入 project.periodVerifications[] 期別查證簿（「曾查證」不遺失），再降回
+ *    status=active / locked=false / 清 verifiedAt-By（與 applyStatusRevertVerified
+ *    語意一致，避免 status=active 但 verifiedAt!=null 混淆）。第 N-1 期測值已凍結於
+ *    measurements 子集合（I-1，delete=false）→ 重啟採集 MRV 安全。
+ *  - 第二期全 verified 後既有狀態機（applyStatusAfterQA）自動再 review+lock，無需寫 re-lock。
+ */
 export async function openNewPeriod(project, plot) {
   if (!plot || !plot.id) { toast('找不到樣區資訊'); return; }
   // 權限對齊 firestore.rules 後門：locked 狀態下僅 admin/pi 可改 periods/currentPeriod/updatedAt
   if (!(isPi() || isSystemAdmin())) { toast('僅 PI 或系統管理員可開啟新一期複查'); return; }
+  // I-2b：已封存＝案件結束，複查不應靜默解封存（與 applyStatusRevertVerified 防呆一致）
+  if (project.archived === true) { toast('已封存專案不可開啟新一期，請先解封存'); return; }
 
   const existing = derivePlotPeriods(plot);
   const maxSeq = existing.reduce((m, p) => Math.max(m, Number(p.seq) || 0), 0);
   const nextSeq = maxSeq + 1;
+  const wasLocked = project.locked === true;  // I-2b：需重啟採集
 
   const result = await new Promise(resolve => {
     const f = el('form', { class: 'space-y-3' },
       el('p', { class: 'text-sm font-medium' }, `為樣區「${plot.code}」開啟【第 ${nextSeq} 期複查】`),
-      el('p', { class: 'text-xs text-amber-800 bg-amber-50 border border-amber-300 p-2 rounded' },
-        '⚠ 本版為期別概念驗證：開啟新一期後系統會記錄目前期別，但立木調查仍為單一紀錄 — 第一期立木 DBH／樹高尚未受保護（歷期保留需後續 I-1）。'),
+      el('p', { class: 'text-xs text-blue-800 bg-blue-50 border border-blue-200 p-2 rounded' },
+        '第 ' + nextSeq + ' 期立木調查存檔時，前一期測值已凍結於歷史測值（I-1，不可改），不會被覆蓋。'),
+      wasLocked ? el('p', { class: 'text-xs text-amber-900 bg-amber-50 border border-amber-300 p-2 rounded' },
+        `⚠ 本案目前已查證並鎖定（${project.status === 'verified' ? '已查證' : '審查中'}）。開啟第 ${nextSeq} 期將把專案重啟為「作業中」以進行第 ${nextSeq} 期採集；第 ${nextSeq - 1} 期之查證紀錄（查證人／時間）會存入「期別查證簿」留存，其測值已凍結不可改。`)
+        : null,
       el('div', { class: 'field' },
         el('label', {}, '備註（選填）：'),
         el('input', { type: 'text', name: 'note', autocomplete: 'off', maxlength: '200',
           class: 'border rounded px-2 py-1 w-full mt-1', placeholder: '例：2027 年第一次複查回訪' })
       ),
       el('div', { class: 'flex gap-2 pt-2' },
-        el('button', { type: 'submit', class: 'flex-1 bg-blue-600 text-white py-2 rounded' }, `📅 開啟第 ${nextSeq} 期`),
+        el('button', { type: 'submit', class: 'flex-1 bg-blue-600 text-white py-2 rounded' },
+          wasLocked ? `📅 開啟第 ${nextSeq} 期並重啟採集` : `📅 開啟第 ${nextSeq} 期`),
         el('button', { type: 'button', class: 'flex-1 border py-2 rounded',
           onclick: () => { closeModal(); resolve(false); } }, '取消')
       )
@@ -501,7 +516,51 @@ export async function openNewPeriod(project, plot) {
     note: result.note
   });
 
+  // I-2b：期別查證簿 — 記錄關閉中那期的查證狀態（每期一筆完整稽核軌跡）
+  const ledgerEntry = {
+    period: prevCurSeq,
+    status: project.status ?? null,
+    verifiedAt: project.verifiedAt ?? null,
+    verifiedBy: project.verifiedBy ?? null,
+    lockedBy: project.lockedBy ?? null,
+    autoLockReason: project.autoLockReason ?? null,
+    closedAt: now,
+    closedBy: state.user.uid
+  };
+  const periodVerifications = [
+    ...(Array.isArray(project.periodVerifications) ? project.periodVerifications : []),
+    ledgerEntry
+  ];
+
   try {
+    // 1) 先寫專案：存查證簿（+ 若 locked 則重啟採集）。失敗則中止，不在仍鎖定的專案上開期。
+    const projUpdates = { periodVerifications };
+    if (wasLocked) {
+      projUpdates.status = 'active';
+      projUpdates.statusChangedAt = fb.serverTimestamp();
+      projUpdates.statusChangedBy = state.user.uid;
+      projUpdates.locked = false;
+      projUpdates.lockedAt = null;
+      projUpdates.lockedBy = null;
+      projUpdates.autoLockReason = null;
+      projUpdates.verifiedAt = null;
+      projUpdates.verifiedBy = null;
+    }
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), projUpdates);
+    // sync 記憶體 project / state.project（讓解鎖即時生效、不必 reload 即可採集）
+    const applyProj = (o) => {
+      if (!o) return;
+      o.periodVerifications = periodVerifications;
+      if (wasLocked) {
+        o.status = 'active'; o.locked = false; o.lockedAt = null; o.lockedBy = null;
+        o.autoLockReason = null; o.verifiedAt = null; o.verifiedBy = null;
+        o.statusChangedBy = state.user.uid; o.statusChangedAt = now;
+      }
+    };
+    applyProj(project);
+    if (state.project && state.project.id === project.id && state.project !== project) applyProj(state.project);
+
+    // 2) 寫樣區期別
     await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id), {
       periods,
       currentPeriod: nextSeq,
@@ -514,7 +573,9 @@ export async function openNewPeriod(project, plot) {
         if (fresh.exists()) state.plot = { id: plot.id, ...fresh.data() };
       } catch (e) { console.warn('[I-2 refresh state.plot]', e); }
     }
-    toast(`已開啟第 ${nextSeq} 期複查`);
+    toast(wasLocked
+      ? `已開啟第 ${nextSeq} 期並重啟採集（專案→作業中）`
+      : `已開啟第 ${nextSeq} 期複查`);
     rerouteCurrentView();
   } catch (e) {
     console.error('openNewPeriod failed:', e);
@@ -2425,14 +2486,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21141',
+        href: './img/gps-position-guide.svg?v=21142',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21141',
+          src: './img/gps-position-guide.svg?v=21142',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
