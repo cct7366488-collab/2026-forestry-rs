@@ -1,25 +1,25 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21143';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21144';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21143';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21144';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21143';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21144';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21143';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21143';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21144';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21144';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21143';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21144';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21143';
+import { createSpeciesPicker } from './species-picker.js?v=21144';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21143';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21144';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21143';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21144';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21143';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21144';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -626,6 +626,9 @@ export function buildMeasurementSnapshot(t, { periodId, recordedBy, source }) {
     biomass_kg: t?.biomass_kg ?? null,
     carbon_kg: t?.carbon_kg ?? null,
     co2_kg: t?.co2_kg ?? null,
+    // I-5：本期狀態 fate + recruitment 期別（逐期歷史，供 I-6 ΔC / 死亡率 / recruitment 報表）
+    resurveyFate: t?.resurveyFate ?? 'alive',
+    recruitedPeriod: t?.recruitedPeriod ?? null,
     // meta
     source: source || 'tree-form',
     recordedBy: recordedBy ?? null,
@@ -2486,14 +2489,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21143',
+        href: './img/gps-position-guide.svg?v=21144',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21143',
+          src: './img/gps-position-guide.svg?v=21144',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -3003,6 +3006,40 @@ export async function openTreeForm(project, plot, existing = null) {
   }
   const padNum = (n) => String(n).padStart(3, '0');
 
+  // ===== I-4 / I-5（v2.11.44）：複查脈絡 — 上期測值 + 跨期 delta + 本期狀態（fate）/ recruitment =====
+  const _periods = derivePlotPeriods(plot);
+  const _curPeriod = currentPlotPeriod(plot);
+  const curSeq = Number(_curPeriod?.seq) || 1;
+  const isResurvey = curSeq > 1;
+  const periodOpenedDate = (seq) => {
+    const p = _periods.find(x => Number(x.seq) === Number(seq));
+    const d = p?.openedAt;
+    if (!d) return null;
+    if (typeof d?.toDate === 'function') return d.toDate();
+    if (d instanceof Date) return d;
+    if (typeof d === 'string' || typeof d === 'number') { const dt = new Date(d); return isNaN(dt) ? null : dt; }
+    return null;
+  };
+  // 上期 measurement（periodId < 本期，取最近一期）— 僅編輯既有立木且處於複查期才抓
+  let priorMeas = null, priorSeq = null, deltaYears = null;
+  if (existing && existing.id && isResurvey) {
+    try {
+      const ms = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', existing.id, 'measurements'));
+      const arr = ms.docs.map(d => d.data())
+        .filter(x => Number.isFinite(Number(x.periodId)) && Number(x.periodId) < curSeq)
+        .sort((a, b) => Number(b.periodId) - Number(a.periodId));
+      if (arr.length) {
+        priorMeas = arr[0];
+        priorSeq = Number(priorMeas.periodId);
+        const dPrev = periodOpenedDate(priorSeq);
+        const dCur = periodOpenedDate(curSeq);
+        if (dPrev && dCur && dCur > dPrev) deltaYears = (dCur - dPrev) / (365.25 * 86400000);
+      }
+    } catch (e) { console.warn('[I-4 prior measurement fetch]', e); }
+  }
+  // recruitment：複查期「新增」立木（無上期 measurement = 本期才出現）
+  const isRecruit = isResurvey && (!existing || (existing && !priorMeas && !(existing.recruitedPeriod)));
+
   // v2.10.5：樹種搜尋（取代 datalist；資料源 = Firestore 224 種 + fallback 靜態 TREES）
   //   保留變數名 speciesInput 以最小化下方計算邏輯改動
   // v2.10.9：若 plot.elevation_m 已有 → 初始 band；不在 → fire & forget DEM lookup
@@ -3376,6 +3413,67 @@ export async function openTreeForm(project, plot, existing = null) {
   }
   treeNumInput.addEventListener('input', updateTreeCodePreview);
 
+  // ===== I-4：跨期 delta 即時警示（通用保守上下界 — 開場 Q3 已定；樹種別參考表留 I-6/後續）=====
+  // 軟警示（amber，永不擋存 — surveyor 記錄現場真實，警示促雙重確認）：
+  //   ΔDBH<0（樹幹不會縮）｜ΔDBH 年增 >5 cm/yr（極寬鬆通用上界）｜無期距時 ΔDBH>15 cm｜ΔH<−1 m（斷梢可能）
+  const I4_BOUND = { DBH_NEG_TOL: -0.05, DBH_YR_MAX: 5, DBH_ABS_MAX: 15, H_DROP: -1.0 };
+  const deltaLine = el('div', { class: 'text-xs mt-1' });
+  const resurveyPanel = priorMeas ? el('div', {
+    class: 'text-xs bg-indigo-50 border border-indigo-200 rounded p-2 my-2'
+  },
+    el('div', { class: 'font-medium text-indigo-900' },
+      `📊 上期（第 ${priorSeq} 期${(() => { const d = periodOpenedDate(priorSeq); return d ? ' @ ' + fmtDate(d) : ''; })()}）`),
+    el('div', { class: 'text-indigo-800 mt-0.5' },
+      `DBH ${priorMeas.dbh_cm ?? '—'} cm ｜ H ${priorMeas.height_m ?? '—'} m ｜ 活力 ${({ healthy: '健康', weak: '衰弱', 'standing-dead': '枯立', fallen: '倒伏' })[priorMeas.vitality] || priorMeas.vitality || '—'}`
+      + (deltaYears ? ` ｜ 期距 ${deltaYears.toFixed(1)} 年` : '')),
+    deltaLine
+  ) : null;
+  function updateDelta() {
+    if (!priorMeas) return;
+    const dbh = parseFloat(f.querySelector('[name=dbh_cm]')?.value);
+    const h = parseFloat(f.querySelector('[name=height_m]')?.value);
+    if (!Number.isFinite(dbh) && !Number.isFinite(h)) {
+      deltaLine.innerHTML = '<span class="text-stone-500">輸入本期 DBH / 樹高即時比對上期</span>';
+      return;
+    }
+    const warns = [];
+    const parts = [];
+    if (Number.isFinite(dbh) && Number.isFinite(priorMeas.dbh_cm)) {
+      const dd = dbh - priorMeas.dbh_cm;
+      const ddYr = deltaYears ? dd / deltaYears : null;
+      parts.push(`ΔDBH ${dd >= 0 ? '+' : ''}${dd.toFixed(1)} cm${ddYr != null ? `（${ddYr >= 0 ? '+' : ''}${ddYr.toFixed(2)}/yr）` : ''}`);
+      if (dd < I4_BOUND.DBH_NEG_TOL) warns.push(`DBH 負成長 ${dd.toFixed(1)} cm（樹幹不會縮；請確認量測或樹牌身分）`);
+      else if (ddYr != null && ddYr > I4_BOUND.DBH_YR_MAX) warns.push(`DBH 年增 ${ddYr.toFixed(1)} cm/yr 偏高（請確認）`);
+      else if (ddYr == null && dd > I4_BOUND.DBH_ABS_MAX) warns.push(`DBH 增量 ${dd.toFixed(1)} cm 偏大（無期距可年化；請確認）`);
+    }
+    if (Number.isFinite(h) && Number.isFinite(priorMeas.height_m)) {
+      const dh = h - priorMeas.height_m;
+      parts.push(`ΔH ${dh >= 0 ? '+' : ''}${dh.toFixed(1)} m`);
+      if (dh < I4_BOUND.H_DROP) warns.push(`樹高退縮 ${dh.toFixed(1)} m（斷梢可能；請確認）`);
+    }
+    if (warns.length) {
+      deltaLine.innerHTML = `<div class="text-amber-800 font-medium">⚠ ${parts.join(' ｜ ')}</div>`
+        + warns.map(w => `<div class="text-amber-700">• ${w}</div>`).join('');
+    } else {
+      deltaLine.innerHTML = `<span class="text-emerald-700">✅ ${parts.join(' ｜ ') || '—'}</span>`;
+    }
+  }
+
+  // ===== I-5：本期狀態（fate）+ recruitment 自動標記 =====
+  const fateField = (existing && existing.id && isResurvey) ? field({
+    label: `本期狀態（第 ${curSeq} 期複查）`, name: 'resurveyFate',
+    options: [
+      { value: 'alive', label: '存活（本期復測）' },
+      { value: 'dead', label: '本期死亡（枯死 / 倒伏）' },
+      { value: 'missing', label: '失蹤 — 無法尋獲' },
+      { value: 'tag-lost', label: '樹牌脫落 — 身分存疑' }
+    ],
+    value: existing?.resurveyFate || 'alive'
+  }) : null;
+  const recruitNote = isRecruit ? el('div', {
+    class: 'text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 rounded p-2 my-2'
+  }, `✨ 本樹於第 ${curSeq} 期新增 = recruitment（新進個體，系統自動標記 recruitedPeriod=${curSeq}）`) : null;
+
   const f = el('form', { class: 'space-y-2' },
     el('div', { class: 'field' },
       el('label', {}, '個體編號 ', el('span', { class: 'req' }, '*')),
@@ -3421,6 +3519,9 @@ export async function openTreeForm(project, plot, existing = null) {
     ),
     field({ label: '枝下高 (m)', name: 'branchHeight_m', type: 'number', step: '0.1', min: '0', value: existing?.branchHeight_m ?? '' }),
     calcOut,
+    recruitNote,        // I-5：複查期新增立木標記（null 安全）
+    resurveyPanel,      // I-4：上期值 + 跨期 delta 即時警示（null 安全）
+    fateField,          // I-5：本期狀態 fate（僅複查既有立木顯示，null 安全）
     field({ label: '活力', name: 'vitality', required: true,
       options: [
         { value: 'healthy', label: '健康' },
@@ -3451,6 +3552,12 @@ export async function openTreeForm(project, plot, existing = null) {
   f.querySelector('[name=height_m]').addEventListener('input', updateCalc);
   speciesInput.addEventListener('input', updateCalc);
   updateCalc();
+  // I-4：跨期 delta 即時比對（與 updateCalc 並行掛同樣 dbh/height input 事件）
+  if (priorMeas) {
+    f.querySelector('[name=dbh_cm]').addEventListener('input', updateDelta);
+    f.querySelector('[name=height_m]').addEventListener('input', updateDelta);
+    updateDelta();
+  }
   // v2.11.28：依 plot.positionMode 初始顯示 offset / GPS / mixed-toggle
   applyPosVisibility();
 
@@ -3551,6 +3658,9 @@ export async function openTreeForm(project, plot, existing = null) {
       // v2.11.31 (J-1)：GPS-mode 樹的「手動標記」— 來源：(a) 表單手填 lat/lng；(b) 編輯既有已 manually-adjusted 樹；(c) 地圖長壓微調（已存欄位）
       // offset 模式不適用 manuallyAdjusted 概念（皮尺本來就是手動定位），一律 false
       manuallyAdjusted: positionSource === 'gps' ? treeGpsManualEntry : false,
+      // I-5：本期狀態（複查期才有 fate select；新建/第一期 → alive）+ recruitment 期別自動標記
+      resurveyFate: fd.get('resurveyFate') || existing?.resurveyFate || 'alive',
+      recruitedPeriod: existing?.recruitedPeriod ?? (isRecruit ? curSeq : null),
       ...m,
       updatedAt: fb.serverTimestamp()
     };
