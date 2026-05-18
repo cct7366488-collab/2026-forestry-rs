@@ -194,7 +194,7 @@ function quota(y, label, pct, col) {
 quota(bY, '正常：已回報 45 / 核准 60 kg（75%）', 0.75, FOREST);
 quota(bY + 1.0, '接近：已回報 56 / 核准 60 kg（93%）', 0.93, AMBER);
 quota(bY + 2.0, '超量：已回報 85 / 核准 80 kg（106%）', 1.0, RED);
-s.addText('demo-08 吳國雄案即為超量紅燈示例', { x: barX, y: bY + 2.6, w: barW, h: 0.3, fontFace: BF, fontSize: 11.5, italic: true, color: MUTE, margin: 0 });
+s.addText('demo-08 吳國雄案即為超量紅燈示例', { x: barX, y: bY + 2.9, w: barW, h: 0.3, fontFace: BF, fontSize: 11.5, italic: true, color: MUTE, margin: 0 });
 pageNum(s, 7);
 notes(s, '採收量在專屬「採收回報及結案」分頁分批回報，系統自動累加並對照核准量、顯示達成率。三段顏色：正常綠、接近黃、超量紅。G2：核准後若一筆都還沒回報，卡片會出現紅幅明示「務必回報」——回報是法定義務。種子資料裡吳國雄那案就是超量紅燈，現場可直接展示。');
 
@@ -208,7 +208,7 @@ s.addText(bullets([
   '卡片列出每一筆已回報明細（採收日／鮮重／乾重／含水率／批次）',
   'G2：尚未回報→紅幅明示；G1：未回報時「回報完畢並結案」禁用',
   '結案後資料固定，供分署查核、合作社彙整'
-], { fs: 13.5, sp: 9 }), { x: MX, y: 1.8, w: 6.05, h: 4.9, fontFace: BF, valign: 'top' });
+], { fs: 12.5, sp: 9 }), { x: MX, y: 1.8, w: 6.05, h: 4.9, fontFace: BF, valign: 'top' });
 const cx = 7.05, cw = W - MX - cx;
 s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: cx, y: 1.8, w: cw, h: 4.85, fill: { color: WHITE }, line: { color: '7C8B70', width: 1.25 }, rectRadius: 0.06, shadow: { type: 'outer', color: '000000', blur: 5, offset: 2, angle: 135, opacity: 0.12 } });
 s.addText('🌾 採收回報及結案（分頁示意）', { x: cx + 0.3, y: 2.0, w: cw - 0.6, h: 0.35, fontFace: HF, fontSize: 14, bold: true, color: FOREST, margin: 0 });
