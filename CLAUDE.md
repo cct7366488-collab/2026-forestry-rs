@@ -1,11 +1,17 @@
 # 2026 forestry_RS — 林業研究與計畫書撰寫主專案
 
 ## 對話開始時請先讀
-進度與最近更動都在 Obsidian：
+進度與最近更動都在 Obsidian 工作筆記：
 `G:\我的雲端硬碟\secondbrain\10-專案\2026-forestry-rs\工作筆記.md`
 
-（此 vault 已連 obsidian MCP，可用 MCP 直接查詢/更新）
-讀完工作筆記再決定下一步。
+**讀取策略（強制，避免脈絡爆量）**：
+1. 用 **Read 工具直讀磁碟檔**（上述路徑），需要時用 offset/limit **分頁**讀。
+2. **先只讀檔頂「📍 狀態速查」區塊**（約前 45 行）——通常已足夠掌握 prod 版本、硬期限、待辦並決定下一步，不必讀全檔。
+3. 需要更早輪次細節時，再續讀近 2 輪，或開 `工作筆記-封存.md`（同樣 Read 工具分頁）。
+4. **禁止用 obsidian MCP `read_note` dump 全檔**：MCP 回傳 JSON 會把中文逐字 escape 成 `\uXXXX`，1 字→6 字元，約 6× 膨脹（37K 檔→271K JSON），單次必爆讀取上限且灌爆脈絡。MCP 僅用於「精準小範圍查詢/更新」（如 search_notes、patch 某段），不要整檔讀。
+
+寫工作筆記一律 UTF-8 **no BOM**；主檔只留近 2 輪＋清單＋踩坑，膨脹再無損封存（見 memory `feedback_worknotes_archival`）。
+讀完狀態速查再決定下一步。
 
 ---
 
