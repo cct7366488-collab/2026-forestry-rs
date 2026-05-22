@@ -1,4 +1,4 @@
-// js/harvest-permits.js — 土肉桂修枝（修下枝葉採取）：林產物採取許可電子化（全鏈路 + 公文稿 + 合作社彙整，v2.11.41）
+// js/harvest-permits.js — 土肉桂修枝（修下枝葉採取）：林產物採取許可電子化（全鏈路 + 公文稿 + 合作社彙整，v2.11.42）
 //
 // 行政流程（依《森林法》第 15 條 / 林產物處分相關規定）：
 //   林農申請（修枝）→ 林保署核准（生法定許可文號）→ 產出量登錄（累計 vs 核准量）→ 結案
@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「產出」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21141';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21142';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -820,8 +820,17 @@ h1{text-align:center;font-size:20px;margin:0 0 4px}.sub{text-align:center;color:
 table{border-collapse:collapse;width:100%;margin-top:8px}th,td{border:1px solid #888;padding:4px 8px}
 th{background:#eee}.kv{margin:3px 0}.box{border:1px solid #888;padding:14px 18px;margin-bottom:16px}
 .total{margin-top:10px;font-weight:bold}.over{color:#c00}
-.sign{margin-top:40px;display:flex;justify-content:space-between}</style>
+.sign{margin-top:40px;display:flex;justify-content:space-between}
+.noprint{background:#f3f4f6;border:1px solid #ccc;border-radius:6px;padding:8px;margin-bottom:16px;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.noprint .hint{flex:1;font-size:12px;color:#666;min-width:140px}
+.noprint button{border:0;padding:9px 16px;border-radius:6px;font-size:15px;color:#fff;cursor:pointer}
+@media print{.noprint{display:none!important}}</style>
 </head><body>
+<div class="noprint">
+<span class="hint">列印或存成 PDF 後，點「關閉並返回」回到系統。</span>
+<button style="background:#15803d" onclick="window.print()">🖨️ 列印 / 存 PDF</button>
+<button style="background:#555" onclick="window.close()">✕ 關閉並返回</button>
+</div>
 <h1>林產物採取許可單（土肉桂修枝及枝葉採取）</h1>
 <div class="sub">林業及自然保育署臺中分署　中華民國 ${roc} 年</div>
 <div class="box">
@@ -837,7 +846,6 @@ ${permit.reviewComment ? `<div class="kv"><b>審核附註：</b>${esc(permit.rev
 <tbody>${rowsHtml}</tbody></table>
 <div class="total ${over ? 'over' : ''}">累計鮮葉產出量：${total.toFixed(1)} kg ／ 核准量：${esc(permit.approvedAmount_kg)} kg${over ? '　⚠ 已超過核准量' : ''}</div>
 <div class="sign"><div>申請人簽章：________________</div><div>分署核章：________________</div></div>
-<script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>
 </body></html>`;
   const w = window.open('', '_blank');
   if (!w) { toast('瀏覽器封鎖彈出視窗，請允許後重試'); return; }
@@ -872,8 +880,16 @@ ol{margin:4px 0 4px 0;padding-left:1.8em}ol li{margin:4px 0}
 .recv{margin-top:26px;border:1px solid #000;padding:8px 12px;font-size:14px}
 .recv .h{font-weight:bold;margin-bottom:6px}
 .line{display:inline-block;border-bottom:1px solid #000;min-width:8em}
-@media print{body{margin:2cm}}
+.noprint{background:#f3f4f6;border:1px solid #ccc;border-radius:6px;padding:8px;margin:-1cm -1cm 18px;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;font-family:"Microsoft JhengHei",sans-serif}
+.noprint .hint{flex:1;font-size:12px;color:#666;min-width:140px}
+.noprint button{border:0;padding:9px 16px;border-radius:6px;font-size:15px;color:#fff;cursor:pointer}
+@media print{body{margin:2cm}.noprint{display:none!important}}
 </style></head><body>
+<div class="noprint">
+<span class="hint">列印或存成 PDF 後，點「關閉並返回」回到系統。</span>
+<button style="background:#15803d" onclick="window.print()">🖨️ 列印 / 存 PDF</button>
+<button style="background:#555" onclick="window.close()">✕ 關閉並返回</button>
+</div>
 <div class="title">土肉桂修枝申請函</div>
 <div class="row"><span class="lbl">受文者：</span>林業及自然保育署臺中分署</div>
 <div class="row"><span class="lbl">發文日期：</span>${rocFull(today)}</div>
@@ -903,7 +919,6 @@ ol{margin:4px 0 4px 0;padding-left:1.8em}ol li{margin:4px 0}
 <div class="h">（以下由林業及自然保育署臺中分署收件填用）</div>
 收文日期：____________　收文文號：____________　承辦人：____________
 </div>
-<script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>
 </body></html>`;
   const w = window.open('', '_blank');
   if (!w) { toast('瀏覽器封鎖彈出視窗，請允許後重試'); return; }
