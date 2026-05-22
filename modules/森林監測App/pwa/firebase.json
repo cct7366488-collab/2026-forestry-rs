@@ -17,6 +17,20 @@
       "firestore.indexes.json",
       "firebase-config.example.js"
     ],
+    "headers": [
+      {
+        "source": "/service-worker.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      },
+      {
+        "source": "/index.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      },
+      {
+        "source": "/",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      }
+    ],
     "rewrites": [
       {
         "source": "**",
