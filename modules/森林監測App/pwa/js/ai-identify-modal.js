@@ -15,9 +15,9 @@
 //   4. POST → top-3 結果（含中文 if 字典命中 + 信心 % + 學名 + 科）
 //   5. 點選一筆 → onPick + close modal
 
-import { el, toast, isSystemAdmin, isPi } from './app.js?v=21139';
-import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, suggestSpeciesFromAi, LLM_MODELS } from './ai-species.js?v=21139';
-import { loadSpeciesCache } from './species-picker.js?v=21139';
+import { el, toast, isSystemAdmin, isPi } from './app.js?v=21140';
+import { identifySpecies, getApiKey, setApiKey, clearApiKey, getProxyUrl, setProxyUrl, clearProxyUrl, getEffectiveApiKey, getEffectiveProxyUrl, loadGlobalAiConfig, setGlobalAiConfig, getLlmKey, setLlmKey, clearLlmKey, getEffectiveLlmKey, getEffectiveLlmModel, enrichWithLLM, resizeImage, matchToLocalSpecies, lookupChineseName, suggestSpeciesFromAi, LLM_MODELS } from './ai-species.js?v=21140';
+import { loadSpeciesCache } from './species-picker.js?v=21140';
 
 // v2.11.7：加 forceSetup 旗標 — 「編輯全域設定」按鈕走這條，不論 effective 是否滿足都進設定畫面
 // v2.11.26：z-index z-50 → z-[2050]（蓋過 #modal z-[2000]，否則 AI modal 被新立木 modal 蓋住）+ dedup 防重複點累積

@@ -18,7 +18,7 @@
 // 安全設計：
 //   - 固定 doc id（demo-01..demo-10 / 其 logs log-1..）→ 重跑覆寫、不重複、可清除
 //   - 每筆帶 demoSeed:true、note 前綴「【DEMO】」→ 一眼可辨、--clean 可全清
-//   - 已核准案文號用保留區「林保中-土肉桂採葉-115-9xx」→ 不碰真實 counters，
+//   - 已核准案文號用保留區「林保中-土肉桂修枝-115-9xx」→ 不碰真實 counters，
 //     現場 live 核准未種子案仍從 001 起，可同時演示真實文號生成
 //   - 同時確保簡報帳號 systemRole=admin（一個登入即可演示申請/審核/彙整三分頁）
 
@@ -127,7 +127,7 @@ const CASES = [
   { id: 'demo-03', status: 'revision', applicantName: '王美桂', contact: '0933-444-555', land: '大甲溪事業區 13 林班 2 小班', area: 1.2, trees: 460, uses: '兩者皆有', est: 80, from: '2026-06-01', to: '2026-10-31',
     reviewComment: '林地地號需檢附土地登記謄本影本，請補正後重新送出。' },
   { id: 'demo-04', status: 'rejected', applicantName: '李文清', contact: '0955-666-777', land: '大甲溪事業區 14 林班 1 小班', area: 2.0, trees: 700, uses: '精油萃取', est: 120, from: '2026-06-01', to: '2026-12-31',
-    reviewComment: '申請採收面積與現地勘查不符，且部分區域逾越土肉桂專區範圍，本案駁回。' },
+    reviewComment: '申請修枝面積與現地勘查不符，且部分區域逾越土肉桂專區範圍，本案駁回。' },
   { id: 'demo-05', status: 'approved', applicantName: '張春生', contact: '0911-000-111', land: '大甲溪事業區 12 林班 8 小班', area: 0.6, trees: 240, uses: '精油萃取', est: 50, approved: 50, permitSeq: 901, from: '2026-06-01', to: '2026-09-30' },
   { id: 'demo-06', status: 'approved', applicantName: '黃秋蘭', contact: '0966-222-333', land: '大甲溪事業區 13 林班 6 小班', area: 0.9, trees: 350, uses: '乾燥食用', est: 70, approved: 60, permitSeq: 902, from: '2026-06-10', to: '2026-10-10' },
   { id: 'demo-07', status: 'harvesting', applicantName: '林大山', contact: '0912-345-678', land: '大甲溪事業區 12 林班 3 小班', area: 0.8, trees: 320, uses: '精油萃取', est: 60, approved: 60, permitSeq: 903, from: '2026-05-01', to: '2026-08-31',
@@ -139,7 +139,7 @@ const CASES = [
   { id: 'demo-10', status: 'draft', applicantName: '陳阿土', contact: '0922-111-222', land: '大甲溪事業區 12 林班 5 小班', area: 0.5, trees: 180, uses: '精油萃取', est: 30, from: '2026-07-01', to: '2026-09-30' }
 ];
 
-function buildPermitNo(seq) { return `林保中-土肉桂採葉-115-${String(seq).padStart(3, '0')}`; }
+function buildPermitNo(seq) { return `林保中-土肉桂修枝-115-${String(seq).padStart(3, '0')}`; }
 
 (async () => {
   console.log(`\n🌿 土肉桂專區 demo 種子（GCP=${GCP_PROJECT}, project=${TARGET_PROJECT_ID}）`);
@@ -213,12 +213,12 @@ function buildPermitNo(seq) { return `林保中-土肉桂採葉-115-${String(seq
       landParcel: c.land,
       forestArea_ha: c.area,
       estTrees: c.trees,
-      harvestMethod: '修枝採葉',
+      harvestMethod: '修枝',
       estAmount_kg: c.est,
       periodFrom: c.from,
       periodTo: c.to,
       uses: c.uses,
-      note: '【DEMO】5/20 說明會種子資料',
+      note: '【DEMO】教育訓練種子資料（修枝版）',
       status: c.status,
       createdAt: D(20),
       updatedAt: D(1)
@@ -278,7 +278,7 @@ function buildPermitNo(seq) { return `林保中-土肉桂採葉-115-${String(seq
 
   console.log(`\n✅ 種子完成：`);
   console.log(`   案件 ${CASES.length} 筆（submitted 2 / revision 1 / rejected 1 / approved 2 / harvesting 2 / completed 1 / draft 1）`);
-  console.log(`   已核准/採收/結案文號：${approvedN} 個（保留區 115-901..905）；收穫紀錄 ${logN} 筆`);
+  console.log(`   已核准/修枝/結案文號：${approvedN} 個（保留區 115-901..905）；產出紀錄 ${logN} 筆`);
   console.log(`   合作社可見已實現可售鮮葉合計：demo-07(45) + demo-08(85) + demo-09(38) = 168 kg`);
   console.log(`   ${adminMsg}`);
   console.log(`\n   清除指令：node seed-cinnamon-demo.mjs --clean\n`);

@@ -15,21 +15,21 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21139";
-import * as forms from "./forms.js?v=21139";
-import * as analytics from "./analytics.js?v=21139";
-import * as importWizard from "./import-wizard.js?v=21139";
+import { firebaseConfig } from "../firebase-config.js?v=21140";
+import * as forms from "./forms.js?v=21140";
+import * as analytics from "./analytics.js?v=21140";
+import * as importWizard from "./import-wizard.js?v=21140";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21139";
-import { renderTreeDistribution } from "./distribution.js?v=21139";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21139";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21139";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21140";
+import { renderTreeDistribution } from "./distribution.js?v=21140";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21140";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21140";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21139";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21139";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21140";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21140";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21139";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21140";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -367,7 +367,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21139');
+    const m = await import('./migration-v2715.js?v=21140');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -389,7 +389,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21139');
+    const m = await import('./migration-v2715.js?v=21140');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -858,7 +858,7 @@ async function renderProjects(root) {
 
     const renderCard = (data, isArchived) => {
       const role = data.members?.[state.user.uid] || (isSystemAdmin() ? 'admin' : '?');
-      const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', harvest_authority: '採收審核（林保署）', coop: '林業合作社', admin: '系統管理者' }[role] || role;
+      const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', harvest_authority: '修枝審核（林保署）', coop: '林業合作社', admin: '系統管理者' }[role] || role;
       // v2.3：status badge（archived 用 archivedBadge 表示，其他狀態都顯示）
       const statusVal = isArchived ? STATUS.ARCHIVED : (data.status || STATUS.ACTIVE);
       const statusBadge = el('span', { html: statusBadgeHTML(statusVal) });
@@ -2348,7 +2348,7 @@ async function renderSettings() {
       const us = await getDoc(doc(db, 'users', uid));
       if (us.exists()) label = `${us.data().displayName} (${us.data().email})`;
     } catch {}
-    const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', harvest_authority: '採收審核（林保署）', coop: '林業合作社' }[role] || role;
+    const roleLabel = { pi: '主持人', surveyor: '調查員', reviewer: '審查委員', harvest_authority: '修枝審核（林保署）', coop: '林業合作社' }[role] || role;
     // v2.11.27：移除按鈕的顯示條件
     const isSelf = uid === state.user.uid;
     const canRemove = !isSelf && (isSystemAdmin() || (isPi() && role !== 'pi'));
