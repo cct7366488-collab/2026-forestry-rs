@@ -53,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21140">
+  <link rel="stylesheet" href="style.css?v=21141">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -66,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.40</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.41</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -512,7 +512,7 @@
     <section data-tab-content="harvestapply" class="hidden space-y-3">
       <div class="flex justify-between items-center flex-wrap gap-2">
         <h2 class="text-lg font-semibold">🌿 土肉桂修枝申請</h2>
-        <button id="btn-new-permit" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor,admin">＋ 新修枝申請</button>
+        <button id="btn-new-permit" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor,admin">＋ 修枝申請</button>
       </div>
       <p class="text-xs text-stone-500">修枝受林業保育署臺中分署控管：須先提出申請，核准後始得修枝及採取枝葉。送出後待分署審核，核准前可存草稿並編輯。核准後請至「🌾 產出回報及結案」分頁填報修下枝葉產出量。</p>
       <div id="harvestapply-list"></div>
@@ -717,6 +717,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21140"></script>
+<script type="module" src="js/app.js?v=21141"></script>
 </body>
 </html>

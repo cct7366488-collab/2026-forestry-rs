@@ -1,4 +1,4 @@
-// js/harvest-permits.js — 土肉桂修枝（修下枝葉採取）：林產物採取許可電子化（全鏈路 + 公文稿 + 合作社彙整，v2.11.40）
+// js/harvest-permits.js — 土肉桂修枝（修下枝葉採取）：林產物採取許可電子化（全鏈路 + 公文稿 + 合作社彙整，v2.11.41）
 //
 // 行政流程（依《森林法》第 15 條 / 林產物處分相關規定）：
 //   林農申請（修枝）→ 林保署核准（生法定許可文號）→ 產出量登錄（累計 vs 核准量）→ 結案
@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「產出」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21140';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21141';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -44,7 +44,6 @@ export const HP_STATUS = {
 };
 
 const HARVEST_METHODS = ['修枝', '其他'];
-const USE_OPTS = ['精油萃取', '乾燥食用', '兩者皆有', '其他'];
 
 function hpBadge(status) {
   const m = HP_STATUS[status] || HP_STATUS.draft;
@@ -98,9 +97,9 @@ function permitCard(project, p, reviewMode) {
       p.permitNo ? el('span', { class: 'text-xs text-stone-500' }, `許可文號 ${p.permitNo}`) : null
     ),
     el('div', { class: 'text-sm text-stone-600' },
-      `林地：${p.landParcel || '—'}　面積：${fmtNum(p.forestArea_ha)} ha　申請鮮葉量：${fmtNum(p.estAmount_kg)} kg`),
+      `林地：${p.landParcel || '—'}　面積：${fmtNum(p.forestArea_ha)} ha　修枝株數：${fmtNum(p.estTrees)}`),
     el('div', { class: 'text-xs text-stone-500' },
-      `修枝方式：${p.harvestMethod || '—'}　修枝期間：${p.periodFrom || '—'} ~ ${p.periodTo || '—'}　用途：${p.uses || '—'}`)
+      `修枝方式：${p.harvestMethod || '—'}　修枝期間：${p.periodFrom || '—'} ~ ${p.periodTo || '—'}`)
   ];
   if (hasPermitDoc) {
     rows.push(el('div', { class: 'text-xs text-emerald-700 mt-1' },
@@ -262,9 +261,9 @@ function reportCard(project, p) {
       p.permitNo ? el('span', { class: 'text-xs text-stone-500' }, `許可文號 ${p.permitNo}`) : null
     ),
     el('div', { class: 'text-sm text-stone-600' },
-      `林地：${p.landParcel || '—'}　申請鮮葉量：${fmtNum(p.estAmount_kg)} kg　核准量：${fmtNum(approved)} kg`),
+      `林地：${p.landParcel || '—'}　核准採取數量：${fmtNum(approved)} kg`),
     el('div', { class: 'text-xs text-stone-500' },
-      `用途：${p.uses || '—'}　效期：${p.validFrom || '—'} ~ ${p.validUntil || '—'}`)
+      `效期：${p.validFrom || '—'} ~ ${p.validUntil || '—'}`)
   ];
 
   const q = quotaInfo(p);
@@ -365,14 +364,12 @@ export function openHarvestPermitForm(project, existing = null) {
     fld('聯絡方式（電話／email）', 'contact', { value: p.contact || '' }),
     fld('林班 / 地號', 'landParcel', { required: true, value: p.landParcel || '' }),
     fld('申請修枝面積 (ha)', 'forestArea_ha', { type: 'number', step: '0.01', min: 0, value: p.forestArea_ha ?? '' }),
-    fld('估計土肉桂株數', 'estTrees', { type: 'number', min: 0, value: p.estTrees ?? '' }),
+    fld('土肉桂修枝株數', 'estTrees', { type: 'number', min: 0, value: p.estTrees ?? '' }),
     fld('修枝方式', 'harvestMethod', { options: HARVEST_METHODS, value: p.harvestMethod || '修枝' }),
-    fld('預計鮮葉產出量 (kg)', 'estAmount_kg', { type: 'number', step: '0.1', min: 0, required: true, value: p.estAmount_kg ?? '' }),
     el('div', { class: 'grid grid-cols-2 gap-2' },
       fld('修枝起日', 'periodFrom', { type: 'date', value: p.periodFrom || '' }),
       fld('修枝迄日', 'periodTo', { type: 'date', value: p.periodTo || '' })
     ),
-    fld('用途', 'uses', { options: USE_OPTS, value: p.uses || '精油萃取' }),
     fld('備註', 'note', { type: 'textarea', value: p.note || '' }),
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', value: 'draft', class: 'flex-1 bg-stone-200 hover:bg-stone-300 text-stone-800 px-3 py-2 rounded text-sm font-medium' }, '💾 儲存草稿'),
@@ -395,16 +392,14 @@ export function openHarvestPermitForm(project, existing = null) {
       forestArea_ha: num(fd.get('forestArea_ha')),
       estTrees: num(fd.get('estTrees')),
       harvestMethod: fd.get('harvestMethod'),
-      estAmount_kg: num(fd.get('estAmount_kg')),
       periodFrom: fd.get('periodFrom') || '',
       periodTo: fd.get('periodTo') || '',
-      uses: fd.get('uses'),
       note: (fd.get('note') || '').trim(),
       status: intent,
       updatedAt: serverTimestamp()
     };
-    if (!data.applicantName || !data.landParcel || data.estAmount_kg == null) {
-      toast('請填申請人、林班/地號、預計產出量');
+    if (!data.applicantName || !data.landParcel) {
+      toast('請填申請人、林班/地號');
       return;
     }
     if (intent === 'submitted') data.submittedAt = serverTimestamp();
@@ -425,13 +420,13 @@ export function openHarvestPermitForm(project, existing = null) {
       toast('儲存失敗：' + err.message);
     }
   });
-  openModal(existing ? '編輯修枝申請' : '新修枝申請（土肉桂）', f);
+  openModal(existing ? '編輯修枝申請' : '修枝申請（土肉桂）', f);
 }
 
 async function submitPermit(project, p) {
   if (!confirm(
     `確定送出此申請給林業保育署臺中分署審核？\n\n` +
-    `申請人：${p.applicantName}\n林地：${p.landParcel}\n預計產出：${p.estAmount_kg} kg\n\n` +
+    `申請人：${p.applicantName}\n林地：${p.landParcel}\n\n` +
     `送出後將無法編輯，需待審核結果。`
   )) return;
   try {
@@ -492,7 +487,7 @@ export async function renderHarvestReview(project) {
 // ===== 林業合作社：唯讀彙整（掌握申請資訊 + 共同銷售產出彙整）=====
 // 唯讀：rules 天然鎖死（coop 非 canCollect / 非 harvest_authority / 非 owner）→ 此頁不放任何寫入。
 // 僅顯示已送出（含）起的案件（排除林農私人草稿）。產出累計直接讀 permit.totalLogged_kg（P2 已 denormalized）。
-// v2.11.39 (G3)：彙整改以「申請當時量 vs 事後實際回報量 + 達成率」為主軸（取代舊 Pipeline 估算）。
+// v2.11.41：申請階段移除預估產量/用途（林農對預估落差有顧慮、無估計機制），彙整改以實際回報產出量為主。
 
 export async function renderCoopView(project) {
   bindFb();
@@ -517,21 +512,15 @@ export async function renderCoopView(project) {
   list.forEach(p => { statusCount[p.status] = (statusCount[p.status] || 0) + 1; });
   const approvedish = list.filter(p => ['approved', 'harvesting', 'completed'].includes(p.status));
   const realizedKg = list.reduce((s, p) => s + (p.totalLogged_kg || 0), 0);
-  // v2.11.39 (G3)：申請當時的量（預計鮮葉量）vs 事後實際回報量，並列供合作社判斷達成率
-  const requestedKg = list.reduce((s, p) => s + (p.estAmount_kg || 0), 0);
 
-  // 依林農彙整
+  // 依林農彙整（v2.11.41：申請階段不再預估產量/用途，彙整以實際回報產出量為主）
   const byFarmer = {};
   list.forEach(p => {
     const k = p.applicantName || '（未填申請人）';
-    const f = byFarmer[k] || (byFarmer[k] = { name: k, cases: 0, requested: 0, realized: 0, uses: {} });
+    const f = byFarmer[k] || (byFarmer[k] = { name: k, cases: 0, realized: 0 });
     f.cases++;
-    f.requested += (p.estAmount_kg || 0);
     f.realized += (p.totalLogged_kg || 0);
-    const u = p.uses || '其他';
-    f.uses[u] = (f.uses[u] || 0) + (p.totalLogged_kg || 0);
   });
-  const pctStr = (num, den) => den > 0 ? `${(num / den * 100).toFixed(0)}%` : '—';
   const farmers = Object.values(byFarmer).sort((a, b) => b.realized - a.realized);
 
   box.innerHTML = '';
@@ -543,33 +532,27 @@ export async function renderCoopView(project) {
       el('div', {}, `申請案（已送出起）：${list.length} 件　已核准/修枝作業中/結案：${approvedish.length} 件`),
       el('div', {}, '狀態分布：' + Object.entries(statusCount)
         .map(([s, n]) => `${(HP_STATUS[s] || { label: s }).label} ${n}`).join('　') ),
-      el('div', { class: 'text-stone-600' },
-        `申請總量（申請當時預計）：${requestedKg.toFixed(1)} kg`),
       el('div', { class: 'text-emerald-700 font-medium' },
-        `已回報產出量（事後實際累計）：${realizedKg.toFixed(1)} kg　達成率 ${pctStr(realizedKg, requestedKg)}`)
+        `已回報產出量（事後實際累計）：${realizedKg.toFixed(1)} kg`)
     )
   ));
 
   // 2) 依林農產出彙整（共同銷售）
   const tbl = el('table', { class: 'w-full text-xs border-collapse' },
     el('thead', {}, el('tr', { class: 'bg-stone-100' },
-      ...['林農', '案件數', '申請量(kg)', '已回報(kg)', '達成率', '用途分布(kg)'].map(h =>
+      ...['林農', '案件數', '已回報產出量(kg)'].map(h =>
         el('th', { class: 'border px-2 py-1 text-left' }, h)))),
     el('tbody', {}, ...farmers.map(f => el('tr', {},
       el('td', { class: 'border px-2 py-1' }, f.name),
       el('td', { class: 'border px-2 py-1' }, String(f.cases)),
-      el('td', { class: 'border px-2 py-1 text-stone-600' }, f.requested.toFixed(1)),
-      el('td', { class: 'border px-2 py-1 font-medium text-emerald-700' }, f.realized.toFixed(1)),
-      el('td', { class: 'border px-2 py-1' }, pctStr(f.realized, f.requested)),
-      el('td', { class: 'border px-2 py-1' },
-        Object.entries(f.uses).map(([u, kg]) => `${u} ${kg.toFixed(1)}`).join('；') || '—')
+      el('td', { class: 'border px-2 py-1 font-medium text-emerald-700' }, f.realized.toFixed(1))
     )))
   );
   box.appendChild(el('div', { class: 'bg-white rounded-lg shadow p-4 mb-3' },
     el('h3', { class: 'font-semibold mb-2' }, '🤝 依林農產出彙整（共同銷售）'),
     el('div', { class: 'overflow-x-auto' }, tbl),
     el('div', { class: 'text-xs text-stone-500 mt-2' },
-      '「申請量」＝申請當時預計鮮葉量；「已回報」＝核准後實際產出回報累計（修枝作業中/已結案），即可投入共同銷售之數量；達成率＝已回報 ÷ 申請量。')
+      '「已回報產出量」＝核准後實際產出回報累計（修枝作業中/已結案），即可投入共同銷售之數量（鮮葉重）。')
   ));
 
   // 3) 各申請案（唯讀，核准後可檢視許可單）
@@ -588,7 +571,7 @@ export async function renderCoopView(project) {
             hpBadge(p.status),
             p.permitNo ? el('span', { class: 'text-xs text-stone-500' }, `文號 ${p.permitNo}`) : null),
           el('div', { class: 'text-xs text-stone-500' },
-            `林地 ${p.landParcel || '—'}　申請 ${fmtNum(p.estAmount_kg)} kg　已回報 ${fmtNum(p.totalLogged_kg)} kg　用途 ${p.uses || '—'}`)
+            `林地 ${p.landParcel || '—'}　已回報產出 ${fmtNum(p.totalLogged_kg)} kg`)
         ),
         canView
           ? el('button', {
@@ -609,11 +592,11 @@ function openDecisionModal(project, p, action) {
   const title = { approve: '核准修枝申請', revision: '要求補件', reject: '駁回修枝申請' }[action];
   const body = el('div', { class: 'space-y-2' });
   body.appendChild(el('div', { class: 'text-sm text-stone-600' },
-    `申請人：${p.applicantName}　林地：${p.landParcel}　申請量：${fmtNum(p.estAmount_kg)} kg`));
+    `申請人：${p.applicantName}　林地：${p.landParcel}　修枝面積：${fmtNum(p.forestArea_ha)} ha　修枝株數：${fmtNum(p.estTrees)}`));
 
   let approvedInput, fromInput, untilInput;
   if (isApprove) {
-    approvedInput = el('input', { type: 'number', step: '0.1', min: 0, value: p.estAmount_kg ?? '', class: 'w-full border rounded px-2 py-1 text-sm' });
+    approvedInput = el('input', { type: 'number', step: '0.1', min: 0, value: '', class: 'w-full border rounded px-2 py-1 text-sm' });
     fromInput = el('input', { type: 'date', value: p.periodFrom || '', class: 'w-full border rounded px-2 py-1 text-sm' });
     untilInput = el('input', { type: 'date', value: p.periodTo || '', class: 'w-full border rounded px-2 py-1 text-sm' });
     body.appendChild(el('div', {}, el('label', { class: 'block text-sm font-medium mb-0.5' }, '核准採取數量 (kg)'), approvedInput));
@@ -653,7 +636,7 @@ function openDecisionModal(project, p, action) {
           tx.set(counterRef, { seq: next }, { merge: true });
           tx.update(permitRef, {
             status: 'approved',
-            approvedAmount_kg: isNaN(amt) ? (p.estAmount_kg ?? null) : amt,
+            approvedAmount_kg: isNaN(amt) ? null : amt,
             validFrom: fromInput.value || '',
             validUntil: untilInput.value || '',
             permitNo,
@@ -784,7 +767,7 @@ async function openPermitDetail(project, permit) {
     el('div', {}, `許可文號：${permit.permitNo || '（未生成）'}`),
     el('div', {}, `申請人：${permit.applicantName || '—'}　聯絡：${permit.contact || '—'}`),
     el('div', {}, `林地：${permit.landParcel || '—'}（${fmtNum(permit.forestArea_ha)} ha）`),
-    el('div', {}, `修枝方式：${permit.harvestMethod || '—'}　用途：${permit.uses || '—'}`),
+    el('div', {}, `修枝方式：${permit.harvestMethod || '—'}　修枝株數：${fmtNum(permit.estTrees)}`),
     el('div', {}, `核准採取數量：${fmtNum(permit.approvedAmount_kg)} kg（鮮葉）`),
     el('div', {}, `效期：${permit.validFrom || '—'} ~ ${permit.validUntil || '—'}`),
     permit.reviewComment ? el('div', {}, `審核附註：${permit.reviewComment}`) : null
@@ -845,7 +828,7 @@ th{background:#eee}.kv{margin:3px 0}.box{border:1px solid #888;padding:14px 18px
 <div class="kv"><b>許可文號：</b>${esc(permit.permitNo)}</div>
 <div class="kv"><b>申請人：</b>${esc(permit.applicantName)}　<b>聯絡方式：</b>${esc(permit.contact)}</div>
 <div class="kv"><b>林地（林班/地號）：</b>${esc(permit.landParcel)}　<b>面積：</b>${esc(permit.forestArea_ha)} ha</div>
-<div class="kv"><b>修枝方式：</b>${esc(permit.harvestMethod)}　<b>用途：</b>${esc(permit.uses)}</div>
+<div class="kv"><b>修枝方式：</b>${esc(permit.harvestMethod)}　<b>土肉桂修枝株數：</b>${esc(permit.estTrees)}</div>
 <div class="kv"><b>核准採取數量：</b>${esc(permit.approvedAmount_kg)} kg（鮮葉）　<b>效期：</b>${esc(permit.validFrom)} ~ ${esc(permit.validUntil)}</div>
 ${permit.reviewComment ? `<div class="kv"><b>審核附註：</b>${esc(permit.reviewComment)}</div>` : ''}
 </div>
@@ -902,20 +885,17 @@ ol{margin:4px 0 4px 0;padding-left:1.8em}ol li{margin:4px 0}
 <ol>
 <li>申請人：${v(permit.applicantName)}（聯絡方式：${v(permit.contact)}）。</li>
 <li>林地坐落及權屬：${v(permit.landParcel)}，面積 ${v(permit.forestArea_ha)} 公頃。</li>
-<li>採取標的：土肉桂修下之枝葉；修枝方式：${v(permit.harvestMethod) || '修枝'}；估計母樹 ${v(permit.estTrees)} 株。</li>
-<li>預計修枝產出鮮葉：${v(permit.estAmount_kg)} 公斤。</li>
+<li>採取標的：土肉桂修下之枝葉；修枝方式：${v(permit.harvestMethod) || '修枝'}；土肉桂修枝株數 ${v(permit.estTrees)} 株。</li>
 <li>修枝作業期間：自民國 ${rocYmd(permit.periodFrom)} 起至 ${rocYmd(permit.periodTo)} 止。</li>
-<li>用途：${v(permit.uses)}。</li>
 <li>本案已於 ForestMRV 線上系統登錄${permit.status === 'submitted' || permit.status === 'under_review' || permit.status === 'approved' || permit.status === 'harvesting' || permit.status === 'completed' ? '並送出' : '（草稿）'}，本函為紙本正式送件文件，內容與線上記錄一致。</li>
 <li>檢附相關文件如附件，請　查照核辦。</li>
 </ol>
 <table class="tbl">
 <tr><th>申請人</th><td>${v(permit.applicantName)}</td><th>聯絡方式</th><td>${v(permit.contact)}</td></tr>
 <tr><th>林班／地號</th><td colspan="3">${v(permit.landParcel)}</td></tr>
-<tr><th>修枝面積</th><td>${v(permit.forestArea_ha)} ha</td><th>估計株數</th><td>${v(permit.estTrees)}</td></tr>
-<tr><th>修枝方式</th><td>${v(permit.harvestMethod) || '修枝'}</td><th>預計鮮葉量</th><td>${v(permit.estAmount_kg)} kg</td></tr>
+<tr><th>修枝面積</th><td>${v(permit.forestArea_ha)} ha</td><th>土肉桂修枝株數</th><td>${v(permit.estTrees)}</td></tr>
+<tr><th>修枝方式</th><td colspan="3">${v(permit.harvestMethod) || '修枝'}</td></tr>
 <tr><th>修枝作業期間</th><td colspan="3">${permit.periodFrom ? esc(permit.periodFrom) : '—'} ~ ${permit.periodTo ? esc(permit.periodTo) : '—'}</td></tr>
-<tr><th>用途</th><td colspan="3">${v(permit.uses)}</td></tr>
 <tr><th>備註</th><td colspan="3">${v(permit.note)}</td></tr>
 </table>
 <div class="sign">申請人：________________（簽章）<br>身分證／統一編號：________________<br>申請日期：${rocFull(today)}</div>
