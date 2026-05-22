@@ -1,4 +1,4 @@
-// js/harvest-permits.js — 土肉桂修枝（修下枝葉採取）：林產物採取許可電子化（全鏈路 + 公文稿 + 合作社彙整，v2.11.42）
+// js/harvest-permits.js — 土肉桂修枝（修下枝葉採取）：林產物採取許可電子化（全鏈路 + 公文稿 + 合作社彙整，v2.11.43）
 //
 // 行政流程（依《森林法》第 15 條 / 林產物處分相關規定）：
 //   林農申請（修枝）→ 林保署核准（生法定許可文號）→ 產出量登錄（累計 vs 核准量）→ 結案
@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「產出」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21142';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21143';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
