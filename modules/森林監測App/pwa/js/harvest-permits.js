@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21145';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21146';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
