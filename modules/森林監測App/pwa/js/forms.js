@@ -1,25 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21144';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21145';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21144';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21145';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21144';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21145';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21144';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21144';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21145';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21145';
+// 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21145';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21144';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21145';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21144';
+import { createSpeciesPicker } from './species-picker.js?v=21145';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21144';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21145';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21144';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21145';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21144';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21145';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -719,6 +721,49 @@ export function openProjectForm(existing = null) {
     existingBoundary = existing.boundaryGeoJson;
   }
 
+  // ── 調查模組組合（軸 A/B）— 只在新建時出現 ───────────────────────
+  // 選計畫類型自動帶套餐預設（defaultModulesForType），Admin 可勾選微調；
+  // 提交時 merge 進 methodology.modules + surveyMethod/monitoring（見 module-registry.js）。
+  let surveyState = defaultModulesForType('');   // 無類型 → 全開（向後相容預設）
+  const moduleBox = el('div', { class: 'field', style: 'background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;padding:10px' });
+  function renderModuleBox() {
+    moduleBox.innerHTML = '';
+    moduleBox.appendChild(el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:2px' }, '調查模組組合'));
+    moduleBox.appendChild(el('p', { style: 'font-size:11px;color:#6d28d9;margin:0 0 8px' },
+      '選計畫類型自動帶預設，可勾選微調。系統核心（樣區/儀表板/地圖/設定）一律開啟。'));
+    ['plot', 'qaqc', 'admin'].forEach(fam => {
+      const mods = MODULES.filter(m => m.family === fam);
+      if (!mods.length) return;
+      moduleBox.appendChild(el('div', { style: 'font-size:12px;color:#57534e;margin:6px 0 2px' }, FAMILIES[fam]));
+      mods.forEach(m => {
+        const cb = el('input', { type: 'checkbox',
+          style: 'vertical-align:middle;margin-right:6px;width:15px;height:15px',
+          ...(surveyState.modules[m.id] ? { checked: 'true' } : {}) });
+        cb.addEventListener('change', () => { surveyState.modules[m.id] = cb.checked; });
+        moduleBox.appendChild(el('label', { style: 'display:block;font-size:13px;line-height:1.7;cursor:pointer' },
+          cb, m.label, m.implemented === false ? el('span', { style: 'color:#a8a29e' }, '（預留，未實作）') : null));
+      });
+    });
+    const radioRow = (name, current, opts, onPick) => el('div', { style: 'margin-top:4px' },
+      ...opts.map(o => {
+        const r = el('input', { type: 'radio', name, value: o.v,
+          style: 'vertical-align:middle;margin-right:4px;width:14px;height:14px',
+          ...(current === o.v ? { checked: 'true' } : {}) });
+        r.addEventListener('change', () => { if (r.checked) onPick(o.v); });
+        return el('label', { style: 'display:inline-block;font-size:13px;margin-right:14px;cursor:pointer' }, r, o.label);
+      }));
+    moduleBox.appendChild(el('div', { style: 'font-size:12px;color:#57534e;margin:8px 0 2px' }, '調查方法'));
+    moduleBox.appendChild(radioRow('surveyMethod', surveyState.surveyMethod,
+      [{ v: 'sampling', label: '山區取樣' }, { v: 'census', label: '都市林/平地全區每木' }],
+      v => { surveyState.surveyMethod = v; }));
+    moduleBox.appendChild(el('div', { style: 'font-size:12px;color:#57534e;margin:8px 0 2px' }, '監測模式'));
+    moduleBox.appendChild(radioRow('monitoring', surveyState.monitoring,
+      [{ v: 'single', label: '單次調查' }, { v: 'repeat', label: '重複監測（複查）' }],
+      v => { surveyState.monitoring = v; }));
+  }
+  renderModuleBox();
+  typeSel.addEventListener('change', () => { surveyState = defaultModulesForType(typeSel.value || ''); renderModuleBox(); });
+
   const f = el('form', { class: 'space-y-2' },
     isEdit
       ? el('div', { class: 'field' },
@@ -755,6 +800,7 @@ export function openProjectForm(existing = null) {
     isEdit
       ? null
       : el('p', { class: 'text-xs text-stone-500' }, '⚠️ 每個 PI 必須先用該 email 登入過一次本系統。建好專案後，PI 可在「設計」分頁設定方法學、在「設定」分頁邀請更多成員。'),
+    isEdit ? null : moduleBox,
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
       el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: closeModal }, '取消')
@@ -843,7 +889,13 @@ export function openProjectForm(existing = null) {
       pis: piUids,
       members,
       memberUids: piUids,
-      methodology: { ...DEFAULT_METHODOLOGY },
+      // 模組組合（軸 A/B）：merge 既有預設 modules（保 plot/disturbance 等 registry 未列 key）+ 本次勾選 + 軸 B
+      methodology: {
+        ...DEFAULT_METHODOLOGY,
+        modules: { ...DEFAULT_METHODOLOGY.modules, ...surveyState.modules },
+        surveyMethod: surveyState.surveyMethod,
+        monitoring: surveyState.monitoring,
+      },
       // v2.7.17：reviewer QAQC 預設 config（reviewer 進審查時可改）
       qaqcConfig: { ...DEFAULT_QAQC_CONFIG },
       locked: false,
@@ -1085,6 +1137,29 @@ export function openMethodologyForm(project) {
       el('p', { style: 'font-size:11px;color:#78716c;margin-top:6px' },
         '🌳 採收紀錄綁立木個體；treeStatusAfter=砍除根除 自動同步 tree.vitality。鮮重→乾重→自動算 tCO₂e 扣減。')
     ),
+    // 進階模組（頂層分頁 design/qaqc/export/admin_harvest + soil）+ 軸 B 調查方式
+    el('div', { class: 'field', style: 'background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;padding:10px' },
+      el('div', { style: 'font-weight:600;font-size:14px;margin-bottom:6px' }, '進階模組與調查方式'),
+      ...[
+        { k: 'qaqc', label: '取樣審查（QAQC）' },
+        { k: 'export', label: '匯出' },
+        { k: 'admin_harvest', label: '修枝採收行政（申請/審核/回報/彙整）' },
+        { k: 'soil', label: '土壤調查（預留，未實作）' },
+      ].map(({ k, label }) => el('label', { style: 'display:block;font-size:13px;line-height:1.7;cursor:pointer' },
+        el('input', { type: 'checkbox', name: `mod_${k}`, style: 'vertical-align:middle;margin-right:6px;width:15px;height:15px',
+          ...((m.modules?.[k] !== undefined ? m.modules[k] === true : getModule(k).default !== false) ? { checked: 'true' } : {}) }),
+        label)),
+      el('div', { style: 'font-size:12px;color:#57534e;margin:8px 0 2px' }, '調查方法'),
+      ...[{ v: 'sampling', label: '山區取樣' }, { v: 'census', label: '都市林/平地全區每木' }].map(o =>
+        el('label', { style: 'display:inline-block;font-size:13px;margin-right:14px;cursor:pointer' },
+          el('input', { type: 'radio', name: 'surveyMethod', value: o.v, style: 'vertical-align:middle;margin-right:4px;width:14px;height:14px',
+            ...((m.surveyMethod || 'sampling') === o.v ? { checked: 'true' } : {}) }), o.label)),
+      el('div', { style: 'font-size:12px;color:#57534e;margin:8px 0 2px' }, '監測模式'),
+      ...[{ v: 'single', label: '單次調查' }, { v: 'repeat', label: '重複監測（複查）' }].map(o =>
+        el('label', { style: 'display:inline-block;font-size:13px;margin-right:14px;cursor:pointer' },
+          el('input', { type: 'radio', name: 'monitoring', value: o.v, style: 'vertical-align:middle;margin-right:4px;width:14px;height:14px',
+            ...((m.monitoring || 'single') === o.v ? { checked: 'true' } : {}) }), o.label))
+    ),
     field({ label: '方法學說明', name: 'description', type: 'textarea', rows: 5, value: m.description || '' }),
     el('div', { class: 'flex gap-2 pt-2' },
       el('button', { type: 'submit', class: 'flex-1 bg-forest-700 text-white py-2 rounded' }, '儲存'),
@@ -1106,6 +1181,7 @@ export function openMethodologyForm(project) {
         pestSymptoms: fd.get('req_pestSymptoms') === 'on'
       },
       modules: {
+        ...m.modules,                                   // 保留既有所有 key（含未列入表單的未來欄位）
         plot: fd.get('mod_plot') === 'on',
         tree: fd.get('mod_tree') === 'on',
         regeneration: fd.get('mod_regeneration') === 'on',
@@ -1113,8 +1189,16 @@ export function openMethodologyForm(project) {
         soilCons: fd.get('mod_soilCons') === 'on',      // v2.0
         wildlife: fd.get('mod_wildlife') === 'on',      // v2.1
         harvest: fd.get('mod_harvest') === 'on',        // v2.2
-        disturbance: m.modules?.disturbance || false
+        disturbance: m.modules?.disturbance || false,
+        // 軸 A 擴充：頂層分頁模組 + soil（與新專案表單同一組 key）
+        qaqc: fd.get('mod_qaqc') === 'on',
+        export: fd.get('mod_export') === 'on',
+        admin_harvest: fd.get('mod_admin_harvest') === 'on',
+        soil: fd.get('mod_soil') === 'on',
       },
+      // 軸 B：調查方法 / 監測模式
+      surveyMethod: fd.get('surveyMethod') || 'sampling',
+      monitoring: fd.get('monitoring') || 'single',
       // v2.0：新模組獨立 config
       understoryConfig: {
         ...DEFAULT_METHODOLOGY.understoryConfig,
@@ -2248,14 +2332,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21144',
+        href: './img/gps-position-guide.svg?v=21145',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21144',
+          src: './img/gps-position-guide.svg?v=21145',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'

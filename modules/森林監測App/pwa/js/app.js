@@ -15,21 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21144";
-import * as forms from "./forms.js?v=21144";
-import * as analytics from "./analytics.js?v=21144";
-import * as importWizard from "./import-wizard.js?v=21144";
+import { firebaseConfig } from "../firebase-config.js?v=21145";
+import * as forms from "./forms.js?v=21145";
+import * as analytics from "./analytics.js?v=21145";
+import * as importWizard from "./import-wizard.js?v=21145";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21144";
-import { renderTreeDistribution } from "./distribution.js?v=21144";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21144";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21144";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21145";
+import { renderTreeDistribution } from "./distribution.js?v=21145";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21145";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21145";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21144";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21144";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21145";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21145";
+// 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21145";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21144";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21145";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -367,7 +369,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21144');
+    const m = await import('./migration-v2715.js?v=21145');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -389,7 +391,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21144');
+    const m = await import('./migration-v2715.js?v=21145');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -515,6 +517,18 @@ export function applyRoleVisibility(root = document) {
     if (allowed.includes(rPiEdit)) show = true;
     if (show) node.classList.remove('hidden');
     else node.classList.add('hidden');
+  });
+  applyModuleVisibility(root);
+}
+
+// 模組 gating（軸 A）：在角色判斷之上「再收一刀」——只隱藏（不還原），
+// 角色已決定基礎可見性，本函式把「本專案未啟用」的模組元素一律藏起。
+// 缺 methodology.modules → moduleEnabled 預設全開，既有專案不受影響。
+export function applyModuleVisibility(root = document) {
+  $$('[data-module]', root).forEach(node => {
+    const ids = node.dataset.module.split(',').map(s => s.trim());
+    const ok = ids.some(id => moduleEnabled(state.project, id));
+    if (!ok) node.classList.add('hidden');
   });
 }
 
@@ -2705,16 +2719,12 @@ async function renderPlotDetail(root, projectId, plotId) {
     gpsWarning.appendChild(warning);
   }
 
-  // v2.0/v2.1/v2.2：依 methodology 顯示新 subtabs
-  const mods = state.project.methodology?.modules || {};
-  const understoryTab = $('[data-subtab="understory"]');
-  const soilConsTab = $('[data-subtab="soilcons"]');
-  const wildlifeTab = $('[data-subtab="wildlife"]');     // v2.1
-  const harvestTab = $('[data-subtab="harvest"]');       // v2.2
-  if (understoryTab) understoryTab.classList.toggle('hidden', !mods.understory);
-  if (soilConsTab) soilConsTab.classList.toggle('hidden', !mods.soilCons);
-  if (wildlifeTab) wildlifeTab.classList.toggle('hidden', !mods.wildlife);
-  if (harvestTab) harvestTab.classList.toggle('hidden', !mods.harvest);
+  // 樣區子調查模組 gating（軸 A，單一真相來源 = methodology.modules，見 module-registry.js）
+  // 取代 v2.0/v2.1/v2.2 各自 hardcode；涵蓋全部含 subtab 的模組（含 tree/regeneration）。
+  MODULES.filter(m => m.subtab).forEach(m => {
+    const link = $(`[data-subtab="${m.subtab}"]`);
+    if (link) link.classList.toggle('hidden', !subtabEnabled(state.project, m.subtab));
+  });
 
   const btnNewUnderstory = $('#btn-new-understory');
   const btnNewSoilCons = $('#btn-new-soilcons');
