@@ -1,5 +1,5 @@
 // v2.8.0：irregular plot 多邊形繪製 + 點對多邊形判斷
-import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=21146';
+import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=21147';
 
 // ===== distribution.js — 立木分布散布圖（v2.6.2 / v2.5.1 backlog 🅲 落地）=====
 //
@@ -62,7 +62,15 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
     return;
   }
 
-  const withXY = trees.filter(t => Number.isFinite(t.localX_m) && Number.isFinite(t.localY_m));
+  // 防呆：排除座標明顯異常的立木（學生誤填 TWD97 絕對座標等）— 否則 span 暴衝、scatter 縮放爆掉卡死。
+  // 容許略超出樣區邊界，但擋住 ~百公尺以上的離譜值；被排除者併入「未設位置」清單。
+  const _sane = (() => {
+    const md = Math.max(plot?.plotDimensions?.width || 0, plot?.plotDimensions?.length || 0,
+      plot?.plotDimensions?.side || 0, Number.isFinite(plot?.area_m2) ? Math.sqrt(plot.area_m2) : 0, 50);
+    return md * 4 + 100;
+  })();
+  const withXY = trees.filter(t => Number.isFinite(t.localX_m) && Number.isFinite(t.localY_m)
+    && Math.abs(t.localX_m) <= _sane && Math.abs(t.localY_m) <= _sane);
   const noXY = trees.length - withXY.length;
   const noXYPct = trees.length > 0 ? ((noXY / trees.length) * 100).toFixed(0) : 0;
 

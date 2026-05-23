@@ -62,12 +62,19 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.47：座標防呆 — 修「立木 X/Y 誤填 TWD97 絕對座標 → 散布圖 span 暴衝、整頁卡死」。
+//   根因：學生在 offset（皮尺）模式把絕對座標（如 200282）填進「樣區內 X/Y 偏移」欄，
+//   表單無範圍檢查 → 產生距樣區數十萬公尺的點。雙層防呆：(A) 立木表單 offset 模式 X/Y 超出
+//   「樣區邊長×4+100 m」即擋下並提示「請勿填 TWD97 絕對座標」；(B) 散布圖排除座標離譜的立木、
+//   併入「未設位置」清單，既有壞資料也不會再讓畫面爆掉。（事故樣區那筆壞資料已手動清空座標。）
+//   ?v=21146 -> ?v=21147 全檔。
 // v2.11.46：🚨 HOTFIX — 修 v2.11.45 樣區詳情頁卡死。重構子分頁 gating 時誤刪了
 //   renderPlotDetail 內的 `const mods = methodology.modules`，但下方 understory/soilCons/
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.46';  // v2.11.46：HOTFIX 樣區詳情卡死；以下歷史
+const CACHE = 'forest-monitor-v2.11.47';  // v2.11.47：立木座標防呆；以下歷史
+// v2.11.46（歷史）：HOTFIX 修 v2.11.45 樣區詳情卡死（誤刪 mods 宣告 ReferenceError）。
 // v2.11.45（歷史）：每專案模組可組合系統 — 依計畫類型/調查需求開關分頁與子調查；新增 module-registry.js。
 // v2.11.32（歷史）：路 J-4 + J-5 合 ship — (J-4) SHELL 補回所有 19 支 JS 預快取（與 index.html / app.js import 一致 ?v=21132，解決 v2.10.2 雙實例雷）。動機：新裝置 / 新成員直接帶到山上訓練（駐地無 wifi）情境，原本 SHELL 只快取 HTML/CSS → JS 沒 cache → 離線開 app 黑屏；現在 install event 一次 addAll 全 JS、保證離線可開。(J-5) 設定頁加「🚀 完整出工檢查」按鈕 + 5 項本機檢查（不需網路）：(1) 登入狀態 + token 剩餘分鐘、(2) Service Worker 已啟動、(3) App cache 完整（JS+HTML+CSS）、(4) Firestore 離線持久化試讀 user doc confirm、(5) 已開啟專案（plots/trees 透過 onSnapshot 預載 cache）。結果 inline 顯示 ✅綠/⚠️黃/❌紅、summary 一句話結論（5 項全綠可放心出工 / 紅項先連網處理 / 黃項可出工但建議）。順手修 species-dict.js / code-tables.js 在 forms.js / species-picker.js 用 ?v=2000 vs import-wizard 用 ?v=21131 ESM 雙 module 不一致（3 處）。SW cache v2.11.31 -> v2.11.32，?v=21131 -> ?v=21132 全 14 檔（48 處）+ ?v=2000 -> ?v=21132（3 處）。路 J 全 5 項 ship 完成。
 // v2.11.31：路 J-1 立木 GPS 模式手動 fallback — 野外山區 GPS 完全無訊號（3-6 hr 離線常見情境）時兩條 escape：(1) 手動輸入 lat/lng（gpsBlock 內加 <details>「✏️ 無 GPS 訊號？手動輸入座標」、套用按鈕驗證 Taiwan 範圍 21-26°N/119-123°E、超範圍黃警仍套、套用後 ✋ 標記、treeGpsManualEntry flag）；(2) 退回皮尺 X/Y 模式（plotPosMode='gps' 才顯示「📐 退回皮尺 X/Y 模式（GPS 完全無訊號緊急用）」amber details、按鈕切換 currentPosSource='offset' + 顯示 offsetBlock + 隱藏 gpsBlock；offsetBlock 對應加「📍 切換回 GPS 量測模式」emerald details 反向切回）。submit 時 manuallyAdjusted=treeGpsManualEntry（gps 模式）/false（offset），覆寫舊邏輯。applyPosVisibility 改成 gps 模式也尊重 currentPosSource（之前 hardcoded 隱藏 offsetBlock）。GPS 失敗自動展開手動輸入 details。編輯既有 manually-adjusted 樹預設 treeGpsManualEntry=true 保留標記；GPS 重抓成功 reset false。SW cache v2.11.30 -> v2.11.31，?v=21130 -> ?v=21132 全 14 檔。
@@ -104,7 +111,7 @@ const CACHE = 'forest-monitor-v2.11.46';  // v2.11.46：HOTFIX 樣區詳情卡�
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21146';
+const JS_VERSION = '21147';
 const SHELL = [
   './',
   './index.html',
