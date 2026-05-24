@@ -62,6 +62,9 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.49：樣區編輯表單「立木定位模式」三選項 RWD 修 — 舊版 whitespace-nowrap 在手機窄畫面
+//   把標籤撐出黃框右側、看似置中/溢出。改 flex items-start + radio flex-shrink-0 + 標籤 min-w-0
+//   可換行：radio 與標籤靠左貼齊、內容在窄畫面換行不溢出黃框。?v=21148 -> ?v=21149 全檔。
 // v2.11.48：樣區清單卡片重複/閃爍修 — plot-list onSnapshot handler 是 async（await 子集合
 //   verified 統計），Firestore cache→server 兩次 fire 都「先清空、各自 await 後再 append」→
 //   樣區卡片重複（001/002 各兩張）、有時又消失。加 generation guard：只有最新一次 fire 在 await
@@ -78,7 +81,8 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.48';  // v2.11.48：樣區清單重複卡片修；以下歷史
+const CACHE = 'forest-monitor-v2.11.49';  // v2.11.49：定位模式三選項 RWD 修；以下歷史
+// v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
 // v2.11.46（歷史）：HOTFIX 修 v2.11.45 樣區詳情卡死（誤刪 mods 宣告 ReferenceError）。
 // v2.11.45（歷史）：每專案模組可組合系統 — 依計畫類型/調查需求開關分頁與子調查；新增 module-registry.js。
@@ -117,7 +121,7 @@ const CACHE = 'forest-monitor-v2.11.48';  // v2.11.48：樣區清單重複卡片
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21148';
+const JS_VERSION = '21149';
 const SHELL = [
   './',
   './index.html',
