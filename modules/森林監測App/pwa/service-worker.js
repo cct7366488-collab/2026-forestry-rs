@@ -62,6 +62,11 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.48：樣區清單卡片重複/閃爍修 — plot-list onSnapshot handler 是 async（await 子集合
+//   verified 統計），Firestore cache→server 兩次 fire 都「先清空、各自 await 後再 append」→
+//   樣區卡片重複（001/002 各兩張）、有時又消失。加 generation guard：只有最新一次 fire 在 await
+//   後才清空+render，較舊 fire 放棄。（全開型專案啟用模組多、await 久，race window 更大更易觸發。）
+//   ?v=21147 -> ?v=21148 全檔。
 // v2.11.47：座標防呆 — 修「立木 X/Y 誤填 TWD97 絕對座標 → 散布圖 span 暴衝、整頁卡死」。
 //   根因：學生在 offset（皮尺）模式把絕對座標（如 200282）填進「樣區內 X/Y 偏移」欄，
 //   表單無範圍檢查 → 產生距樣區數十萬公尺的點。雙層防呆：(A) 立木表單 offset 模式 X/Y 超出
@@ -73,7 +78,8 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.47';  // v2.11.47：立木座標防呆；以下歷史
+const CACHE = 'forest-monitor-v2.11.48';  // v2.11.48：樣區清單重複卡片修；以下歷史
+// v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
 // v2.11.46（歷史）：HOTFIX 修 v2.11.45 樣區詳情卡死（誤刪 mods 宣告 ReferenceError）。
 // v2.11.45（歷史）：每專案模組可組合系統 — 依計畫類型/調查需求開關分頁與子調查；新增 module-registry.js。
 // v2.11.32（歷史）：路 J-4 + J-5 合 ship — (J-4) SHELL 補回所有 19 支 JS 預快取（與 index.html / app.js import 一致 ?v=21132，解決 v2.10.2 雙實例雷）。動機：新裝置 / 新成員直接帶到山上訓練（駐地無 wifi）情境，原本 SHELL 只快取 HTML/CSS → JS 沒 cache → 離線開 app 黑屏；現在 install event 一次 addAll 全 JS、保證離線可開。(J-5) 設定頁加「🚀 完整出工檢查」按鈕 + 5 項本機檢查（不需網路）：(1) 登入狀態 + token 剩餘分鐘、(2) Service Worker 已啟動、(3) App cache 完整（JS+HTML+CSS）、(4) Firestore 離線持久化試讀 user doc confirm、(5) 已開啟專案（plots/trees 透過 onSnapshot 預載 cache）。結果 inline 顯示 ✅綠/⚠️黃/❌紅、summary 一句話結論（5 項全綠可放心出工 / 紅項先連網處理 / 黃項可出工但建議）。順手修 species-dict.js / code-tables.js 在 forms.js / species-picker.js 用 ?v=2000 vs import-wizard 用 ?v=21131 ESM 雙 module 不一致（3 處）。SW cache v2.11.31 -> v2.11.32，?v=21131 -> ?v=21132 全 14 檔（48 處）+ ?v=2000 -> ?v=21132（3 處）。路 J 全 5 項 ship 完成。
@@ -111,7 +117,7 @@ const CACHE = 'forest-monitor-v2.11.47';  // v2.11.47：立木座標防呆；以
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21147';
+const JS_VERSION = '21148';
 const SHELL = [
   './',
   './index.html',
