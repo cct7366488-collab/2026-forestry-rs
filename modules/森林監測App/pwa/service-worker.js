@@ -62,6 +62,10 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.51：Admin 可編輯 PI 專案的方法學/調查模組 — 設計分頁「編輯方法學」「批量建立空殼樣區」
+//   工作流提示原本只開 PI（data-role-show="pi"），Admin（總管理者）看不到、無法回頭修正開案時設錯的
+//   調查模組。改 data-role-show="pi,admin"。rules 早已允許 isSystemAdmin 更新專案 methodology（line 93），
+//   點擊 handler 與 openMethodologyForm 也無內部角色限制 → 純 UI gating 放行即可。?v=21150 -> ?v=21151 全檔。
 // v2.11.50：立木定位模式三選項 RWD 真正修好（v2.11.49 改壞了，本版修正）。根因＝全域
 //   .field input{width:100%;padding;border}（style.css）也套到黃框內的 radio → radio 撐滿整列、
 //   圓圈置中、CJK 標籤被 min-w-0 擠成逐字直書。修：radio 改 inline style width:auto/flex:0 0 auto/
@@ -85,7 +89,8 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.50';  // v2.11.50：定位模式 RWD 真正修好；以下歷史
+const CACHE = 'forest-monitor-v2.11.51';  // v2.11.51：Admin 可編輯 PI 專案方法學/模組；以下歷史
+// v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
 // v2.11.46（歷史）：HOTFIX 修 v2.11.45 樣區詳情卡死（誤刪 mods 宣告 ReferenceError）。
@@ -125,7 +130,7 @@ const CACHE = 'forest-monitor-v2.11.50';  // v2.11.50：定位模式 RWD 真正�
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21150';
+const JS_VERSION = '21151';
 const SHELL = [
   './',
   './index.html',
