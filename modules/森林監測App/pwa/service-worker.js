@@ -62,6 +62,17 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.55：修枝申請三層 dropdown — 林農選作業位置 → 自動帶出地籍（5/20 後 user 一直惦記的需求）
+//   (A) parseProjectBoundaryGeoJson 升級為 FeatureCollection 輸出，保留 per-feature properties
+//       — 原輸出 Polygon/MultiPolygon 砍掉所有屬性、dropdown 沒料可用。L.geoJSON 同樣吃 FC，地圖
+//       render 無需改；舊版上傳的純 geometry 仍可顯示，只是 dropdown 沒 metadata → fallback 手填。
+//   (B) harvest-permits.js 新增 normalizeWorkUnit() — 橫流溪/烏石坑 schema 差異統一：
+//       承租人(橫)/name(烏)、樹種/契約樹種、面積/契約面積/area1、作業區(14_1_1)/標示(117-260-01)、
+//       林班、假地號、工作站/事業區、契約書 → 統一 { zone, lessee, unitId, species, area_ha, ... }。
+//   (C) buildWorkUnitPicker() 三層連動下拉（專區→承租人→作業單元）；選完自動帶入 landParcel + 面積，
+//       並把結構化 meta 寫進 harvestPermit.landParcelMeta 給彙整/許可單溯源用。
+//   (D) 申請卡片補「✓ 系統識別：橫流溪/鄭清標/14_1_1/土肉桂/0.0849 ha」摘要行，林農目視確認沒選錯。
+//   ?v=21154 -> ?v=21155 全檔。
 // v2.11.54：開案表單邊界 + 預設邊界一鍵 — admin 開新案時一站完成邊界準備（不用兩步入場）
 //   (A) buildBoundarySection 在新建模式也顯示（先前只給編輯模式）；submit 採 addDoc→updateDoc 兩步
 //       原子化（addDoc 失敗整個取消；boundary updateDoc 失敗不擋專案建立、僅 toast 警告）。
@@ -107,7 +118,7 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.54';  // v2.11.54：開案表單邊界 + 預設邊界一鍵；以下歷史
+const CACHE = 'forest-monitor-v2.11.55';  // v2.11.55：修枝申請三層 dropdown + properties 保留；以下歷史
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
@@ -148,7 +159,7 @@ const CACHE = 'forest-monitor-v2.11.54';  // v2.11.54：開案表單邊界 + 預
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21154';
+const JS_VERSION = '21155';
 const SHELL = [
   './',
   './index.html',

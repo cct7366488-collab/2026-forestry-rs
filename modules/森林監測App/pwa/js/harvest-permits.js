@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21154';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21155';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -101,6 +101,12 @@ function permitCard(project, p, reviewMode) {
     el('div', { class: 'text-xs text-stone-500' },
       `修枝方式：${p.harvestMethod || '—'}　修枝期間：${p.periodFrom || '—'} ~ ${p.periodTo || '—'}`)
   ];
+  // v2.11.55：若有 picker 帶出的結構化 meta → 補一行系統識別摘要（讓 user 視覺確認沒選錯）
+  if (p.landParcelMeta && (p.landParcelMeta.zone || p.landParcelMeta.lessee)) {
+    const m = p.landParcelMeta;
+    const parts = [m.zone, m.lessee, m.unitId, m.species, m.area_ha != null ? `${m.area_ha} ha` : null].filter(Boolean);
+    rows.push(el('div', { class: 'text-xs text-blue-700' }, '✓ 系統識別：' + parts.join(' / ')));
+  }
   if (hasPermitDoc) {
     rows.push(el('div', { class: 'text-xs text-emerald-700 mt-1' },
       `核准量 ${fmtNum(p.approvedAmount_kg)} kg　效期 ${p.validFrom || '—'} ~ ${p.validUntil || '—'}`));
@@ -166,6 +172,197 @@ function permitCard(project, p, reviewMode) {
   }
   rows.push(actions);
   return el('div', { class: 'bg-white rounded-lg shadow p-4 mb-3' }, ...rows);
+}
+
+// ===== v2.11.55：作業單元 picker（專區 → 承租人 → 作業單元 三層 dropdown，自動帶入地籍）=====
+//   入：project（讀 boundaryGeoJsonStr，需為 v2.11.55+ FeatureCollection 格式才能用）
+//       existingMeta（編輯時帶入既有選擇），onPick(meta) 選完通知 caller
+//   出：DOM 節點。若 boundary 缺或舊格式 → 回傳 hint 區塊（請手填）
+//
+//   schema 兼容（橫流溪 vs 烏石坑）：
+//     - 承租人：props.承租人 (橫流溪) / props.name (烏石坑)
+//     - 作業單元ID：props.作業區「14_1_1」/ props.標示「117-260-01」
+//     - 樹種：props.樹種 / props.契約樹種
+//     - 面積：props.面積 / props.契約面積 / props.area1
+//     - 林班：props.林班 (烏石坑) / null (橫流溪)
+//     - 假地號：props.假地號（皆有）
+//     - 工作站：props.工作站 (橫流溪) / props.事業區 (烏石坑)
+//     - 契約書號：props.契約書 (橫流溪)
+function normalizeWorkUnit(props) {
+  if (!props) return null;
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+  const zone = props.專區 ?? null;
+  const lessee = props.承租人 ?? props.name ?? null;
+  const unitId = props.作業區 ?? props.標示 ?? null;
+  const species = props.樹種 ?? props.契約樹種 ?? null;
+  const area = num(props.面積 ?? props.契約面積 ?? props.area1);
+  const station = props.工作站 ?? props.事業區 ?? null;
+  const contract = props.契約書 ?? null;
+  const lin = props.林班 ?? null;
+  const dihao = props.假地號 ?? null;
+  // 組合「林班 X，假地號 Y」字串塞回手填欄位（保留 unit ID 為 fallback）
+  const parts = [];
+  if (lin) parts.push(`林班 ${lin}`);
+  if (dihao != null && dihao !== '') parts.push(`假地號 ${dihao}`);
+  const landParcelText = parts.length ? parts.join('，') : (unitId || '');
+  return { zone, lessee, unitId, species, area_ha: area, station, contract, landParcelText };
+}
+
+function getProjectWorkUnits(project) {
+  // 回傳 [{ wu: normalized, raw: properties }, ...]；缺/舊格式回 []
+  if (!project?.boundaryGeoJsonStr) return [];
+  let geo;
+  try { geo = JSON.parse(project.boundaryGeoJsonStr); }
+  catch { return []; }
+  if (geo?.type !== 'FeatureCollection' || !Array.isArray(geo.features)) return [];
+  const out = [];
+  for (const f of geo.features) {
+    const wu = normalizeWorkUnit(f.properties);
+    if (!wu) continue;
+    if (!wu.zone && !wu.lessee && !wu.unitId) continue;   // 完全沒可辨識欄位 → 跳過
+    out.push({ wu, raw: f.properties });
+  }
+  return out;
+}
+
+function buildWorkUnitPicker(project, existingMeta, onPick) {
+  const units = getProjectWorkUnits(project);
+  const wrap = el('div', { class: 'bg-blue-50 border border-blue-200 rounded p-2.5 space-y-2' });
+  wrap.appendChild(el('div', { class: 'text-sm font-medium text-blue-900' }, '📍 作業位置（從專案邊界帶入）'));
+
+  if (units.length === 0) {
+    wrap.appendChild(el('div', { class: 'text-xs text-stone-600' },
+      '（本專案邊界未含作業單元資訊，或尚未上傳邊界 — 請手填下方林班 / 地號欄位）'));
+    return wrap;
+  }
+
+  // 索引：zone → set(lessee)；zone+lessee → [unit]
+  const zones = [...new Set(units.map(u => u.wu.zone).filter(Boolean))].sort();
+  function lesseesOf(zone) {
+    return [...new Set(units.filter(u => u.wu.zone === zone).map(u => u.wu.lessee).filter(Boolean))].sort();
+  }
+  function unitsOf(zone, lessee) {
+    return units.filter(u => u.wu.zone === zone && u.wu.lessee === lessee);
+  }
+
+  const zoneSel = el('select', { class: 'w-full border rounded px-2 py-1 text-sm bg-white' },
+    el('option', { value: '' }, '— 選專區 —'),
+    ...zones.map(z => el('option', { value: z }, z)));
+  const lesseeSel = el('select', { class: 'w-full border rounded px-2 py-1 text-sm bg-white', disabled: 'true' },
+    el('option', { value: '' }, '— 先選專區 —'));
+  const unitSel = el('select', { class: 'w-full border rounded px-2 py-1 text-sm bg-white', disabled: 'true' },
+    el('option', { value: '' }, '— 先選承租人 —'));
+
+  const summary = el('div', { class: 'text-xs text-stone-700 mt-1 leading-relaxed' });
+
+  function refreshLessees() {
+    const z = zoneSel.value;
+    lesseeSel.innerHTML = '';
+    if (!z) {
+      lesseeSel.appendChild(el('option', { value: '' }, '— 先選專區 —'));
+      lesseeSel.disabled = true;
+      unitSel.innerHTML = '';
+      unitSel.appendChild(el('option', { value: '' }, '— 先選承租人 —'));
+      unitSel.disabled = true;
+      summary.innerHTML = '';
+      onPick(null);
+      return;
+    }
+    const ls = lesseesOf(z);
+    lesseeSel.appendChild(el('option', { value: '' }, `— 選承租人（${ls.length} 位）—`));
+    ls.forEach(l => lesseeSel.appendChild(el('option', { value: l }, l)));
+    lesseeSel.disabled = false;
+    unitSel.innerHTML = '';
+    unitSel.appendChild(el('option', { value: '' }, '— 先選承租人 —'));
+    unitSel.disabled = true;
+    summary.innerHTML = '';
+    onPick(null);
+  }
+  function refreshUnits() {
+    const z = zoneSel.value, l = lesseeSel.value;
+    unitSel.innerHTML = '';
+    if (!z || !l) {
+      unitSel.appendChild(el('option', { value: '' }, '— 先選承租人 —'));
+      unitSel.disabled = true;
+      summary.innerHTML = '';
+      onPick(null);
+      return;
+    }
+    const us = unitsOf(z, l);
+    unitSel.appendChild(el('option', { value: '' }, `— 選作業單元（${us.length} 個）—`));
+    us.forEach((u, i) => {
+      const wu = u.wu;
+      const label = [
+        wu.unitId || `#${i + 1}`,
+        wu.area_ha != null ? `${wu.area_ha} ha` : null,
+        wu.species,
+      ].filter(Boolean).join(' / ');
+      unitSel.appendChild(el('option', { value: String(i) }, label));
+    });
+    unitSel.disabled = false;
+    summary.innerHTML = '';
+    onPick(null);
+  }
+  function refreshSummary() {
+    const z = zoneSel.value, l = lesseeSel.value;
+    const idx = unitSel.value;
+    if (!z || !l || idx === '') { summary.innerHTML = ''; onPick(null); return; }
+    const us = unitsOf(z, l);
+    const u = us[Number(idx)];
+    if (!u) { summary.innerHTML = ''; onPick(null); return; }
+    const wu = u.wu;
+    const rows = [
+      ['專區', wu.zone],
+      ['承租人', wu.lessee],
+      ['作業單元', wu.unitId],
+      ['契約樹種', wu.species],
+      ['契約面積', wu.area_ha != null ? `${wu.area_ha} ha` : null],
+      ['工作站／事業區', wu.station],
+      ['契約書', wu.contract],
+    ].filter(r => r[1] != null && r[1] !== '');
+    summary.innerHTML = '';
+    summary.appendChild(el('div', { class: 'font-medium text-emerald-700 mb-0.5' }, '✓ 已帶入下方林班/地號欄位（如需細調可手動編輯）：'));
+    const table = el('table', { class: 'w-full text-xs' });
+    rows.forEach(([k, v]) => {
+      table.appendChild(el('tr', {},
+        el('td', { class: 'text-stone-500 pr-2 align-top whitespace-nowrap py-0.5' }, k + '：'),
+        el('td', { class: 'py-0.5 break-all' }, String(v))
+      ));
+    });
+    summary.appendChild(table);
+    onPick(wu);
+  }
+
+  zoneSel.addEventListener('change', refreshLessees);
+  lesseeSel.addEventListener('change', refreshUnits);
+  unitSel.addEventListener('change', refreshSummary);
+
+  wrap.appendChild(el('div', { class: 'grid grid-cols-1 sm:grid-cols-3 gap-2' },
+    el('div', {}, el('label', { class: 'block text-xs text-stone-600 mb-0.5' }, '1. 專區'), zoneSel),
+    el('div', {}, el('label', { class: 'block text-xs text-stone-600 mb-0.5' }, '2. 承租人'), lesseeSel),
+    el('div', {}, el('label', { class: 'block text-xs text-stone-600 mb-0.5' }, '3. 作業單元'), unitSel),
+  ));
+  wrap.appendChild(summary);
+
+  // 編輯既有申請時，若 landParcelMeta 有值 → 預選
+  if (existingMeta?.zone && zones.includes(existingMeta.zone)) {
+    zoneSel.value = existingMeta.zone;
+    refreshLessees();
+    if (existingMeta.lessee && lesseesOf(existingMeta.zone).includes(existingMeta.lessee)) {
+      lesseeSel.value = existingMeta.lessee;
+      refreshUnits();
+      if (existingMeta.unitId) {
+        const us = unitsOf(existingMeta.zone, existingMeta.lessee);
+        const matchIdx = us.findIndex(u => u.wu.unitId === existingMeta.unitId);
+        if (matchIdx >= 0) {
+          unitSel.value = String(matchIdx);
+          refreshSummary();
+        }
+      }
+    }
+  }
+
+  return wrap;
 }
 
 // ===== 共用：表單欄位工廠 =====
@@ -359,11 +556,37 @@ export async function renderHarvestReport(project) {
 export function openHarvestPermitForm(project, existing = null) {
   bindFb();
   const p = existing || {};
+  // v2.11.55：picker 與 landParcel input 雙向聯動 — picker 選完 → 自動填 landParcel + 面積；user 仍可手動 override
+  let pickedMeta = p.landParcelMeta || null;   // 提交時順帶寫進 Firestore，供 dropdown 回顯與報表用
+  const landParcelInput = el('input', {
+    id: 'hp-landParcel', name: 'landParcel', type: 'text',
+    class: 'w-full border rounded px-2 py-1 text-sm', value: p.landParcel || '', required: 'true'
+  });
+  const areaInput = el('input', {
+    id: 'hp-forestArea_ha', name: 'forestArea_ha', type: 'number', step: '0.01', min: 0,
+    class: 'w-full border rounded px-2 py-1 text-sm', value: p.forestArea_ha ?? ''
+  });
+  const picker = buildWorkUnitPicker(project, p.landParcelMeta, (wu) => {
+    pickedMeta = wu;
+    if (wu) {
+      if (wu.landParcelText) landParcelInput.value = wu.landParcelText;
+      if (wu.area_ha != null && !areaInput.value) areaInput.value = String(wu.area_ha);
+    }
+  });
   const f = el('form', { class: 'space-y-2' },
     fld('申請人姓名', 'applicantName', { required: true, value: p.applicantName || (state.userDoc?.displayName ?? '') }),
     fld('聯絡方式（電話／email）', 'contact', { value: p.contact || '' }),
-    fld('林班 / 地號', 'landParcel', { required: true, value: p.landParcel || '' }),
-    fld('申請修枝面積 (ha)', 'forestArea_ha', { type: 'number', step: '0.01', min: 0, value: p.forestArea_ha ?? '' }),
+    picker,
+    el('div', {},
+      el('label', { for: 'hp-landParcel', class: 'block text-sm font-medium mb-0.5' },
+        '林班 / 地號', el('span', { class: 'text-red-600' }, ' *')),
+      landParcelInput,
+      el('div', { class: 'text-xs text-stone-500 mt-0.5' }, '上方選完作業單元會自動帶入；可手動編輯。')
+    ),
+    el('div', {},
+      el('label', { for: 'hp-forestArea_ha', class: 'block text-sm font-medium mb-0.5' }, '申請修枝面積 (ha)'),
+      areaInput
+    ),
     fld('土肉桂修枝株數', 'estTrees', { type: 'number', min: 0, value: p.estTrees ?? '' }),
     fld('修枝方式', 'harvestMethod', { options: HARVEST_METHODS, value: p.harvestMethod || '修枝' }),
     el('div', { class: 'grid grid-cols-2 gap-2' },
@@ -389,6 +612,9 @@ export function openHarvestPermitForm(project, existing = null) {
       applicantName: (fd.get('applicantName') || '').trim(),
       contact: (fd.get('contact') || '').trim(),
       landParcel: (fd.get('landParcel') || '').trim(),
+      // v2.11.55：picker 帶出的結構化 metadata（彙整/報表/許可單可用結構化欄位，不必再 parse 自由字串）
+      //   若 user 沒用 picker 或手填覆蓋了 landParcel → 仍保留 picker 上次選擇的 meta（pickedMeta）給溯源
+      landParcelMeta: pickedMeta || null,
       forestArea_ha: num(fd.get('forestArea_ha')),
       estTrees: num(fd.get('estTrees')),
       harvestMethod: fd.get('harvestMethod'),
