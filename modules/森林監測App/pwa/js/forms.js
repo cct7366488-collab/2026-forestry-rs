@@ -1,33 +1,96 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21151';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21152';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21151';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21152';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21151';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21152';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21151';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21151';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21152';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21152';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21151';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21152';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21151';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21152';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21151';
+import { createSpeciesPicker } from './species-picker.js?v=21152';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21151';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21152';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21151';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21152';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21151';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21152';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
 
 // （v2.0：原本內聯的 ~100 種樹種陣列已移到 species-dict.js TREES，本檔透過上面的 SPECIES = TREES 別名引用）
 const PEST_OPTIONS = ['葉斑', '潰瘍', '蟲孔', '空洞', '菌害', '枯梢', '無'];
+
+// ===== v2.11.52：樣區 GeoJSON 上傳防呆 — 偵測「這檔看起來是專案邊界、不是樣區」 =====
+//   觸發任一即提示（confirm 對話框）：
+//     - FeatureCollection 含 > 1 個 feature
+//     - MultiPolygon 含 > 1 個 polygon
+//     - 總頂點數 > VERTEX_MAX(50)
+//     - bbox 跨度 > 500 m（樣區通常 < 100 m；WGS84 度轉粗略 m 估算）
+//   背景：5/29 user 把整個土肉桂專區作業單元（115 feature/TWD97）GeoJSON 丟到樣區表單，
+//        系統只顯示「頂點數 0」（VERTEX_MAX 擋下後 toast 一行、preview box 不更新）→ user 困惑。
+//        本防呆把問題講白並引導至「編輯專案 → 📐 專案邊界」上傳。
+function looksLikeProjectBoundary(json) {
+  const reasons = [];
+  let polyCount = 0;
+  const allCoords = [];
+
+  const collectRing = (ring) => {
+    if (!Array.isArray(ring)) return;
+    for (const c of ring) {
+      if (Array.isArray(c) && c.length >= 2 && Number.isFinite(Number(c[0])) && Number.isFinite(Number(c[1]))) {
+        allCoords.push([Number(c[0]), Number(c[1])]);
+      }
+    }
+  };
+  const collectGeom = (g) => {
+    if (!g || !g.type) return;
+    if (g.type === 'Polygon') {
+      polyCount += 1;
+      (g.coordinates || []).forEach(collectRing);
+    } else if (g.type === 'MultiPolygon') {
+      polyCount += (g.coordinates || []).length;
+      (g.coordinates || []).forEach(poly => (poly || []).forEach(collectRing));
+    }
+  };
+
+  if (json?.type === 'FeatureCollection') {
+    const feats = json.features || [];
+    if (feats.length > 1) reasons.push(`FeatureCollection 含 ${feats.length} 個 feature（樣區應為單一 Polygon）`);
+    feats.forEach(f => collectGeom(f?.geometry));
+  } else if (json?.type === 'Feature') {
+    collectGeom(json.geometry);
+  } else {
+    collectGeom(json);
+  }
+
+  if (polyCount > 1 && !reasons.length) reasons.push(`含 ${polyCount} 個多邊形（樣區應為單一邊界）`);
+  if (allCoords.length > VERTEX_MAX) reasons.push(`總頂點數 ${allCoords.length}（樣區上限 ${VERTEX_MAX}）`);
+
+  if (allCoords.length >= 2) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [x, y] of allCoords) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    // 座標系粗判：WGS84 度數（|x|<360, |y|<90）vs TWD97 公尺
+    const isWgs84Deg = Math.abs(minX) < 360 && Math.abs(maxY) < 90;
+    const spanXm = isWgs84Deg ? (maxX - minX) * 102000 : (maxX - minX);  // 23°N → 1° lng ≈ 102 km
+    const spanYm = isWgs84Deg ? (maxY - minY) * 111000 : (maxY - minY);  //          1° lat ≈ 111 km
+    const maxSpanM = Math.max(spanXm, spanYm);
+    if (maxSpanM > 500) reasons.push(`邊界跨度約 ${Math.round(maxSpanM)} m（樣區通常 < 100 m）`);
+  }
+
+  return { suspect: reasons.length > 0, reasons, polyCount, vertexCount: allCoords.length };
+}
 
 // ===== v2.3.6：共用 GPS button helper =====
 // plot 表單與 wildlife 表單共用，避免 drift；行為 100% 一致
@@ -2279,6 +2342,24 @@ export async function openPlotForm(project, existing = null) {
     try {
       const text = await file.text();
       const json = JSON.parse(text);
+      // v2.11.52：UX 防呆 — 偵測「這檔看起來是專案邊界、不是樣區」並建議改去專案邊界上傳
+      //   原本只在頂點 > VERTEX_MAX 時 toast 一行，使用者常分不清「樣區」「專案邊界」差異
+      //   ＿觸發條件（任一即提示）：FeatureCollection > 1 feature / MultiPolygon 多 polygon / 頂點 > 50 / bbox 跨度 > 500 m
+      const susp = looksLikeProjectBoundary(json);
+      if (susp.suspect) {
+        const ok = confirm(
+          '⚠️ 這個 GeoJSON 看起來是「專案邊界 / 計畫區 / 林班 / 作業單元」，不像「樣區」：\n\n' +
+          susp.reasons.map(r => '・' + r).join('\n') +
+          '\n\n樣區（plot）= 固定面積的調查樣點（通常 < 50 頂點、< 100 m 邊長）\n' +
+          '專案邊界 = 整個計畫區（支援 MultiPolygon、無頂點上限）\n\n' +
+          '建議：取消這次上傳 → 回主畫面按「編輯專案」→ 在「📐 專案邊界（GeoJSON，選填）」上傳同一檔案\n\n' +
+          '仍要以樣區方式繼續嘗試嗎？（多數情況會被頂點上限擋下）'
+        );
+        if (!ok) {
+          geoFileInput.value = '';
+          return;
+        }
+      }
       // GPS 是否已設？
       const lng = parseFloat(lngInput.value);
       const lat = parseFloat(latInput.value);
@@ -2289,7 +2370,7 @@ export async function openPlotForm(project, existing = null) {
       const center = wgs84ToTwd97(lng, lat);
       const result = parseGeoJsonPolygon(json, center, twd97ToWgs84, wgs84ToTwd97);
       if (result.vertices.length > VERTEX_MAX) {
-        showFormMessages([{ level: 'error', text: `頂點數 ${result.vertices.length} 超過上限 ${VERTEX_MAX}` }]);
+        showFormMessages([{ level: 'error', text: `頂點數 ${result.vertices.length} 超過上限 ${VERTEX_MAX} — 此檔看似專案邊界，請改去「編輯專案 → 📐 專案邊界」上傳` }]);
         return;
       }
       irregularVertices = result.vertices.map(v => ({ x: v.x, y: v.y }));
@@ -2332,14 +2413,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21151',
+        href: './img/gps-position-guide.svg?v=21152',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21151',
+          src: './img/gps-position-guide.svg?v=21152',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'

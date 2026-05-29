@@ -48,6 +48,15 @@ venv/
 # *.las
 # *.laz
 
+# 案件 GIS 原始檔（含承租人姓名/契約書號 PII，按 Cloud.md 規則：資料→Firebase，不上 GitHub）
+data/*.geojson
+data/*.qmd
+data/*.shp
+data/*.dbf
+data/*.shx
+data/*.prj
+data/*.cpg
+
 # 編輯器
 .vscode/
 .idea/
