@@ -62,6 +62,14 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.54：開案表單邊界 + 預設邊界一鍵 — admin 開新案時一站完成邊界準備（不用兩步入場）
+//   (A) buildBoundarySection 在新建模式也顯示（先前只給編輯模式）；submit 採 addDoc→updateDoc 兩步
+//       原子化（addDoc 失敗整個取消；boundary updateDoc 失敗不擋專案建立、僅 toast 警告）。
+//   (B) buildBoundarySection 新增「📥 預設邊界」下拉 + 載入按鈕 — fetch pwa/data/presets/*.geojson
+//       走既有 parse 流程。初版預設集：cinnamon-zones（土肉桂專區橫流溪+烏石坑合併 115 features）。
+//   ⚠ PII 風險已知：預設檔含承租人姓名/契約書號；Hosting 靜態檔有 URL 即可下載。判定屬合作社契約半公開
+//       資料、demo 風險可接受；6/6 後若要嚴格保護 → 改 Firestore boundaryPresets/{id} + rules 鎖 admin。
+//   ?v=21153 -> ?v=21154 全檔。
 // v2.11.53：編輯專案雙入口 — 補 v2.11.22 把唯一入口塞地圖分頁的 UX 缺口（admin 反映找不到）
 //   (A) 所有分頁頂部「← 返回我的專案」旁加 ✏️ 編輯專案 按鈕（pi,admin 可見）
 //   (B) 設定分頁新增「📋 專案資訊與邊界」區塊（含邊界已上傳狀態摘要 + 編輯入口）
@@ -99,7 +107,7 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.53';  // v2.11.53：編輯專案雙入口（頂部 + 設定分頁）；以下歷史
+const CACHE = 'forest-monitor-v2.11.54';  // v2.11.54：開案表單邊界 + 預設邊界一鍵；以下歷史
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
@@ -140,7 +148,7 @@ const CACHE = 'forest-monitor-v2.11.53';  // v2.11.53：編輯專案雙入口（
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21153';
+const JS_VERSION = '21154';
 const SHELL = [
   './',
   './index.html',

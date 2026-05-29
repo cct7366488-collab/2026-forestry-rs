@@ -12,8 +12,8 @@
 //   form.appendChild(picker.root);
 //   picker.input.addEventListener('input', () => { ... picker.getMatched() ... });
 
-import { fb, el } from './app.js?v=21153';
-import { TREES } from './species-dict.js?v=21153';
+import { fb, el } from './app.js?v=21154';
+import { TREES } from './species-dict.js?v=21154';
 
 // ===== Module-level cache =====
 // v2.11.18：getDocs（一次性）→ onSnapshot（即時）— 修正 F1 auto-suggest / admin verify 後新字典條目

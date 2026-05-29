@@ -1,27 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21153';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21154';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21153';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21154';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21153';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21154';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21153';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21153';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21154';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21154';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21153';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21154';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21153';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21154';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21153';
+import { createSpeciesPicker } from './species-picker.js?v=21154';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21153';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21154';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21153';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21154';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21153';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21154';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -635,9 +635,24 @@ export async function deleteProjectCascade(project) {
 
 // ===== 專案表單 =====
 // v1.5：admin 建空殼 + 指派 PI 的 email；自動填 memberUids、預設 methodology
-// ===== v2.11.19：專案邊界 GeoJSON 上傳 section（給 openProjectForm edit 模式用）=====
+// ===== v2.11.19/54：專案邊界 GeoJSON 上傳 section =====
 // 三狀態：未動 / 上傳新檔（draft={geojson, srcSystem, ...}）/ 清除（draft='CLEAR'）
+// v2.11.54：新建模式也顯示（先前只給編輯模式）；加「📥 載入預設邊界」下拉（土肉桂專區一鍵）。
 // onChange(draft) → caller form 暫存到 boundaryDraft，submit 時寫入 Firestore
+//
+// v2.11.54：預設邊界清單（從 pwa/data/presets/ 靜態檔載入，避免 admin 開新案時再去找檔案位置）
+//   ⚠ PII 風險已知：合併檔含承租人姓名與契約書號；放 Hosting 靜態檔意味著有 URL 的人都可下載。
+//   現階段判定：合作社契約屬半公開資料（林業署有開放類似 dataset），demo 風險可接受。
+//   若 6/6 後要轉嚴格路 → 改放 Firestore boundaryPresets/{id} + rules 鎖 admin 才能讀。
+const BOUNDARY_PRESETS = [
+  {
+    id: 'cinnamon-zones',
+    label: '土肉桂專區（橫流溪 + 烏石坑，合作社契約）',
+    file: './data/presets/cinnamon-zones-merged.geojson',
+    description: '115 個作業單元（45 橫流溪 + 70 烏石坑）／ TWD97 TM2 ／ 141.7 KB',
+  },
+];
+
 function buildBoundarySection({ existingBoundary, onChange }) {
   const wrap = el('div', { class: 'border border-stone-200 rounded p-2 space-y-2 bg-stone-50' });
   wrap.appendChild(el('div', { class: 'text-sm font-medium' }, '📐 專案邊界（GeoJSON，選填）'));
@@ -662,6 +677,63 @@ function buildBoundarySection({ existingBoundary, onChange }) {
   }
   wrap.appendChild(statusBox);
 
+  // v2.11.54：抽 helper — file/preset 共用 parse + status + onChange 流程
+  async function processGeojsonText(text, displayName) {
+    if (text.length > 1024 * 1024) {
+      renderStatus(`✗ 檔案過大（${(text.length / 1024 / 1024).toFixed(2)} MB），上限 1 MB（Firestore doc 限制）`, 'text-red-700');
+      onChange(null);
+      return;
+    }
+    renderStatus('⏳ 解析中...', 'text-blue-600');
+    try {
+      const json = JSON.parse(text);
+      const result = parseProjectBoundaryGeoJson(json, twd97ToWgs84);
+      result.fileName = displayName;
+      const sizeKb = (text.length / 1024).toFixed(1);
+      renderStatus(`✓ ${displayName}（${result.srcSystem}, ${result.polygonCount} 多邊形 / ${result.ringCount} 環 / ${result.vertexCount} 頂點 / ${sizeKb} KB）— 儲存後生效`, 'text-green-700');
+      onChange(result);
+    } catch (e) {
+      console.error('[boundary GeoJSON]', e);
+      renderStatus(`✗ 解析失敗：${e.message}`, 'text-red-700');
+      onChange(null);
+    }
+  }
+
+  // v2.11.54：預設邊界一鍵載入（下拉選單 + 載入按鈕）
+  const presetRow = el('div', { class: 'flex items-center gap-2 flex-wrap pt-1' });
+  presetRow.appendChild(el('span', { class: 'text-xs text-stone-500' }, '📥 預設邊界：'));
+  const presetSel = el('select', { class: 'border rounded text-xs px-2 py-1' },
+    el('option', { value: '' }, '— 選一個預設集 —'),
+    ...BOUNDARY_PRESETS.map(p => el('option', { value: p.id, title: p.description }, p.label))
+  );
+  const presetBtn = el('button', {
+    type: 'button',
+    class: 'text-xs px-2 py-1 border border-blue-300 text-blue-700 rounded hover:bg-blue-50 disabled:opacity-50',
+  }, '載入');
+  presetBtn.addEventListener('click', async () => {
+    const id = presetSel.value;
+    if (!id) { toast('請先選擇預設集'); return; }
+    const preset = BOUNDARY_PRESETS.find(p => p.id === id);
+    if (!preset) return;
+    presetBtn.disabled = true;
+    presetBtn.textContent = '⏳ 下載中…';
+    try {
+      const resp = await fetch(preset.file, { cache: 'no-cache' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      await processGeojsonText(text, `${preset.label}`);
+    } catch (e) {
+      renderStatus(`✗ 預設邊界載入失敗：${e.message}`, 'text-red-700');
+      onChange(null);
+    } finally {
+      presetBtn.disabled = false;
+      presetBtn.textContent = '載入';
+    }
+  });
+  presetRow.appendChild(presetSel);
+  presetRow.appendChild(presetBtn);
+  wrap.appendChild(presetRow);
+
   // 檔案輸入
   const fileInput = el('input', {
     type: 'file',
@@ -671,27 +743,10 @@ function buildBoundarySection({ existingBoundary, onChange }) {
   fileInput.addEventListener('change', async () => {
     const f = fileInput.files?.[0];
     if (!f) return;
-    if (f.size > 1024 * 1024) {
-      renderStatus(`✗ 檔案過大（${(f.size / 1024 / 1024).toFixed(2)} MB），上限 1 MB（Firestore doc 限制）`, 'text-red-700');
-      onChange(null);
-      return;
-    }
-    renderStatus('⏳ 解析中...', 'text-blue-600');
-    try {
-      const text = await f.text();
-      const json = JSON.parse(text);
-      const result = parseProjectBoundaryGeoJson(json, twd97ToWgs84);
-      result.fileName = f.name;
-      const sizeKb = (text.length / 1024).toFixed(1);
-      const summary = `✓ ${f.name}（${result.srcSystem}, ${result.polygonCount} 多邊形 / ${result.ringCount} 環 / ${result.vertexCount} 頂點 / ${sizeKb} KB）— 儲存後生效`;
-      renderStatus(summary, 'text-green-700');
-      onChange(result);
-    } catch (e) {
-      console.error('[boundary GeoJSON]', e);
-      renderStatus(`✗ 解析失敗：${e.message}`, 'text-red-700');
-      onChange(null);
-    }
+    const text = await f.text();
+    await processGeojsonText(text, f.name);
   });
+  wrap.appendChild(el('div', { class: 'text-xs text-stone-500' }, '或上傳自己的檔案：'));
   wrap.appendChild(fileInput);
 
   // 清除按鈕（只在已有邊界時顯示）
@@ -849,11 +904,12 @@ export function openProjectForm(existing = null) {
         ),
     field({ label: '專案名稱', name: 'name', required: true, value: existing?.name || '', placeholder: '示範林班' }),
     field({ label: '描述', name: 'description', type: 'textarea', value: existing?.description || '' }),
-    // v2.11.19：專案邊界 GeoJSON 上傳（只在編輯模式；新建時無 doc 不能寫）
-    isEdit ? buildBoundarySection({
+    // v2.11.19：專案邊界 GeoJSON 上傳（初版只給編輯模式）
+    // v2.11.54：開放新建模式也顯示 — admin 開新案時一站完成邊界準備（先 addDoc 拿 docId → 再 updateDoc 寫 boundary，submit handler 內處理）
+    buildBoundarySection({
       existingBoundary,
       onChange: (draft) => { boundaryDraft = draft; },   // null | parsed object | 'CLEAR'
-    }) : null,
+    }),
     // v1.7.0：支援多 PI（comma 或換行分隔多個 email）
     isEdit
       ? null
@@ -977,7 +1033,32 @@ export function openProjectForm(existing = null) {
     };
     try {
       const ref = await fb.addDoc(fb.collection(fb.db, 'projects'), data);
-      toast(`已建立 ${code}（${piUids.length} 位 PI）`);
+      // v2.11.54：新建時若 user 已上傳邊界 → addDoc 後立即 updateDoc 寫 boundary 兩步原子化
+      //   失敗不擋整個建立流程（專案已建好、邊界後續可從「✏️ 編輯專案」補上）
+      if (boundaryDraft && typeof boundaryDraft === 'object') {
+        try {
+          await fb.updateDoc(fb.doc(fb.db, 'projects', ref.id), {
+            boundaryGeoJson: null,
+            boundaryGeoJsonStr: JSON.stringify(boundaryDraft.geojson),
+            boundaryMeta: {
+              srcSystem: boundaryDraft.srcSystem,
+              polygonCount: boundaryDraft.polygonCount,
+              ringCount: boundaryDraft.ringCount,
+              vertexCount: boundaryDraft.vertexCount,
+              bbox: boundaryDraft.bbox,
+              fileName: boundaryDraft.fileName || null,
+            },
+            boundaryUpdatedAt: fb.serverTimestamp(),
+            boundaryUpdatedBy: state.user.uid,
+          });
+          toast(`已建立 ${code}（${piUids.length} 位 PI，含邊界）`);
+        } catch (be) {
+          console.error('[create-then-boundary] updateDoc failed:', be);
+          toast(`已建立 ${code}（邊界寫入失敗：${be.message}，請進編輯重試）`, 6000);
+        }
+      } else {
+        toast(`已建立 ${code}（${piUids.length} 位 PI）`);
+      }
       closeModal();
       location.hash = `#/p/${ref.id}`;
     } catch (e) { toast('建立失敗：' + e.message); }
@@ -2413,14 +2494,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21153',
+        href: './img/gps-position-guide.svg?v=21154',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21153',
+          src: './img/gps-position-guide.svg?v=21154',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
