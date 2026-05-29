@@ -62,7 +62,16 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
-// v2.11.59：修枝申請表單 UX 細修（user 6/3 拍板）
+// v2.11.60：申請函說明段改為正式公文體 4 點（user 5/30 拍板）
+//   原 6 點為「申請人/林地/採取標的/作業期間/系統聲明/查照」逐項條列，與下方表列重複、流水帳。
+//   改 4 點官方公文風格：
+//     (1) 申請目的與理由（撫育管理＋通風透光，採枝葉作後續利用）
+//     (2) 作業原則（不損生長、不影響保育、避免過度修剪、現地維護）
+//     (3) 範圍/數量/期間 → 詳如本函表列資料及所附文件
+//     (4) ForestMRV 線上系統登錄聲明（草稿/送出兩種狀態文案）
+//   表列資料（申請人/聯絡/林班地號/面積/方式/株數/作業期間/備註）保留於下方。
+//   ?v=21159 -> ?v=21160 全檔（許可單無 6 點說明、未動）。
+// v2.11.59：修枝申請表單 UX 細修（user 5/30 拍板）
 //   (A) 土肉桂修枝株數改為「申請面積 × 1800 株/ha」自動計算（合作社契約假設密度），即時連動：
 //       面積變更（picker 帶入 / 手動輸入）→ 株數自動 Math.round(area × 1800) 覆蓋，user 仍可手動覆蓋。
 //       表單 hint「預設＝申請面積 × 1800 株/ha（合作社契約假設密度）；修改面積會即時連動，可手動覆蓋。」
@@ -146,7 +155,7 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.59';  // v2.11.59：株數自動 ×1800 + 起迄日必填；以下歷史
+const CACHE = 'forest-monitor-v2.11.60';  // v2.11.60：申請函說明改公文體 4 點；以下歷史
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
@@ -187,7 +196,7 @@ const CACHE = 'forest-monitor-v2.11.59';  // v2.11.59：株數自動 ×1800 + �
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21159';
+const JS_VERSION = '21160';
 const SHELL = [
   './',
   './index.html',

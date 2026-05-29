@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21159';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21160';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -1194,12 +1194,10 @@ ol{margin:4px 0 4px 0;padding-left:1.8em}ol li{margin:4px 0}
 <div class="subject"><b>主　旨：</b>申請於下列林地進行土肉桂修枝及枝葉採取乙案，請　核准。</div>
 <div><b>說　明：</b></div>
 <ol>
-<li>申請人：${v(permit.applicantName)}（聯絡方式：${v(permit.contact)}）。</li>
-<li>林地坐落及權屬：${v(permit.landParcel)}，面積 ${v(permit.forestArea_ha)} 公頃。</li>
-<li>採取標的：土肉桂修下之枝葉；修枝方式：${v(permit.harvestMethod) || '修枝'}；土肉桂修枝株數 ${v(permit.estTrees)} 株。</li>
-<li>修枝作業期間：自民國 ${rocYmd(permit.periodFrom)} 起至 ${rocYmd(permit.periodTo)} 止。</li>
-<li>本案已於 ForestMRV 線上系統登錄${permit.status === 'submitted' || permit.status === 'under_review' || permit.status === 'approved' || permit.status === 'harvesting' || permit.status === 'completed' ? '並送出' : '（草稿）'}，本函為紙本正式送件文件，內容與線上記錄一致。</li>
-<li>檢附相關文件如附件，請　查照核辦。</li>
+<li>本案係基於土肉桂林木撫育管理及林分通風透光改善之需要，擬辦理適度修枝作業，並採取修枝後之枝葉作為後續利用。</li>
+<li>本次作業將依不損及林木生長、不影響林地保育功能及避免過度修剪之原則辦理，作業過程並將注意現地環境維護及林木後續生長狀況。</li>
+<li>申請作業之範圍、數量、期間及相關內容，詳如本函表列資料及所附文件，敬請惠予審核。</li>
+<li>${permit.status === 'submitted' || permit.status === 'under_review' || permit.status === 'approved' || permit.status === 'harvesting' || permit.status === 'completed' ? '本案已於 ForestMRV 線上系統完成登錄送出，紙本文件內容與線上紀錄相符，併請查照。' : '本案目前於 ForestMRV 線上系統為草稿狀態（尚未送出），紙本文件內容與線上紀錄相符，併請查照。'}</li>
 </ol>
 <table class="tbl">
 <tr><th>申請人</th><td>${v(permit.applicantName)}</td><th>聯絡方式</th><td>${v(permit.contact)}</td></tr>
