@@ -238,13 +238,16 @@ service cloud.firestore {
         }
       }
 
-      // ===== 許可文號流水號計數器（v2.11.34）=====
-      // 法定許可文號不可重號 → 用 Firestore transaction 原子遞增（解 treeCode 非原子同類問題）
-      //   read：專案成員 + admin　write：核准者（分署）/ PI / admin（核准當下交易遞增）
+      // ===== 流水號計數器 =====
+      //   v2.11.34：法定許可文號（核准方產生）— harvest_authority / PI / admin 寫
+      //   v2.11.61：申請發文字號（送出時申請人產生）— 加 canCollect（含 surveyor 林農）寫權，
+      //             供 buildApplicantDocNo 的 transaction 原子遞增使用。
+      //             安全評估：counter 為純流水號 doc，惡意 surveyor 寫亂頂多造成序號漂移，不涉資料外洩或越權；
+      //             counter doc 本身不含 PII，且 read 仍限專案成員。
       match /counters/{counterId} {
         allow read:  if isSignedIn() && canRead(projectId);
         allow write: if isSignedIn() && (
-          isHarvestAuthority(projectId) || isPi(projectId) || isSystemAdmin()
+          canCollect(projectId) || isHarvestAuthority(projectId)
         );
       }
     }

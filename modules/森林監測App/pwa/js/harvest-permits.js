@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21160';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21161';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -68,6 +68,14 @@ async function loadLogs(projectId, permitId) {
 function buildPermitNo(seq) {
   const roc = new Date().getFullYear() - 1911;
   return `林保中-土肉桂修枝-${roc}-${String(seq).padStart(3, '0')}`;
+}
+
+// v2.11.61：林農申請發文字號（送出時 transaction 原子產生）— 大雪山林業合作社（修）字第 XXX 號
+//   專案級流水號，三位零填補。送出 (draft/revision → submitted) 時產生一次、回退/再送不重編。
+//   合作社名目前 hardcode；未來若多合作社共用系統，加 project.applicantOrgName 欄位以
+//   project.applicantOrgName || '大雪山林業合作社' fallback。
+function buildApplicantDocNo(seq) {
+  return `大雪山林業合作社（修）字第${String(seq).padStart(3, '0')}號`;
 }
 
 // 累計葉片採收 vs 核准量（denormalized 在許可單上，卡片即時顯示）
@@ -698,6 +706,27 @@ export function openHarvestPermitForm(project, existing = null) {
       return;
     }
     if (intent === 'submitted') data.submittedAt = serverTimestamp();
+    // v2.11.61：送出時若尚未配發發文字號 → runTransaction 原子遞增 counters/applicantSeq、產生申請字號。
+    //   只在 draft/revision → submitted 的瞬間配發一次；已配發的（含被退回再送、編輯）不重新編號。
+    //   counter 失敗 → 整個提交中止（避免送出無號狀態混淆）。
+    if (intent === 'submitted' && !existing?.applicantSeq) {
+      try {
+        const counterRef = doc(db, 'projects', project.id, 'counters', 'applicantSeq');
+        const newSeq = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(counterRef);
+          const cur = snap.exists() ? (snap.data().value || 0) : 0;
+          const next = cur + 1;
+          tx.set(counterRef, { value: next, updatedAt: serverTimestamp() });
+          return next;
+        });
+        data.applicantSeq = newSeq;
+        data.applicantDocNo = buildApplicantDocNo(newSeq);
+      } catch (err) {
+        console.error('[applicantSeq tx] failed', err);
+        toast('產生發文字號失敗：' + err.message);
+        return;
+      }
+    }
     try {
       if (existing) {
         await updateDoc(doc(db, 'projects', project.id, 'harvestPermits', existing.id), data);
@@ -1188,7 +1217,7 @@ ol{margin:4px 0 4px 0;padding-left:1.8em}ol li{margin:4px 0}
 <div class="title">土肉桂修枝申請函</div>
 <div class="row"><span class="lbl">受文者：</span>林業及自然保育署臺中分署</div>
 <div class="row"><span class="lbl">發文日期：</span>${rocFull(today)}</div>
-<div class="row"><span class="lbl">發文字號：</span><span class="line">&nbsp;</span>（申請人自編／免填）</div>
+<div class="row"><span class="lbl">發文字號：</span>${permit.applicantDocNo ? esc(permit.applicantDocNo) : '<span class="line">&nbsp;</span>（送出申請後自動編號）'}</div>
 <div class="row"><span class="lbl">速別：</span>普通件　　<span class="lbl">密等：</span>普通</div>
 <div class="row"><span class="lbl">附件：</span>地籍圖、現場照片等（如附）</div>
 <div class="subject"><b>主　旨：</b>申請於下列林地進行土肉桂修枝及枝葉採取乙案，請　核准。</div>
