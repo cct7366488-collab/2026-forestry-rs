@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21158';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21159';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -602,11 +602,29 @@ export function openHarvestPermitForm(project, existing = null) {
     id: 'hp-forestArea_ha', name: 'forestArea_ha', type: 'number', step: '0.0001', min: 0,
     class: 'w-full border rounded px-2 py-1 text-sm', value: p.forestArea_ha ?? ''
   });
+  // v2.11.59：土肉桂修枝株數改為自動計算（申請面積 × 1800 株/ha），user 可手動覆蓋。
+  //   密度 1800 株/ha 為合作社契約假設（user 5/30 拍板）；面積變更時即時連動，覆蓋既有值。
+  //   若 user 已手動輸入想保留，編輯後再覆蓋即可（最後送出時值為主）。
+  const CINNAMON_DENSITY_PER_HA = 1800;
+  const treesInput = el('input', {
+    id: 'hp-estTrees', name: 'estTrees', type: 'number', min: 0,
+    class: 'w-full border rounded px-2 py-1 text-sm', value: p.estTrees ?? ''
+  });
+  function recalcTreesFromArea() {
+    const a = parseFloat(areaInput.value);
+    if (Number.isFinite(a) && a >= 0) {
+      treesInput.value = Math.round(a * CINNAMON_DENSITY_PER_HA);
+    }
+  }
+  areaInput.addEventListener('input', recalcTreesFromArea);
   const picker = buildWorkUnitPicker(project, p.landParcelMeta, (wu) => {
     pickedMeta = wu;
     if (wu) {
       if (wu.landParcelText) landParcelInput.value = wu.landParcelText;
-      if (wu.area_ha != null && !areaInput.value) areaInput.value = String(wu.area_ha);
+      if (wu.area_ha != null && !areaInput.value) {
+        areaInput.value = String(wu.area_ha);
+        recalcTreesFromArea();   // v2.11.59：picker 帶入面積 → 順帶填株數
+      }
     }
   });
   const f = el('form', { class: 'space-y-2' },
@@ -623,11 +641,17 @@ export function openHarvestPermitForm(project, existing = null) {
       el('label', { for: 'hp-forestArea_ha', class: 'block text-sm font-medium mb-0.5' }, '申請修枝面積 (ha)'),
       areaInput
     ),
-    fld('土肉桂修枝株數', 'estTrees', { type: 'number', min: 0, value: p.estTrees ?? '' }),
+    el('div', {},
+      el('label', { for: 'hp-estTrees', class: 'block text-sm font-medium mb-0.5' }, '土肉桂修枝株數'),
+      treesInput,
+      el('div', { class: 'text-xs text-stone-500 mt-0.5' },
+        `預設＝申請面積 × ${CINNAMON_DENSITY_PER_HA} 株/ha（合作社契約假設密度）；修改面積會即時連動，可手動覆蓋。`)
+    ),
     fld('修枝方式', 'harvestMethod', { options: HARVEST_METHODS, value: p.harvestMethod || '修枝' }),
+    // v2.11.59：修枝起迄日改為必填
     el('div', { class: 'grid grid-cols-2 gap-2' },
-      fld('修枝起日', 'periodFrom', { type: 'date', value: p.periodFrom || '' }),
-      fld('修枝迄日', 'periodTo', { type: 'date', value: p.periodTo || '' })
+      fld('修枝起日', 'periodFrom', { type: 'date', required: true, value: p.periodFrom || '' }),
+      fld('修枝迄日', 'periodTo', { type: 'date', required: true, value: p.periodTo || '' })
     ),
     fld('備註', 'note', { type: 'textarea', value: p.note || '' }),
     el('div', { class: 'flex gap-2 pt-2' },
@@ -662,6 +686,15 @@ export function openHarvestPermitForm(project, existing = null) {
     };
     if (!data.applicantName || !data.landParcel) {
       toast('請填申請人、林班/地號');
+      return;
+    }
+    // v2.11.59：修枝起迄日必填 + 順序檢查（草稿亦擋，避免不完整資料散落 Firestore）
+    if (!data.periodFrom || !data.periodTo) {
+      toast('請填修枝起日與修枝迄日');
+      return;
+    }
+    if (data.periodFrom > data.periodTo) {
+      toast('修枝迄日不可早於修枝起日');
       return;
     }
     if (intent === 'submitted') data.submittedAt = serverTimestamp();
