@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21157';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21158';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -596,8 +596,10 @@ export function openHarvestPermitForm(project, existing = null) {
     id: 'hp-landParcel', name: 'landParcel', type: 'text',
     class: 'w-full border rounded px-2 py-1 text-sm', value: p.landParcel || '', required: 'true'
   });
+  // v2.11.58：step='0.01' 擋掉契約面積 0.2544 等 4 位小數 → 改 step='0.0001'（= 1 m² 精度，符合
+  //   台灣林業契約標準；公頃 × 10^-4 = m²）。先前 step=0.01 是抓股票 / 一般金額的習慣值，不適合林業。
   const areaInput = el('input', {
-    id: 'hp-forestArea_ha', name: 'forestArea_ha', type: 'number', step: '0.01', min: 0,
+    id: 'hp-forestArea_ha', name: 'forestArea_ha', type: 'number', step: '0.0001', min: 0,
     class: 'w-full border rounded px-2 py-1 text-sm', value: p.forestArea_ha ?? ''
   });
   const picker = buildWorkUnitPicker(project, p.landParcelMeta, (wu) => {
