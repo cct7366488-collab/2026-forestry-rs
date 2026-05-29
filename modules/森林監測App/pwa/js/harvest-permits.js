@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21156';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21157';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -136,11 +136,11 @@ function permitCard(project, p, reviewMode) {
     if (canEdit) {
       actions.appendChild(el('button', {
         class: 'text-xs border border-blue-300 text-blue-700 hover:bg-blue-50 px-2 py-1 rounded',
-        onClick: () => openHarvestPermitForm(project, p)
+        onClick: () => openHarvestPermitForm(state.project, p)   // v2.11.57：用 state.project 避免 stale closure
       }, '✏️ 編輯'));
       actions.appendChild(el('button', {
         class: 'text-xs bg-forest-700 text-white px-2 py-1 rounded',
-        onClick: () => submitPermit(project, p)
+        onClick: () => submitPermit(state.project, p)            // v2.11.57：用 state.project 避免 stale closure
       }, '📤 送出申請'));
     }
     if (needsReport) {
@@ -419,10 +419,21 @@ export async function renderHarvestApply(project) {
   const list = $('#harvestapply-list');
   if (!list) return;
 
+  // v2.11.57：修 stale closure — 改用 state.project 動態取現值，避免「初次 render → 編輯專案升級邊界
+  //   → 點＋按鈕仍開到舊 project」的 picker 失效 bug。_bound flag 保留，但 closure 內讀 state.project。
   const newBtn = $('#btn-new-permit');
   if (newBtn && !newBtn._bound) {
     newBtn._bound = true;
-    newBtn.addEventListener('click', () => openHarvestPermitForm(project));
+    newBtn.addEventListener('click', () => openHarvestPermitForm(state.project));
+  }
+
+  // v2.11.57：監聽 project-updated → 自動 re-render，讓編輯專案後 picker 立刻拿最新 project
+  if (!state.__harvestApplyListenerAttached) {
+    state.__harvestApplyListenerAttached = true;
+    window.addEventListener('forestmrv:project-updated', () => {
+      const visible = document.querySelector('[data-tab-content="harvestapply"]')?.classList.contains('hidden') === false;
+      if (visible && state.project) renderHarvestApply(state.project);
+    });
   }
 
   list.innerHTML = '<div class="text-sm text-stone-500 p-4">載入中…</div>';
@@ -443,7 +454,7 @@ export async function renderHarvestApply(project) {
     return;
   }
   list.innerHTML = '';
-  mine.forEach(p => list.appendChild(permitCard(project, p, false)));
+  mine.forEach(p => list.appendChild(permitCard(state.project, p, false)));  // v2.11.57：永遠用 state.project
 }
 
 // ===== 林農端：葉片採收回報及結案（v2.11.39）=====
