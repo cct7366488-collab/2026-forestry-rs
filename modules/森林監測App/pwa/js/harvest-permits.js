@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21155';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21156';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -231,8 +231,31 @@ function buildWorkUnitPicker(project, existingMeta, onPick) {
   wrap.appendChild(el('div', { class: 'text-sm font-medium text-blue-900' }, '📍 作業位置（從專案邊界帶入）'));
 
   if (units.length === 0) {
-    wrap.appendChild(el('div', { class: 'text-xs text-stone-600' },
-      '（本專案邊界未含作業單元資訊，或尚未上傳邊界 — 請手填下方林班 / 地號欄位）'));
+    // v2.11.55+：精細化提示 — 區分三種空陣列原因，讓 admin 知道要做什麼動作升級
+    let reason = '尚未上傳專案邊界';
+    let action = '請 admin 進入「✏️ 編輯專案 → 📐 專案邊界」上傳邊界 GeoJSON。';
+    if (project?.boundaryGeoJsonStr) {
+      try {
+        const geo = JSON.parse(project.boundaryGeoJsonStr);
+        if (geo?.type === 'Polygon' || geo?.type === 'MultiPolygon') {
+          reason = '邊界格式為舊版（v2.11.54 以前上傳，未保留作業單元屬性）';
+          action = '請 admin 進入「✏️ 編輯專案 → 📐 專案邊界」→ 在「📥 預設邊界」下拉選「土肉桂專區（橫流溪 + 烏石坑）」→ 按「載入」→ 儲存。即會升級為含屬性的 FeatureCollection，dropdown 立刻可用。';
+        } else if (geo?.type === 'FeatureCollection') {
+          const n = Array.isArray(geo.features) ? geo.features.length : 0;
+          reason = `邊界含 ${n} 個 features，但屬性無「專區/承租人/作業單元」可辨識欄位`;
+          action = '請確認邊界檔已含 normalized properties（橫流溪/烏石坑合併檔 cinnamon-zones-merged.geojson 即符合）。';
+        }
+      } catch {
+        reason = '邊界資料 JSON 解析失敗';
+        action = '請 admin 進入「✏️ 編輯專案」重新上傳邊界。';
+      }
+    }
+    const hint = el('div', { class: 'text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 space-y-1' },
+      el('div', { class: 'font-medium' }, `⚠ ${reason}`),
+      el('div', {}, action),
+      el('div', { class: 'text-stone-600' }, '目前可手填下方林班/地號欄位繼續送出，但無法享有自動帶入。')
+    );
+    wrap.appendChild(hint);
     return wrap;
   }
 
