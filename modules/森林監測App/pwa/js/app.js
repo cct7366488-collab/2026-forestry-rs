@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21152";
-import * as forms from "./forms.js?v=21152";
-import * as analytics from "./analytics.js?v=21152";
-import * as importWizard from "./import-wizard.js?v=21152";
+import { firebaseConfig } from "../firebase-config.js?v=21153";
+import * as forms from "./forms.js?v=21153";
+import * as analytics from "./analytics.js?v=21153";
+import * as importWizard from "./import-wizard.js?v=21153";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21152";
-import { renderTreeDistribution } from "./distribution.js?v=21152";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21152";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21152";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21153";
+import { renderTreeDistribution } from "./distribution.js?v=21153";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21153";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21153";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21152";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21152";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21153";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21153";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21152";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21153";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21152";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21153";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -369,7 +369,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21152');
+    const m = await import('./migration-v2715.js?v=21153');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -391,7 +391,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21152');
+    const m = await import('./migration-v2715.js?v=21153');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1063,6 +1063,25 @@ async function renderProjectHome(root, projectId) {
 
   // 套用角色顯示矩陣
   applyRoleVisibility();
+
+  // v2.11.53：頂部「✏️ 編輯專案」按鈕（在 ← 返回我的專案 旁；所有分頁皆可見）
+  //   背景：v2.11.22 把唯一入口塞到「地圖」分頁的圖層控制列右側（ml-auto），admin 反映找不到。
+  //   本入口與地圖分頁的 #btn-edit-project-boundary 同呼 openProjectForm(state.project)，雙入口並存。
+  const editTopBtn = $('#btn-edit-project-top');
+  if (editTopBtn) {
+    editTopBtn.onclick = () => {
+      editTopBtn.disabled = true;
+      const oldText = editTopBtn.innerHTML;
+      editTopBtn.innerHTML = '⏳ 開啟編輯…';
+      setTimeout(() => {
+        try { forms.openProjectForm(state.project); }
+        finally {
+          editTopBtn.disabled = false;
+          editTopBtn.innerHTML = oldText;
+        }
+      }, 0);
+    };
+  }
 
   // v2.3：lock-banner 升級為狀態列（同時顯示 status 與 lock 原因）
   renderStatusBanner();
@@ -2522,6 +2541,46 @@ async function renderSettings() {
       if (isLocked()) return toast('資料已 Lock，無法匯入');
       importWizard.openImportWizard(state.project);
     };
+  }
+
+  // v2.11.53：設定分頁「專案資訊」區塊（PI / admin 可見）— 含「編輯專案 / 上傳邊界」入口與邊界狀態摘要
+  //   背景：v2.11.22 把編輯入口只塞地圖分頁，admin 反映找不到；v2.11.53 補頂部按鈕之外、再給設定分頁
+  //   一個結構化入口（與其他設定項目並列），同時顯示「目前邊界是否已上傳」摘要避免重複上傳。
+  if (isPi() || isSystemAdmin()) {
+    const settingsView = $('[data-tab-content="settings"]');
+    if (settingsView && !settingsView.querySelector('#project-info-zone')) {
+      // v2.11.24：邊界存兩欄 — boundaryGeoJsonStr（stringified GeoJSON）+ boundaryMeta（摘要）
+      const meta = state.project.boundaryMeta;
+      const hasBoundary = !!state.project.boundaryGeoJsonStr;
+      let bStatus;
+      if (hasBoundary && meta) {
+        const fname = meta.fileName || '（檔名未存）';
+        const src = meta.srcSystem || '?';
+        bStatus = el('div', { class: 'text-sm text-emerald-700 mb-3' },
+          `✓ 已上傳邊界：${fname}（${src}，${meta.polygonCount || '?'} 多邊形 / ${meta.vertexCount || '?'} 頂點）— 重新編輯可覆蓋或清除`);
+      } else if (hasBoundary) {
+        bStatus = el('div', { class: 'text-sm text-emerald-700 mb-3' },
+          '✓ 已上傳邊界（meta 缺失，可重新編輯補上）');
+      } else {
+        bStatus = el('div', { class: 'text-sm text-stone-600 mb-3' },
+          '（尚未上傳專案邊界 GeoJSON）');
+      }
+      const editBtn = el('button', {
+        class: 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium',
+        onclick: () => forms.openProjectForm(state.project)
+      }, '✏️ 編輯專案 / 上傳邊界 GeoJSON');
+      const infoZone = el('div', {
+        id: 'project-info-zone',
+        class: 'bg-white border border-stone-200 rounded-lg shadow p-4 mt-4'
+      },
+        el('h3', { class: 'font-semibold mb-2' }, '📋 專案資訊與邊界'),
+        el('p', { class: 'text-sm text-stone-600 mb-2' },
+          '編輯專案基本資料、方法學摘要、上傳 / 清除「專案邊界 GeoJSON」（支援 Polygon / MultiPolygon、自動偵測 WGS84 / TWD97）。'),
+        bStatus,
+        editBtn
+      );
+      settingsView.appendChild(infoZone);
+    }
   }
 
   // v1.6.19：admin 專案管理區塊（封存 / 永久刪除依狀態切換顯示）

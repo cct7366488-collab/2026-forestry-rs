@@ -53,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21152">
+  <link rel="stylesheet" href="style.css?v=21153">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -66,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.52</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.53</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -250,10 +250,17 @@
 <template id="view-project-home">
   <div class="space-y-6">
     <div>
-      <a href="#/" class="inline-flex items-center gap-2 text-sm font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 px-3 py-1.5 rounded-lg transition shadow-sm">
-        <span class="text-base leading-none">←</span>
-        <span>返回我的專案</span>
-      </a>
+      <div class="flex items-center gap-2 flex-wrap">
+        <a href="#/" class="inline-flex items-center gap-2 text-sm font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 px-3 py-1.5 rounded-lg transition shadow-sm">
+          <span class="text-base leading-none">←</span>
+          <span>返回我的專案</span>
+        </a>
+        <!-- v2.11.53：在所有分頁都看得到的「編輯專案」入口（補 v2.11.22 把按鈕只放在地圖分頁的 UX 缺口）-->
+        <button id="btn-edit-project-top" class="hidden inline-flex items-center gap-1 text-sm font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-3 py-1.5 rounded-lg transition shadow-sm" data-role-show="pi,admin" title="編輯專案資訊、方法學摘要、上傳專案邊界 GeoJSON">
+          <span>✏️</span>
+          <span>編輯專案</span>
+        </button>
+      </div>
       <h1 class="text-2xl font-bold mt-1" data-bind="project.name"></h1>
       <p class="text-sm text-stone-600" data-bind="project.code"></p>
     </div>
@@ -717,6 +724,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21152"></script>
+<script type="module" src="js/app.js?v=21153"></script>
 </body>
 </html>
