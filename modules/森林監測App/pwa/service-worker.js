@@ -62,6 +62,18 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.66：申請表單內嵌迷你地圖（地圖視覺優化 Phase 2）— picker 選作業單元 → 自動 zoom 預覽
+//   harvest-permits.js 新增 buildApplicationMiniMap(project)：
+//     - 讀 project.boundaryGeoJsonStr（需 FC 格式）。舊 polygon/MultiPolygon → 顯示提示無圖。
+//     - 240px 高 Leaflet 地圖嵌入藍框 wrap：
+//       - 初始所有 polygon 灰色淡填、fit 全 boundary
+//       - picker partial（zone+lessee）→ 紅色高亮該承租人所有圖塊、fit 對應 bounds
+//       - picker full（含 unitId）→ 紅色高亮該作業單元、fit 並 maxZoom: 18
+//     - status 行同步顯示「✓ 已定位：橫流溪 / 陳世允 / 8_1_1（1 個圖塊）」之類訊息。
+//   openHarvestPermitForm 把 miniMap.wrap 插在 picker 與 林班/地號 之間；picker callback 同步呼叫
+//   miniMap.setSelectedUnit(wu)；openModal 後 queueMicrotask 呼叫 miniMap.invalidateSize() 修
+//   Leaflet 容器在 modal 顯示前無法量大小的問題。編輯既有申請時依 landParcelMeta 預先高亮。
+//   ?v=21165 -> ?v=21166 全檔（無 rules 變動）。
 // v2.11.65：作業單元代碼地圖 label + 點面 popup（地圖視覺優化 Phase 1）
 //   analytics.js renderProjectBoundary 的 L.geoJSON 加 onEachFeature：
 //     - bindTooltip permanent + className='work-unit-code-label' 顯示作業區/標示/unitId 代碼
@@ -208,7 +220,7 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.65';  // v2.11.65：作業單元代碼地圖 label + popup；以下歷史
+const CACHE = 'forest-monitor-v2.11.66';  // v2.11.66：申請表單 mini-map 自動定位；以下歷史
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
@@ -249,7 +261,7 @@ const CACHE = 'forest-monitor-v2.11.65';  // v2.11.65：作業單元代碼地圖
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21165';
+const JS_VERSION = '21166';
 const SHELL = [
   './',
   './index.html',

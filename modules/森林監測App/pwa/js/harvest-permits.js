@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21165';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21166';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -223,6 +223,92 @@ function normalizeWorkUnit(props) {
   if (dihao != null && dihao !== '') parts.push(`假地號 ${dihao}`);
   const landParcelText = parts.length ? parts.join('，') : (unitId || '');
   return { zone, lessee, unitId, species, area_ha: area, station, contract, landParcelText };
+}
+
+// ===== v2.11.66：申請表單內嵌迷你地圖 — picker 選作業單元 → 自動定位預覽 =====
+//   入：project（讀 boundaryGeoJsonStr，需為 FC 格式）
+//   出：{ wrap, setSelectedUnit(wu), invalidateSize() }；caller 負責 invalidateSize 在 modal 顯示後呼叫一次。
+//   行為：
+//     - 初始畫所有 polygon 灰色淡填，fit 到全 boundary
+//     - picker partial（zone+lessee 已選）→ 高亮該承租人所有 polygon、fit bounds
+//     - picker full（含 unitId）→ 高亮該作業單元、fit bounds
+//     - 切換時舊高亮 layer remove、新增上去
+//   cleanup：modal 內 leaflet map 於下次 openModal innerHTML='' 時 detach；無顯式 remove 不致 leak（小規模）。
+function buildApplicationMiniMap(project) {
+  const wrap = el('div', { class: 'border border-blue-200 rounded p-2 bg-blue-50 space-y-1.5' });
+  wrap.appendChild(el('div', { class: 'text-sm font-medium text-blue-900' }, '📍 作業位置預覽（地圖）'));
+  const mapDiv = el('div', { style: 'height:240px;border-radius:4px;overflow:hidden;background:#e5e7eb' });
+  wrap.appendChild(mapDiv);
+  const status = el('div', { class: 'text-xs text-stone-600' }, '請於上方下拉選擇承租人/作業單元，地圖會自動 zoom。');
+  wrap.appendChild(status);
+
+  let features = [];
+  try {
+    const geo = JSON.parse(project?.boundaryGeoJsonStr || 'null');
+    if (geo?.type === 'FeatureCollection') features = geo.features || [];
+  } catch {}
+
+  if (features.length === 0) {
+    mapDiv.style.display = 'none';
+    status.textContent = '（專案邊界尚未上傳或為舊格式，無地圖可顯示）';
+    return { wrap, setSelectedUnit: () => {}, invalidateSize: () => {} };
+  }
+
+  let map = null, baseLayer = null, highlightLayer = null, fullBounds = null;
+  function init() {
+    if (map) return;
+    map = L.map(mapDiv, { zoomControl: true, attributionControl: false }).setView([24.27, 121.0], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    baseLayer = L.geoJSON({ type: 'FeatureCollection', features }, {
+      style: { color: '#6b7280', weight: 1, opacity: 0.6, fillColor: '#9ca3af', fillOpacity: 0.08 }
+    }).addTo(map);
+    fullBounds = baseLayer.getBounds();
+    if (fullBounds.isValid()) map.fitBounds(fullBounds, { padding: [8, 8] });
+  }
+
+  function setSelectedUnit(wu) {
+    init();
+    if (highlightLayer) { map.removeLayer(highlightLayer); highlightLayer = null; }
+    if (!wu) {
+      status.textContent = '請於上方下拉選擇承租人/作業單元，地圖會自動 zoom。';
+      if (fullBounds?.isValid()) map.fitBounds(fullBounds, { padding: [8, 8] });
+      return;
+    }
+    // 匹配優先序：unitId（完整選擇）→ lessee（部分選擇）
+    let matches = [];
+    if (wu.unitId) {
+      matches = features.filter(f => {
+        const code = f.properties?.['作業區'] || f.properties?.['標示'];
+        return code === wu.unitId;
+      });
+    } else if (wu.lessee) {
+      matches = features.filter(f => {
+        const lessee = f.properties?.['承租人'] || f.properties?.['name'];
+        return lessee === wu.lessee;
+      });
+    }
+    if (matches.length === 0) {
+      status.textContent = '⚠ 找不到對應位置（屬性與選擇不符）';
+      return;
+    }
+    highlightLayer = L.geoJSON({ type: 'FeatureCollection', features: matches }, {
+      style: { color: '#dc2626', weight: 3, opacity: 1, fillColor: '#ef4444', fillOpacity: 0.4 }
+    }).addTo(map);
+    const b = highlightLayer.getBounds();
+    if (b.isValid()) map.fitBounds(b, { padding: [25, 25], maxZoom: 18 });
+    if (wu.unitId) {
+      status.textContent = `✓ 已定位：${wu.zone || ''} / ${wu.lessee || ''} / ${wu.unitId}（${matches.length} 個圖塊）`;
+    } else if (wu.lessee) {
+      status.textContent = `✓ 顯示承租人「${wu.lessee}」的 ${matches.length} 個作業單元（待選作業單元定位至單一圖塊）`;
+    }
+  }
+
+  function invalidateSize() {
+    init();
+    if (map) map.invalidateSize();
+  }
+
+  return { wrap, setSelectedUnit, invalidateSize };
 }
 
 function getProjectWorkUnits(project) {
@@ -648,9 +734,12 @@ export function openHarvestPermitForm(project, existing = null) {
     value: p.contact || '',
     placeholder: '電話或 email'
   });
+  // v2.11.66：申請表單內嵌迷你地圖（picker 選作業單元 → 自動 zoom 預覽）
+  const miniMap = buildApplicationMiniMap(project);
   const picker = buildWorkUnitPicker(project, p.landParcelMeta, (wu) => {
     if (!wu) {
       pickedMeta = null;
+      miniMap.setSelectedUnit(null);
       return;
     }
     // v2.11.63：承租人已知（partial 或 full） → 自動覆蓋申請人姓名（user 5/30 拍板，承租人 = 申請人為原則）
@@ -666,6 +755,8 @@ export function openHarvestPermitForm(project, existing = null) {
         recalcTreesFromArea();   // v2.11.59：picker 帶入面積 → 順帶填株數
       }
     }
+    // v2.11.66：每次 picker 變動同步更新地圖（partial 顯承租人所有圖塊；full 定位至單一作業單元）
+    miniMap.setSelectedUnit(wu);
   });
   const f = el('form', { class: 'space-y-2' },
     el('div', {},
@@ -680,6 +771,7 @@ export function openHarvestPermitForm(project, existing = null) {
       contactInput
     ),
     picker,
+    miniMap.wrap,   // v2.11.66：地圖即時預覽 picker 選擇
     el('div', {},
       el('label', { for: 'hp-landParcel', class: 'block text-sm font-medium mb-0.5' },
         '林班 / 地號', el('span', { class: 'text-red-600' }, ' *')),
@@ -791,6 +883,14 @@ export function openHarvestPermitForm(project, existing = null) {
     }
   });
   openModal(existing ? '編輯修枝申請' : '修枝申請（土肉桂）', f);
+  // v2.11.66：modal 顯示後 Leaflet 才能正確量 container 大小 — 微任務後 invalidateSize
+  //   若 form 是編輯既有申請、landParcelMeta 已預選 → 預設高亮已選作業單元
+  queueMicrotask(() => {
+    miniMap.invalidateSize();
+    if (p.landParcelMeta?.zone || p.landParcelMeta?.lessee) {
+      miniMap.setSelectedUnit(p.landParcelMeta);
+    }
+  });
 }
 
 async function submitPermit(project, p) {
