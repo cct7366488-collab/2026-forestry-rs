@@ -62,6 +62,22 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.68：6/6 demo 前 pre-flight 兩項 polish：
+//   (A) 純行政專案地圖頁清掉立木 UI 殘留 — 5/30 dry-run 發現 v2.11.64 雖然藏了
+//   樣區/設計/儀表板三個 tab，但地圖頁面的「著色依據（QA/立木密度/斷面積密度）」三個
+//   radio + 「疊加圖層：樣區邊界」checkbox 仍露出（純行政專案 0 立木 0 樣區）→ 暴露
+//   「為什麼有這些?」的疑問、6/6 demo 時會干擾承辦/合作社代表理解。修法：沿用
+//   v2.11.64 同條件 data-module 機制，在 index.html 第一個 row（著色依據）和「樣區邊界」
+//   label 加 data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest"；
+//   border-t 殘留由 style.css `#map-layer-toggle > div.hidden + div` sibling selector
+//   去掉 border-top + padding-top，避免出現孤兒分隔線。既有有 plot 模組的專案完全不
+//   受影響（data-module 任一模組啟用就顯示）。
+//   (B) 修枝申請表單欄位順序調整 — 原順序申請人姓名 → 聯絡方式 → picker → mini-map → 林班/地號…
+//   違背 v2.11.63 picker 自動覆蓋申請人姓名的設計（user 還沒選承租人就先看到姓名欄、
+//   邏輯顛倒）。改為：picker → mini-map → 申請人姓名 → 聯絡方式 → 林班/地號 → …
+//   讓「先選作業位置 → 申請人姓名自動由承租人帶入 → 補聯絡方式」順序更自然。
+//   提示文案順帶從「下方選承租人後會自動帶入」改成「上方選承租人後會自動帶入」。
+//   ?v=21167 -> ?v=21168 全 15 檔。
 // v2.11.67：申請函嵌入作業位置示意圖（地圖視覺優化 Phase 3 / 公文整合終章）
 //   harvest-permits.js 新增 buildLocationSvg(project, meta, opts) — 純 inline SVG 自製、無外部依賴：
 //     - 讀 project.boundaryGeoJsonStr (FC) 找出 meta.unitId 對應目標作業單元
@@ -74,7 +90,7 @@
 //     標題「附圖：作業位置示意圖」+ 副說明 + SVG + meta 行（作業單元/專區/承租人）
 //   print CSS .loc-map page-break-inside:avoid 確保附圖不被分頁切開。
 //   無 landParcelMeta.unitId（舊申請 / 邊界格式舊）→ locationSvg=null，附圖區自動省略不渲染。
-//   ?v=21166 -> ?v=21167 全檔（無 rules 變動）。
+//   ?v=21166 -> ?v=21168 全檔（無 rules 變動）。
 // v2.11.66：申請表單內嵌迷你地圖（地圖視覺優化 Phase 2）— picker 選作業單元 → 自動 zoom 預覽
 //   harvest-permits.js 新增 buildApplicationMiniMap(project)：
 //     - 讀 project.boundaryGeoJsonStr（需 FC 格式）。舊 polygon/MultiPolygon → 顯示提示無圖。
@@ -233,7 +249,8 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.67';  // v2.11.67：申請函嵌入作業位置 SVG；以下歷史
+const CACHE = 'forest-monitor-v2.11.68';  // v2.11.68：純行政專案地圖頁藏立木/樣區 UI 殘留；以下歷史
+// v2.11.67（歷史）：申請函嵌入作業位置 SVG（buildLocationSvg）+ printApplicationLetter signature 改 (permit, project)。
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
@@ -274,7 +291,7 @@ const CACHE = 'forest-monitor-v2.11.67';  // v2.11.67：申請函嵌入作業位
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21167';
+const JS_VERSION = '21168';
 const SHELL = [
   './',
   './index.html',

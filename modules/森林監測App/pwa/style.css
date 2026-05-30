@@ -133,3 +133,12 @@ input[type="checkbox"] {
 .leaflet-tooltip.work-unit-code-label:before {
   display: none;  /* 不顯示 tooltip 箭頭，label 風格 */
 }
+
+/* v2.11.68：純行政專案藏「著色依據」整 row 後，下一 row 的 border-top 殘留處理。
+   配合 index.html 在第一個 row 加 data-module gating；applyModuleVisibility 會
+   給該 row 加 .hidden；相鄰 sibling 即第二個 row（疊加圖層）這時去掉上分隔線
+   與多餘 padding-top，避免出現孤兒細線。 */
+#map-layer-toggle > div.hidden + div {
+  border-top-width: 0 !important;
+  padding-top: 0 !important;
+}

@@ -53,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21167">
+  <link rel="stylesheet" href="style.css?v=21168">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -66,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.67</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.68</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -433,8 +433,10 @@
       <!-- v2.9.1：圖層切換（QA 狀態 / stems ha 密度 / BA 密度）-->
       <!-- v2.11.19：加 2 個 checkbox 切「樣區邊界」/「專案邊界」overlay -->
       <!-- v2.11.22：加「上傳專案邊界」入口按鈕（admin/PI 才看得到，補 v2.11.19 漏掉的入口）-->
+      <!-- v2.11.68：純行政專案（無 plot 家族模組）藏「著色依據」整 row 與「樣區邊界」checkbox；
+                    沿用 v2.11.64 同條件 data-module 機制；border-t 殘留由 style.css sibling selector 處理。-->
       <div id="map-layer-toggle" class="bg-white rounded-lg shadow p-2 mb-2 text-xs space-y-1.5">
-        <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-3 flex-wrap" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest">
           <span class="text-stone-500">著色依據：</span>
           <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="qa" checked> QA 狀態（pending / verified / flagged / rejected）</label>
           <label class="cursor-pointer flex items-center gap-1"><input type="radio" name="map-layer" value="density"> 立木密度（株/ha）</label>
@@ -442,7 +444,7 @@
         </div>
         <div class="flex items-center gap-3 flex-wrap pt-1.5 border-t border-stone-100">
           <span class="text-stone-500">疊加圖層：</span>
-          <label class="cursor-pointer flex items-center gap-1"><input type="checkbox" name="map-overlay" value="plot-boundary"> 📐 樣區邊界</label>
+          <label class="cursor-pointer flex items-center gap-1" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest"><input type="checkbox" name="map-overlay" value="plot-boundary"> 📐 樣區邊界</label>
           <label class="cursor-pointer flex items-center gap-1"><input type="checkbox" name="map-overlay" value="project-boundary" checked> 🗺️ 專案邊界（如已上傳）</label>
           <button id="btn-edit-project-boundary" class="hidden ml-auto border border-blue-300 text-blue-700 hover:bg-blue-50 px-2 py-0.5 rounded text-xs" data-role-show="pi,admin">✏️ 編輯專案 / 上傳邊界 GeoJSON</button>
         </div>
@@ -726,6 +728,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21167"></script>
+<script type="module" src="js/app.js?v=21168"></script>
 </body>
 </html>

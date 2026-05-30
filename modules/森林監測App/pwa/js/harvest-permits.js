@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21167';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21168';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -758,20 +758,25 @@ export function openHarvestPermitForm(project, existing = null) {
     // v2.11.66：每次 picker 變動同步更新地圖（partial 顯承租人所有圖塊；full 定位至單一作業單元）
     miniMap.setSelectedUnit(wu);
   });
+  // v2.11.68：欄位順序調整 — 作業位置 picker / mini-map 移到最上面，
+  //   讓使用者「先選作業位置 → 申請人姓名自動由承租人帶入 → 補聯絡方式」的順序更自然。
+  //   原順序（申請人姓名 → 聯絡方式 → picker → mini-map → 林班/地號 …）違背了
+  //   v2.11.63 picker 自動覆蓋申請人姓名的設計（user 還沒選承租人就先看到姓名欄、邏輯顛倒）。
+  //   新順序：picker → mini-map → 申請人姓名 → 聯絡方式 → 林班/地號 → 面積 → 株數 → 方式 → 期間 → 備註 → 按鈕。
   const f = el('form', { class: 'space-y-2' },
+    picker,
+    miniMap.wrap,   // v2.11.66：地圖即時預覽 picker 選擇
     el('div', {},
       el('label', { for: 'hp-applicantName', class: 'block text-sm font-medium mb-0.5' },
         '申請人姓名', el('span', { class: 'text-red-600' }, ' *')),
       applicantNameInput,
-      el('div', { class: 'text-xs text-stone-500 mt-0.5' }, '下方選承租人後會自動帶入；可手動編輯。')
+      el('div', { class: 'text-xs text-stone-500 mt-0.5' }, '上方選承租人後會自動帶入；可手動編輯。')
     ),
     el('div', {},
       el('label', { for: 'hp-contact', class: 'block text-sm font-medium mb-0.5' },
         '聯絡方式（電話／email）', el('span', { class: 'text-red-600' }, ' *')),
       contactInput
     ),
-    picker,
-    miniMap.wrap,   // v2.11.66：地圖即時預覽 picker 選擇
     el('div', {},
       el('label', { for: 'hp-landParcel', class: 'block text-sm font-medium mb-0.5' },
         '林班 / 地號', el('span', { class: 'text-red-600' }, ' *')),
