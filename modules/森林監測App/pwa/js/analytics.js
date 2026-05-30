@@ -1,17 +1,17 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21164';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21165';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21164';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21165';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21164';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21165';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21164';
+import { getEquationBadge } from './species-equations.js?v=21165';
 // v2.11.19：irregular plot vertices 轉換用
-import { vertsToArrays } from './plot-polygon.js?v=21164';
+import { vertsToArrays } from './plot-polygon.js?v=21165';
 // v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
-import { openProjectForm } from './forms.js?v=21164';
+import { openProjectForm } from './forms.js?v=21165';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -748,6 +748,42 @@ function renderProjectBoundary() {
         fillColor: '#3b82f6',      // 淺藍填充
         fillOpacity: 0.10,
         dashArray: '8, 4',
+      },
+      // v2.11.65：每個作業單元顯示代碼 label（橫流溪「作業區」/烏石坑「標示」/通用 unitId fallback）
+      //   + 點擊跳 popup 顯示完整 metadata（承租人 / 契約樹種 / 面積 / 工作站 / 契約書）
+      //   permanent tooltip 高 zoom 才看清楚，低 zoom 會重疊但不擋互動（user 可放大查單一單元）
+      onEachFeature: (feature, lyr) => {
+        const props = feature.properties || {};
+        const code = props['作業區'] || props['標示'] || props.unitId || '';
+        if (code) {
+          lyr.bindTooltip(String(code), {
+            permanent: true,
+            direction: 'center',
+            className: 'work-unit-code-label',
+          });
+        }
+        // popup：點面即顯（避免要點點）
+        const lessee = props['承租人'] || props['name'] || '';
+        const zone = props['專區'] || '';
+        const species = props['契約樹種'] || props['樹種'] || '';
+        const area = props['契約面積'] ?? props['面積'] ?? props.area1;
+        const station = props['工作站'] || props['事業區'] || '';
+        const contract = props['契約書'] || '';
+        const rows = [
+          ['作業單元', code],
+          ['專區', zone],
+          ['承租人', lessee],
+          ['契約樹種', species],
+          ['契約面積', area != null ? `${area} ha` : ''],
+          ['工作站／事業區', station],
+          ['契約書', contract],
+        ].filter(r => r[1] !== '' && r[1] != null);
+        if (rows.length) {
+          const html = '<div style="font-size:11px;line-height:1.5">' +
+            rows.map(r => `<div><b style="color:#1d4ed8">${r[0]}：</b>${r[1]}</div>`).join('') +
+            '</div>';
+          lyr.bindPopup(html, { maxWidth: 260 });
+        }
       },
     });
     _projectBoundaryLayer.addLayer(layer);

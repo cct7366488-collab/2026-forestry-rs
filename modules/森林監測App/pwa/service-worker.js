@@ -62,6 +62,13 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.65：作業單元代碼地圖 label + 點面 popup（地圖視覺優化 Phase 1）
+//   analytics.js renderProjectBoundary 的 L.geoJSON 加 onEachFeature：
+//     - bindTooltip permanent + className='work-unit-code-label' 顯示作業區/標示/unitId 代碼
+//     - bindPopup 顯示 7 欄結構化 metadata（作業單元/專區/承租人/契約樹種/面積/工作站/契約書）
+//   style.css 補 .leaflet-tooltip.work-unit-code-label（白底藍框、bold 10px、無箭頭）
+//   user 進入專案 → 地圖即看到 115 個作業單元代碼疊在邊界上，點任一面跳出該單元完整資訊。
+//   ?v=21164 -> ?v=21165 全檔（無 rules 變動）。
 // v2.11.64：純行政專案隱藏 樣區/設計/儀表板 分頁（user 5/30 拍板，土肉桂葉片監測會計系統需求）
 //   背景：土肉桂專案僅啟用 admin_harvest 模組，但 樣區/設計/儀表板 一直顯示且無法關閉
 //        （CORE_TABS 硬編、BASE_ON 強制開 tree/regen）→ admin 介面雜訊大。
@@ -201,7 +208,7 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.64';  // v2.11.64：純行政專案隱藏樣區/設計/儀表板；以下歷史
+const CACHE = 'forest-monitor-v2.11.65';  // v2.11.65：作業單元代碼地圖 label + popup；以下歷史
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
@@ -242,7 +249,7 @@ const CACHE = 'forest-monitor-v2.11.64';  // v2.11.64：純行政專案隱藏樣
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21164';
+const JS_VERSION = '21165';
 const SHELL = [
   './',
   './index.html',

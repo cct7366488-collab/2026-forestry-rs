@@ -115,3 +115,21 @@ input[type="checkbox"] {
   display: inline-block; vertical-align: middle;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+
+/* v2.11.65：地圖上作業單元代碼 label（permanent Leaflet tooltip） */
+.leaflet-tooltip.work-unit-code-label {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid #1d4ed8;
+  border-radius: 3px;
+  color: #1d4ed8;
+  font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.leaflet-tooltip.work-unit-code-label:before {
+  display: none;  /* 不顯示 tooltip 箭頭，label 風格 */
+}
