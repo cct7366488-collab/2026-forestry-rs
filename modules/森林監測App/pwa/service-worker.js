@@ -62,6 +62,21 @@
 //   新專案表單依計畫類型帶套餐預設 + 可勾選微調；方法學編輯器擴充頂層模組（qaqc/export/admin_harvest/soil）
 //   + 修存檔吃掉新 key bug；頂層分頁與樣區子分頁 gating 改「角色 AND 模組已啟用」。
 //   向後相容：缺 methodology.modules 視為全開，既有專案不受影響（plan A）。?v=21144 -> ?v=21145 全檔。
+// v2.11.64：純行政專案隱藏 樣區/設計/儀表板 分頁（user 5/30 拍板，土肉桂葉片監測會計系統需求）
+//   背景：土肉桂專案僅啟用 admin_harvest 模組，但 樣區/設計/儀表板 一直顯示且無法關閉
+//        （CORE_TABS 硬編、BASE_ON 強制開 tree/regen）→ admin 介面雜訊大。
+//   (A) index.html：樣區/設計/儀表板 三個 tab link + 對應 section 加
+//       data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest"
+//       → 任一 plot 家族模組啟用才顯示；全部關閉時 applyModuleVisibility 自動隱藏 tab + 內容。
+//   (B) module-registry.js：BASE_ON 從 ['tree','regen','export'] 縮為 ['export']；
+//       basic_sampling / census_urban / full_ecology 套餐自帶 tree/regen。
+//       既有專案不受影響（Firestore 已存值優先），僅影響新建專案預設。
+//       RES/OTHER 類型用 admin_harvest 套餐 → 新建即不啟用 plot 模組 → 三 tabs 預設隱藏。
+//   (C) app.js：設定分頁新增「⚙️ 方法學與調查模組」備援卡片，含「✏️ 編輯方法學」+「＋ 批量建立空殼樣區」
+//       兩個按鈕（PI/admin），讓 admin 在設計分頁被隱藏後仍可重新啟用 plot 模組（避免雞生蛋）。
+//   (D) app.js renderProjectHome：加 queueMicrotask 偵測預設 active tab 是否被隱藏，自動點第一個可見 tab
+//       （否則 user 看到「樣區清單 0/50 尚無樣區」誤導畫面）。
+//   ?v=21163 -> ?v=21164 全檔。
 // v2.11.63：申請人姓名自動帶入＋聯絡方式必填（user 5/30 拍板）
 //   (A) buildWorkUnitPicker 升級：refreshUnits（zone+lessee 選定但 unit 未選）改 fire partial onPick
 //       回傳 { zone, lessee, unitId: null, partial: true }。完整三層選定 refreshSummary 仍 fire 完整 wu
@@ -186,7 +201,7 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.63';  // v2.11.63：申請人自動帶入＋聯絡必填；以下歷史
+const CACHE = 'forest-monitor-v2.11.64';  // v2.11.64：純行政專案隱藏樣區/設計/儀表板；以下歷史
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
 // v2.11.48（歷史）：樣區清單卡片重複/閃爍修（plot-list async onSnapshot race，generation guard）。
 // v2.11.47（歷史）：立木座標防呆（X/Y 誤填 TWD97 絕對座標→卡死）。
@@ -227,7 +242,7 @@ const CACHE = 'forest-monitor-v2.11.63';  // v2.11.63：申請人自動帶入＋
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21163';
+const JS_VERSION = '21164';
 const SHELL = [
   './',
   './index.html',

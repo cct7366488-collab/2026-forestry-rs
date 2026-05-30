@@ -79,12 +79,15 @@ export function getMonitoring(project) { return project?.methodology?.monitoring
 export function getModule(id) { return moduleById[id]; }
 
 // ---- 套餐（UI 預設模板）：on=要開的模組 id；外加軸 B 覆寫 ----
-// 任何樣區型專案的基底（可在新專案表單再勾掉）。
-const BASE_ON = ['tree', 'regeneration', 'export'];
+// v2.11.64：BASE_ON 從 ['tree','regeneration','export'] 縮為 ['export']
+//   原因：純行政專案（RES/OTHER + admin_harvest）不需樣區調查，但 tree/regeneration 從 BASE_ON 強制開
+//        導致樣區/設計/儀表板分頁無法隱藏。改為由各套餐自行帶入 tree/regeneration（樣區調查型套餐）。
+//   既有專案（Firestore 已存 methodology.modules）不受影響；僅影響新建專案的預設值。
+const BASE_ON = ['export'];
 export const PRESETS = {
-  basic_sampling: { label: '基本樣區調查（取樣）', on: [], surveyMethod: 'sampling' },
-  census_urban:   { label: '全區每木調查（都市林/平地）', on: [], surveyMethod: 'census' },
-  full_ecology:   { label: '完整生態調查', on: ['understory', 'soilCons', 'soil', 'wildlife'] },
+  basic_sampling: { label: '基本樣區調查（取樣）', on: ['tree', 'regeneration'], surveyMethod: 'sampling' },
+  census_urban:   { label: '全區每木調查（都市林/平地）', on: ['tree', 'regeneration'], surveyMethod: 'census' },
+  full_ecology:   { label: '完整生態調查', on: ['tree', 'regeneration', 'understory', 'soilCons', 'soil', 'wildlife'] },
   qaqc:           { label: '取樣審查', on: ['qaqc'] },
   admin_harvest:  { label: '修枝採收行政', on: ['admin_harvest', 'harvest'] },
   repeat:         { label: '重複監測', on: [], monitoring: 'repeat' },

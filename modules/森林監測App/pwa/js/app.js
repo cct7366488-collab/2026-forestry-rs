@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21163";
-import * as forms from "./forms.js?v=21163";
-import * as analytics from "./analytics.js?v=21163";
-import * as importWizard from "./import-wizard.js?v=21163";
+import { firebaseConfig } from "../firebase-config.js?v=21164";
+import * as forms from "./forms.js?v=21164";
+import * as analytics from "./analytics.js?v=21164";
+import * as importWizard from "./import-wizard.js?v=21164";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21163";
-import { renderTreeDistribution } from "./distribution.js?v=21163";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21163";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21163";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21164";
+import { renderTreeDistribution } from "./distribution.js?v=21164";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21164";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21164";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21163";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21163";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21164";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21164";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21163";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21164";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21163";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21164";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -369,7 +369,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21163');
+    const m = await import('./migration-v2715.js?v=21164');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -391,7 +391,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21163');
+    const m = await import('./migration-v2715.js?v=21164');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1094,6 +1094,16 @@ async function renderProjectHome(root, projectId) {
   if (isSystemAdmin()) {
     queueMicrotask(() => renderRectConversionBanner(projectId));
   }
+
+  // v2.11.64：若預設 active tab（樣區）被模組關閉（純行政專案），自動切到第一個可見 tab
+  //   原本 plots 為硬編預設 active；當 admin_harvest-only 專案關掉所有 plot 模組 → 樣區分頁 hidden，
+  //   但內容仍顯示「樣區清單 (0 / 50) 尚無樣區」誤導 user。改為偵測並主動點第一個可見 tab。
+  queueMicrotask(() => {
+    const activeLink = document.querySelector('.tab-link.border-forest-700:not(.hidden)');
+    if (activeLink) return;
+    const firstVisible = document.querySelector('.tab-link:not(.hidden)');
+    if (firstVisible) firstVisible.click();
+  });
 
   // tab 切換
   $$('.tab-link').forEach(a => a.addEventListener('click', e => {
@@ -2580,6 +2590,33 @@ async function renderSettings() {
         editBtn
       );
       settingsView.appendChild(infoZone);
+    }
+
+    // v2.11.64：方法學編輯備援卡片
+    //   背景：純行政專案（如土肉桂葉片監測，僅啟用 admin_harvest）可關掉所有 plot 模組 → 設計分頁也消失。
+    //   若 admin 後來想再開啟 plot 模組（例如改回完整生態調查），需有不依賴設計分頁的入口。
+    //   本卡片永遠顯示在設定分頁，PI/admin 可直接呼叫 openMethodologyForm；批量建立空殼樣區同理。
+    if (settingsView && !settingsView.querySelector('#methodology-zone')) {
+      const methZone = el('div', {
+        id: 'methodology-zone',
+        class: 'bg-white border border-stone-200 rounded-lg shadow p-4 mt-4'
+      },
+        el('h3', { class: 'font-semibold mb-2' }, '⚙️ 方法學與調查模組'),
+        el('p', { class: 'text-sm text-stone-600 mb-3' },
+          '編輯本專案啟用之調查模組（樣區/QAQC/修枝採收行政等）、樣區規格、軸 B 設定。' +
+          '若關閉所有樣區模組，「樣區/設計/儀表板」分頁會自動隱藏；可在此處重新啟用。'),
+        el('div', { class: 'flex gap-2 flex-wrap' },
+          el('button', {
+            class: 'bg-forest-700 hover:bg-forest-800 text-white px-4 py-2 rounded text-sm font-medium',
+            onclick: () => forms.openMethodologyForm(state.project)
+          }, '✏️ 編輯方法學'),
+          el('button', {
+            class: 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium',
+            onclick: () => forms.openBatchPlotsForm(state.project)
+          }, '＋ 批量建立空殼樣區')
+        )
+      );
+      settingsView.appendChild(methZone);
     }
   }
 

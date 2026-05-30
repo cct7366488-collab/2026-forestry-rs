@@ -53,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21163">
+  <link rel="stylesheet" href="style.css?v=21164">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -66,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.63</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.64</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -266,11 +266,13 @@
     </div>
 
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
-      <a href="#" data-tab="plots" class="tab-link px-3 py-2 border-b-2 border-forest-700 font-medium text-sm">樣區</a>
-      <a href="#" data-tab="design" data-role-show="pi-edit,surveyor,reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設計</a>
+      <!-- v2.11.64：樣區/設計/儀表板 改由任一 plot 家族模組決定 — 純行政專案（如土肉桂葉片監測會計系統，
+           僅啟用 admin_harvest）可一次隱藏三個分頁。方法學編輯入口在 設定 分頁有備援卡片。 -->
+      <a href="#" data-tab="plots" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest" class="tab-link px-3 py-2 border-b-2 border-forest-700 font-medium text-sm">樣區</a>
+      <a href="#" data-tab="design" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest" data-role-show="pi-edit,surveyor,reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設計</a>
       <a href="#" data-tab="pending" data-module="qaqc" data-role-show="pi" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">待審核 <span id="pending-count" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
       <a href="#" data-tab="myflagged" data-module="qaqc" data-role-show="surveyor" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">我被 flag <span id="myflagged-count" class="ml-1 text-xs bg-red-100 text-red-800 px-1.5 rounded-full"></span></a>
-      <a href="#" data-tab="dashboard" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">儀表板</a>
+      <a href="#" data-tab="dashboard" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">儀表板</a>
       <a href="#" data-tab="map" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm">地圖</a>
       <!-- v2.7.17：審查（QAQC）— reviewer / admin 才看到 -->
       <a href="#" data-tab="qaqc" data-module="qaqc" data-role-show="reviewer,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">🔍 審查（QAQC） <span id="qaqc-progress-pill" class="ml-1 text-xs bg-amber-100 text-amber-800 px-1.5 rounded-full"></span></a>
@@ -285,7 +287,7 @@
       <a href="#" data-tab="settings" data-role-show="pi,admin" class="tab-link px-3 py-2 border-b-2 border-transparent text-stone-600 text-sm hidden">設定</a>
     </nav>
 
-    <section data-tab-content="plots">
+    <section data-tab-content="plots" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest">
       <div class="flex justify-between items-center mb-3">
         <h2 class="text-lg font-semibold">樣區清單 <span id="plot-progress" class="text-sm text-stone-500"></span></h2>
         <button id="btn-new-plot" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新樣區</button>
@@ -362,7 +364,7 @@
       </div>
     </section>
 
-    <section data-tab-content="design" class="hidden">
+    <section data-tab-content="design" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest" class="hidden">
       <h2 class="text-lg font-semibold mb-3">方法學設計</h2>
       <p class="text-sm text-stone-600 mb-4">PI 設定本專案的樣區規格、必填欄位、調查模組。surveyor 加新樣區時會自動套用。</p>
       <div id="methodology-display" class="bg-white rounded-lg shadow p-4 space-y-3 text-sm"></div>
@@ -387,7 +389,7 @@
       <div id="myflagged-list" class="bg-white rounded-lg shadow"></div>
     </section>
 
-    <section data-tab-content="dashboard" class="hidden space-y-4">
+    <section data-tab-content="dashboard" data-module="tree,regeneration,understory,soilCons,soil,wildlife,harvest" class="hidden space-y-4">
       <div id="dashboard-summary" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="font-semibold mb-2">直徑分布</h3>
@@ -724,6 +726,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21163"></script>
+<script type="module" src="js/app.js?v=21164"></script>
 </body>
 </html>
