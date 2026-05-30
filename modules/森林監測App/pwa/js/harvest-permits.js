@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21162';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21163';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -341,7 +341,9 @@ function buildWorkUnitPicker(project, existingMeta, onPick) {
     });
     unitSel.disabled = false;
     summary.innerHTML = '';
-    onPick(null);
+    // v2.11.63：zone+lessee 已選定但 unit 未選 → fire partial wu，讓 caller 可自動帶入申請人姓名等
+    //   partial: true 旗標讓 caller 區分「部分選擇（未進 Firestore meta）」vs「完整三層選擇（commit meta）」
+    onPick({ zone: z, lessee: l, unitId: null, partial: true });
   }
   function refreshSummary() {
     const z = zoneSel.value, l = lesseeSel.value;
@@ -634,9 +636,30 @@ export function openHarvestPermitForm(project, existing = null) {
     }
   }
   areaInput.addEventListener('input', recalcTreesFromArea);
+  // v2.11.63：申請人姓名 / 聯絡方式抽出為獨立 input — picker 選承租人時可自動填申請人姓名；聯絡方式改必填
+  const applicantNameInput = el('input', {
+    id: 'hp-applicantName', name: 'applicantName', type: 'text', required: 'true',
+    class: 'w-full border rounded px-2 py-1 text-sm',
+    value: p.applicantName || (state.userDoc?.displayName ?? '')
+  });
+  const contactInput = el('input', {
+    id: 'hp-contact', name: 'contact', type: 'text', required: 'true',
+    class: 'w-full border rounded px-2 py-1 text-sm',
+    value: p.contact || '',
+    placeholder: '電話或 email'
+  });
   const picker = buildWorkUnitPicker(project, p.landParcelMeta, (wu) => {
-    pickedMeta = wu;
-    if (wu) {
+    if (!wu) {
+      pickedMeta = null;
+      return;
+    }
+    // v2.11.63：承租人已知（partial 或 full） → 自動覆蓋申請人姓名（user 5/30 拍板，承租人 = 申請人為原則）
+    //   覆蓋既有值（即使是 displayName 預設或手動輸入）— user 期待承租人選擇為單一可信來源；
+    //   若 user 想保留手填，最後手動再改即可。
+    if (wu.lessee) applicantNameInput.value = wu.lessee;
+    // 完整選擇（含作業單元）→ commit metadata + 帶入 landParcel + 面積（重複 onChange 不會錯）
+    if (!wu.partial && wu.unitId) {
+      pickedMeta = wu;
       if (wu.landParcelText) landParcelInput.value = wu.landParcelText;
       if (wu.area_ha != null && !areaInput.value) {
         areaInput.value = String(wu.area_ha);
@@ -645,8 +668,17 @@ export function openHarvestPermitForm(project, existing = null) {
     }
   });
   const f = el('form', { class: 'space-y-2' },
-    fld('申請人姓名', 'applicantName', { required: true, value: p.applicantName || (state.userDoc?.displayName ?? '') }),
-    fld('聯絡方式（電話／email）', 'contact', { value: p.contact || '' }),
+    el('div', {},
+      el('label', { for: 'hp-applicantName', class: 'block text-sm font-medium mb-0.5' },
+        '申請人姓名', el('span', { class: 'text-red-600' }, ' *')),
+      applicantNameInput,
+      el('div', { class: 'text-xs text-stone-500 mt-0.5' }, '下方選承租人後會自動帶入；可手動編輯。')
+    ),
+    el('div', {},
+      el('label', { for: 'hp-contact', class: 'block text-sm font-medium mb-0.5' },
+        '聯絡方式（電話／email）', el('span', { class: 'text-red-600' }, ' *')),
+      contactInput
+    ),
     picker,
     el('div', {},
       el('label', { for: 'hp-landParcel', class: 'block text-sm font-medium mb-0.5' },
@@ -703,6 +735,11 @@ export function openHarvestPermitForm(project, existing = null) {
     };
     if (!data.applicantName || !data.landParcel) {
       toast('請填申請人、林班/地號');
+      return;
+    }
+    // v2.11.63：聯絡方式必填（送出公文/許可單需有可聯絡途徑）
+    if (!data.contact) {
+      toast('請填聯絡方式（電話或 email）');
       return;
     }
     // v2.11.59：修枝起迄日必填 + 順序檢查（草稿亦擋，避免不完整資料散落 Firestore）
