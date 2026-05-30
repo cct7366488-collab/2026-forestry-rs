@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21161';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21162';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -157,11 +157,20 @@ function permitCard(project, p, reviewMode) {
         class: 'w-full text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded'
       }, '✅ 已核准 → 請至「🌾 葉片採收回報及結案」分頁填報實際葉片採收量，回報完畢後結案'));
     }
-    if (p.status === 'draft' && mineOrManager) {
+    // v2.11.62：刪除按鈕分兩款
+    //   (A) 林農 owner 刪自己「草稿」：小型下劃線連結（已有，保持低調避免誤刪）
+    //   (B) PI/admin 任何狀態：紅框醒目按鈕（清練習案 / 修誤鍵案件用；含 cascade logs）
+    if (p.status === 'draft' && mineOrManager && !isPi() && !isSystemAdmin()) {
       actions.appendChild(el('button', {
         class: 'text-xs text-red-600 hover:text-red-800 underline',
-        onClick: () => deletePermit(project, p)
+        onClick: () => deletePermit(state.project, p)
       }, '✕ 刪除草稿'));
+    }
+    if (isPi() || isSystemAdmin()) {
+      actions.appendChild(el('button', {
+        class: 'text-xs bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 px-2 py-1 rounded',
+        onClick: () => deletePermit(state.project, p)
+      }, '🗑️ 刪除申請案'));
     }
     // 申請公文「函」稿 — 草稿/送出後皆可下載，供紙本正式發文（電子＋文書雙軌同步）
     if (mineOrManager) {
@@ -764,13 +773,37 @@ async function submitPermit(project, p) {
   }
 }
 
+// v2.11.62：刪除申請案 — 含 cascade（先刪 logs 子集合再刪 doc）+ 警告對話框列出案件摘要
+//   開放對象：草稿 owner（保留舊行為）/ PI / admin（任何狀態）。
+//   warning 文字依案件狀態組裝，已核准/已採收的案件特別標示「將同時失效」與「累計回報量」。
 async function deletePermit(project, p) {
-  if (!confirm('確定刪除此草稿？此操作無法復原。')) return;
+  const statusLabel = HP_STATUS[p.status]?.label || p.status;
+  const hasLogs = (p.totalLogged_kg || 0) > 0;
+  const lines = [
+    '確定刪除此修枝申請？',
+    '',
+    `申請人：${p.applicantName || '—'}`,
+    `林地：${p.landParcel || '—'}`,
+    `狀態：${statusLabel}`,
+  ];
+  if (p.applicantDocNo) lines.push(`發文字號：${p.applicantDocNo}`);
+  if (p.permitNo) lines.push(`⚠ 法定許可文號：${p.permitNo}（將同時失效）`);
+  if (hasLogs) lines.push(`⚠ 已有採收回報累計 ${p.totalLogged_kg} kg，將連同子集合一併刪除`);
+  lines.push('', '刪除後無法恢復。');
+  if (!confirm(lines.join('\n'))) return;
   try {
+    // 1. 子集合 logs 先刪（草稿/已送出/已駁回案多半為空集合）
+    const logsRef = collection(db, 'projects', project.id, 'harvestPermits', p.id, 'logs');
+    const logsSnap = await getDocs(logsRef);
+    if (logsSnap.size > 0) {
+      await Promise.all(logsSnap.docs.map(d => deleteDoc(d.ref)));
+    }
+    // 2. 刪 permit doc
     await deleteDoc(doc(db, 'projects', project.id, 'harvestPermits', p.id));
-    toast('已刪除草稿');
-    renderHarvestApply(project);
+    toast(`已刪除（${p.applicantName || '—'} / ${statusLabel}）`);
+    renderHarvestApply(state.project);
   } catch (e) {
+    console.error('deletePermit failed', e);
     toast('刪除失敗：' + e.message);
   }
 }

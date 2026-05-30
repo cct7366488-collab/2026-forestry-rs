@@ -232,9 +232,18 @@ service cloud.firestore {
             && (harvestPermitDoc(projectId, permitId).createdBy == request.auth.uid
                 || isPi(projectId) || isSystemAdmin());
 
-          allow update, delete: if isSignedIn()
+          // v2.11.62：update 仍限 approved/harvesting + owner/pi/admin（避免結案後個資爭議）；
+          //   delete 對 PI/admin 跨狀態放行（含 completed/rejected），供「練習用案件清理 / 誤鍵案件
+          //   重設」用例。owner 仍受 approved/harvesting 限制。
+          allow update: if isSignedIn()
             && harvestPermitDoc(projectId, permitId).get('status', 'draft') in ['approved', 'harvesting']
             && (isOwner() || isPi(projectId) || isSystemAdmin());
+          allow delete: if isSignedIn() && (
+            (harvestPermitDoc(projectId, permitId).get('status', 'draft') in ['approved', 'harvesting']
+              && isOwner())
+            || isPi(projectId)
+            || isSystemAdmin()
+          );
         }
       }
 
