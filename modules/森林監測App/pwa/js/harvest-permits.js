@@ -1,7 +1,8 @@
 // js/harvest-permits.js — 土肉桂修枝（修下枝葉採取）：林產物採取許可電子化（全鏈路 + 公文稿 + 合作社彙整，v2.11.44）
 //
 // 行政流程（依《森林法》第 15 條 / 林產物處分相關規定）：
-//   林農申請（修枝）→ 林保署核准（生法定許可文號）→ 葉片採收量登錄（累計 vs 核准量）→ 結案
+//   林農申請（修枝）→ 林保署核准（生法定許可文號）→ 葉片採收量登錄（累計實際量）→ 結案
+//   v2.11.69：許可不再預估/限制採收量，葉片採收以實際回報為準（不設上限）
 //   雙軌：申請端可印「申請公文函稿」、核准端可印「林產物採取許可單」（皆即時由線上記錄產生，不另存副本）
 //
 // 狀態機：
@@ -19,7 +20,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21168';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21169';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -78,17 +79,10 @@ function buildApplicantDocNo(seq) {
   return `大雪山林業合作社（修）字第${String(seq).padStart(3, '0')}號`;
 }
 
-// 累計葉片採收 vs 核准量（denormalized 在許可單上，卡片即時顯示）
-function quotaInfo(p) {
-  const approved = p.approvedAmount_kg;
-  const used = p.totalLogged_kg;
-  if (approved == null || used == null) return null;
-  const pct = approved > 0 ? (used / approved) * 100 : 0;
-  let cls = 'text-stone-600';
-  if (pct > 100) cls = 'text-red-700 font-semibold';
-  else if (pct > 90) cls = 'text-amber-700 font-medium';
-  return { text: `已回報 ${used} / 核准 ${approved} kg（${pct.toFixed(0)}%）`, cls, over: pct > 100 };
-}
+// v2.11.69：原 quotaInfo 已廢除（業務拍板：許可只許可修枝作業、不預估/限制採收量；
+//   採收量以實際回報為準、不設預估上限）。schema 保留 approvedAmount_kg 欄位向後相容，
+//   但核准時一律寫 null、UI 全部不顯示。既有資料（吳宏斌 null / 陳璽元 0.9）不動。
+//   累計回報量改成單純顯示 totalLogged_kg、不再與核准量做對照。
 
 // ===== 共用：申請卡片 =====
 function permitCard(project, p, reviewMode) {
@@ -116,11 +110,13 @@ function permitCard(project, p, reviewMode) {
     rows.push(el('div', { class: 'text-xs text-blue-700' }, '✓ 系統識別：' + parts.join(' / ')));
   }
   if (hasPermitDoc) {
+    // v2.11.69：拿掉「核准量 X kg」，只顯示效期；累計回報量改用單一資訊不對照
     rows.push(el('div', { class: 'text-xs text-emerald-700 mt-1' },
-      `核准量 ${fmtNum(p.approvedAmount_kg)} kg　效期 ${p.validFrom || '—'} ~ ${p.validUntil || '—'}`));
-    const q = quotaInfo(p);
-    if (q) rows.push(el('div', { class: `text-xs mt-0.5 ${q.cls}` },
-      q.text + (q.over ? '　⚠ 已超過核准量' : '')));
+      `效期 ${p.validFrom || '—'} ~ ${p.validUntil || '—'}`));
+    if (p.totalLogged_kg != null && p.totalLogged_kg > 0) {
+      rows.push(el('div', { class: 'text-xs text-stone-600 mt-0.5' },
+        `已回報葉片採收累計：${fmtNum(p.totalLogged_kg)} kg`));
+    }
   }
   if ((p.status === 'rejected' || p.status === 'revision') && p.reviewComment) {
     rows.push(el('div', { class: 'text-xs text-red-700 mt-1' }, `審核意見：${p.reviewComment}`));
@@ -566,7 +562,7 @@ export async function renderHarvestApply(project) {
 // 核准後「實際葉片採收量的填報」與「結案」統一在此分頁，使資訊架構對應真實流程：
 //   申請 → 審核 → 【葉片採收回報及結案】 → 彙整。只列該林農 approved/harvesting/completed 的案。
 //   - approved 尚未回報 → 紅幅明示「務必回報」（G2）
-//   - 可分批多次「＋ 填報葉片採收量」；即時顯示 已回報累計 vs 核准量 + 達成率/超量
+//   - 可分批多次「＋ 填報葉片採收量」；即時顯示已回報累計（v2.11.69 起不再對照核准量/算達成率）
 //   - 「✅ 回報完畢並結案」＝明確閘門（G1：closePermit 客戶端 + firestore.rules 雙擋零回報結案）
 function reportLogsTable(logs) {
   return el('table', { class: 'w-full text-xs border-collapse mt-1' },
@@ -587,7 +583,6 @@ function reportLogsTable(logs) {
 function reportCard(project, p) {
   const isDone = p.status === 'completed';
   const logged = p.totalLogged_kg;
-  const approved = p.approvedAmount_kg;
   const noReport = (logged == null || logged <= 0);
 
   const rows = [
@@ -596,18 +591,16 @@ function reportCard(project, p) {
       hpBadge(p.status),
       p.permitNo ? el('span', { class: 'text-xs text-stone-500' }, `許可文號 ${p.permitNo}`) : null
     ),
+    // v2.11.69：拿掉「核准葉片採收量」（許可不再預估上限）
     el('div', { class: 'text-sm text-stone-600' },
-      `林地：${p.landParcel || '—'}　核准葉片採收量：${fmtNum(approved)} kg`),
+      `林地：${p.landParcel || '—'}`),
     el('div', { class: 'text-xs text-stone-500' },
       `效期：${p.validFrom || '—'} ~ ${p.validUntil || '—'}`)
   ];
 
-  const q = quotaInfo(p);
-  rows.push(q
-    ? el('div', { class: `text-sm mt-1 ${q.cls}` },
-        '已回報累計：' + q.text + (q.over ? '　⚠ 已超過核准量' : ''))
-    : el('div', { class: 'text-sm mt-1 text-stone-600' },
-        `已回報累計：${fmtNum(logged || 0)} kg ／ 核准 ${fmtNum(approved)} kg`));
+  // v2.11.69：累計回報量單獨顯示，不再做核准量對照/達成率/超量
+  rows.push(el('div', { class: 'text-sm mt-1 text-stone-700' },
+    `已回報葉片採收累計：${fmtNum(logged || 0)} kg`));
 
   // G2：approved 尚未回報 → 紅幅明示「一定要回報」
   if (p.status === 'approved' && noReport) {
@@ -1093,12 +1086,14 @@ function openDecisionModal(project, p, action) {
   body.appendChild(el('div', { class: 'text-sm text-stone-600' },
     `申請人：${p.applicantName}　林地：${p.landParcel}　修枝面積：${fmtNum(p.forestArea_ha)} ha　修枝株數：${fmtNum(p.estTrees)}`));
 
-  let approvedInput, fromInput, untilInput;
+  // v2.11.69：核准 modal 拿掉「核准葉片採收量 (kg)」欄位 — 業務拍板：許可只許可修枝作業、
+  //   不預估/限制採收量；採收量以實際回報為準。承辦人只需填效期與選填審核附註。
+  let fromInput, untilInput;
   if (isApprove) {
-    approvedInput = el('input', { type: 'number', step: '0.1', min: 0, value: '', class: 'w-full border rounded px-2 py-1 text-sm' });
     fromInput = el('input', { type: 'date', value: p.periodFrom || '', class: 'w-full border rounded px-2 py-1 text-sm' });
     untilInput = el('input', { type: 'date', value: p.periodTo || '', class: 'w-full border rounded px-2 py-1 text-sm' });
-    body.appendChild(el('div', {}, el('label', { class: 'block text-sm font-medium mb-0.5' }, '核准葉片採收量 (kg)'), approvedInput));
+    body.appendChild(el('div', { class: 'text-xs text-stone-500 bg-stone-50 border border-stone-200 rounded px-2 py-1.5' },
+      '本案核准後即許可進行修枝作業；所採取葉片重量由林農於 ForestMRV 線上系統實際回報，不設預估上限。'));
     body.appendChild(el('div', { class: 'grid grid-cols-2 gap-2' },
       el('div', {}, el('label', { class: 'block text-sm font-medium mb-0.5' }, '效期起日'), fromInput),
       el('div', {}, el('label', { class: 'block text-sm font-medium mb-0.5' }, '效期迄日'), untilInput)
@@ -1124,7 +1119,6 @@ function openDecisionModal(project, p, action) {
     confirmBtn.disabled = true;
     try {
       if (isApprove) {
-        const amt = parseFloat(approvedInput.value);
         const permitRef = doc(db, 'projects', project.id, 'harvestPermits', p.id);
         const counterRef = doc(db, 'projects', project.id, 'counters', 'harvestPermit');
         // 法定許可文號不可重號 → Firestore transaction 原子遞增（解 treeCode 非原子同類問題）
@@ -1135,7 +1129,9 @@ function openDecisionModal(project, p, action) {
           tx.set(counterRef, { seq: next }, { merge: true });
           tx.update(permitRef, {
             status: 'approved',
-            approvedAmount_kg: isNaN(amt) ? null : amt,
+            // v2.11.69：approvedAmount_kg 一律寫 null（schema 保留向後相容；UI 全藏；
+            //   業務上不再預估/限制採收量，採收以實際回報為準）
+            approvedAmount_kg: null,
             validFrom: fromInput.value || '',
             validUntil: untilInput.value || '',
             permitNo,
@@ -1175,7 +1171,8 @@ export function openHarvestLogForm(project, permit) {
   bindFb();
   const f = el('form', { class: 'space-y-2' },
     el('div', { class: 'text-sm text-stone-600' },
-      `許可文號 ${permit.permitNo || '—'}　核准量 ${fmtNum(permit.approvedAmount_kg)} kg　已回報 ${fmtNum(permit.totalLogged_kg)} kg`),
+      // v2.11.69：拿掉「核准量」對照，只顯示許可文號 + 已回報累計
+      `許可文號 ${permit.permitNo || '—'}　已回報累計 ${fmtNum(permit.totalLogged_kg)} kg`),
     fld('採收日期', 'logDate', { type: 'date', required: true, value: new Date().toISOString().slice(0, 10) }),
     fld('實際鮮葉重 (kg)', 'amount_kg_fresh', { type: 'number', step: '0.1', min: 0, required: true }),
     fld('乾燥後重 (kg)', 'amount_kg_dry', { type: 'number', step: '0.1', min: 0 }),
@@ -1214,10 +1211,8 @@ export function openHarvestLogForm(project, permit) {
       }
       await updateDoc(doc(db, 'projects', project.id, 'harvestPermits', permit.id), upd);
       closeModal();
-      const over = permit.approvedAmount_kg != null && total > permit.approvedAmount_kg;
-      toast(over
-        ? `⚠ 已回報，累計 ${total} kg 已超過核准量 ${permit.approvedAmount_kg} kg`
-        : `✅ 已回報，累計 ${total} kg`, 4000);
+      // v2.11.69：拿掉超量警告（許可不再設預估上限）
+      toast(`✅ 已回報，累計 ${total} kg`, 4000);
       renderHarvestReport(project);
     } catch (err) {
       console.error('log save 失敗', err);
@@ -1238,12 +1233,11 @@ async function closePermit(project, permit) {
     toast('尚未回報任何葉片採收量 — 請先「＋ 填報葉片採收量」，回報完畢後才能結案', 4000);
     return;
   }
-  const over = permit.approvedAmount_kg != null && logged > permit.approvedAmount_kg;
+  // v2.11.69：拿掉核准量對照（許可不再預估上限）
   if (!confirm(
     `確定「回報完畢並結案」此林產物採取許可？\n\n` +
     `許可文號：${permit.permitNo || '—'}\n` +
-    `累計回報葉片採收量：${fmtNum(logged)} kg ／ 核准 ${fmtNum(permit.approvedAmount_kg)} kg` +
-    (over ? '（⚠ 已超過核准量）' : '') + `\n\n` +
+    `累計回報葉片採收量：${fmtNum(logged)} kg\n\n` +
     `結案代表本案實際葉片採收量已全數回報完畢、不再新增。\n` +
     `結案後不可再填報，狀態固定供分署/合作社查核與彙整。`
   )) return;
@@ -1267,8 +1261,10 @@ async function openPermitDetail(project, permit) {
     el('div', {}, `申請人：${permit.applicantName || '—'}　聯絡：${permit.contact || '—'}`),
     el('div', {}, `林地：${permit.landParcel || '—'}（${fmtNum(permit.forestArea_ha)} ha）`),
     el('div', {}, `修枝方式：${permit.harvestMethod || '—'}　修枝株數：${fmtNum(permit.estTrees)}`),
-    el('div', {}, `核准葉片採收量：${fmtNum(permit.approvedAmount_kg)} kg（鮮葉）`),
+    // v2.11.69：拿掉「核准葉片採收量」整行 + 加一句宣告（業務拍板：許可只許可修枝作業、不預估上限）
     el('div', {}, `效期：${permit.validFrom || '—'} ~ ${permit.validUntil || '—'}`),
+    el('div', { class: 'text-xs text-stone-500 mt-1' },
+      '本許可只許可修枝作業；所採取葉片重量以實際回報為準、不設預估上限。'),
     permit.reviewComment ? el('div', {}, `審核附註：${permit.reviewComment}`) : null
   ));
   const logsBox = el('div', { class: 'text-sm text-stone-500' }, '載入葉片採收紀錄…');
@@ -1280,8 +1276,6 @@ async function openPermitDetail(project, permit) {
   let logs = [];
   try { logs = await loadLogs(project.id, permit.id); } catch {}
   const total = logs.reduce((s, l) => s + (l.amount_kg_fresh || 0), 0);
-  const approved = permit.approvedAmount_kg;
-  const over = approved != null && total > approved;
 
   logsBox.className = 'text-sm';
   logsBox.innerHTML = '';
@@ -1299,8 +1293,9 @@ async function openPermitDetail(project, permit) {
           el('td', { class: 'border px-1 py-0.5' }, l.batch || '—')))
       : [el('tr', {}, el('td', { class: 'border px-1 py-2 text-center text-stone-400', colspan: '5' }, '尚無葉片採收紀錄'))]))
   ));
-  logsBox.appendChild(el('div', { class: `mt-1 ${over ? 'text-red-700 font-semibold' : 'text-stone-700'}` },
-    `累計鮮葉 ${total.toFixed(1)} kg ／ 核准 ${fmtNum(approved)} kg` + (over ? '　⚠ 已超過核准量' : '')));
+  // v2.11.69：拿掉「核准量對照 + 超量警告」，只顯示累計鮮葉採收量
+  logsBox.appendChild(el('div', { class: 'mt-1 text-stone-700 font-medium' },
+    `累計鮮葉採收量：${total.toFixed(1)} kg`));
 
   printBtn.addEventListener('click', () => printPermit(permit, logs, total));
 }
@@ -1311,14 +1306,15 @@ function printPermit(permit, logs, total) {
   const rowsHtml = logs.length
     ? logs.map(l => `<tr><td>${esc(l.logDate)}</td><td style="text-align:right">${esc(l.amount_kg_fresh)}</td><td style="text-align:right">${esc(l.amount_kg_dry)}</td><td style="text-align:right">${esc(l.moisture_pct)}</td><td>${esc(l.batch)}</td></tr>`).join('')
     : '<tr><td colspan="5" style="text-align:center;color:#999">尚無葉片採收紀錄</td></tr>';
-  const over = permit.approvedAmount_kg != null && total > permit.approvedAmount_kg;
+  // v2.11.69：拿掉「核准葉片採收量」row 與「核准量對照/超量警告」；改為一句宣告
   const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
 <title>林產物採取許可單 ${esc(permit.permitNo)}</title>
 <style>body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;margin:32px;color:#222;font-size:13px}
 h1{text-align:center;font-size:20px;margin:0 0 4px}.sub{text-align:center;color:#666;margin-bottom:18px}
 table{border-collapse:collapse;width:100%;margin-top:8px}th,td{border:1px solid #888;padding:4px 8px}
 th{background:#eee}.kv{margin:3px 0}.box{border:1px solid #888;padding:14px 18px;margin-bottom:16px}
-.total{margin-top:10px;font-weight:bold}.over{color:#c00}
+.declare{font-size:12px;color:#666;margin-top:6px;padding-top:6px;border-top:1px dashed #ccc}
+.total{margin-top:10px;font-weight:bold}
 .sign{margin-top:40px;display:flex;justify-content:space-between}
 .noprint{background:#f3f4f6;border:1px solid #ccc;border-radius:6px;padding:8px;margin-bottom:16px;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
 .noprint .hint{flex:1;font-size:12px;color:#666;min-width:140px}
@@ -1330,20 +1326,21 @@ th{background:#eee}.kv{margin:3px 0}.box{border:1px solid #888;padding:14px 18px
 <button style="background:#15803d" onclick="window.print()">🖨️ 列印 / 存 PDF</button>
 <button style="background:#555" onclick="window.close()">✕ 關閉並返回</button>
 </div>
-<h1>林產物採取許可單（土肉桂修枝及枝葉採取）</h1>
+<h1>林產物採取許可單(土肉桂修枝及枝葉採取)</h1>
 <div class="sub">林業及自然保育署臺中分署　中華民國 ${roc} 年</div>
 <div class="box">
 <div class="kv"><b>許可文號：</b>${esc(permit.permitNo)}</div>
 <div class="kv"><b>申請人：</b>${esc(permit.applicantName)}　<b>聯絡方式：</b>${esc(permit.contact)}</div>
-<div class="kv"><b>林地（林班/地號）：</b>${esc(permit.landParcel)}　<b>面積：</b>${esc(permit.forestArea_ha)} ha</div>
+<div class="kv"><b>林地(林班/地號)：</b>${esc(permit.landParcel)}　<b>面積：</b>${esc(permit.forestArea_ha)} ha</div>
 <div class="kv"><b>修枝方式：</b>${esc(permit.harvestMethod)}　<b>土肉桂修枝株數：</b>${esc(permit.estTrees)}</div>
-<div class="kv"><b>核准葉片採收量：</b>${esc(permit.approvedAmount_kg)} kg（鮮葉）　<b>效期：</b>${esc(permit.validFrom)} ~ ${esc(permit.validUntil)}</div>
+<div class="kv"><b>效期：</b>${esc(permit.validFrom)} ~ ${esc(permit.validUntil)}</div>
 ${permit.reviewComment ? `<div class="kv"><b>審核附註：</b>${esc(permit.reviewComment)}</div>` : ''}
+<div class="declare">本許可只許可於上述林地進行土肉桂修枝作業；所採取葉片重量以申請人於 ForestMRV 線上系統實際回報為準，不設預估上限。</div>
 </div>
 <b>葉片採收量登錄紀錄</b>
 <table><thead><tr><th>採收日</th><th>鮮重(kg)</th><th>乾重(kg)</th><th>含水率%</th><th>批次</th></tr></thead>
 <tbody>${rowsHtml}</tbody></table>
-<div class="total ${over ? 'over' : ''}">累計鮮葉採收量：${total.toFixed(1)} kg ／ 核准量：${esc(permit.approvedAmount_kg)} kg${over ? '　⚠ 已超過核准量' : ''}</div>
+<div class="total">累計鮮葉採收量：${total.toFixed(1)} kg</div>
 <div class="sign"><div>申請人簽章：________________</div><div>分署核章：________________</div></div>
 </body></html>`;
   const w = window.open('', '_blank');
