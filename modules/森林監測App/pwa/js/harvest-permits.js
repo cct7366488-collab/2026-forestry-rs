@@ -19,7 +19,7 @@
 // 注意：本模組所有 import 的 ?v= 須與 index.html / app.js 一致（ESM 單實例，見 SW v2.10.2 雷）
 // 文案：B1（2026-05-20 分署意見）申請主體＝「修枝」、事後實際量＝「葉片採收」；Firestore field 名一律不動（保 prod 資料）。
 
-import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21166';
+import { fb, $, el, toast, openModal, closeModal, state, isPi, isSystemAdmin } from './app.js?v=21167';
 
 // ⚠ 不可在模組頂層 destructure fb：app.js ⇄ harvest-permits.js 為循環 import，
 //   模組求值時 app.js body 尚未執行、export const fb 還在 TDZ → 整個 module graph throw → 白畫面。
@@ -176,7 +176,7 @@ function permitCard(project, p, reviewMode) {
     if (mineOrManager) {
       actions.appendChild(el('button', {
         class: 'text-xs border border-stone-400 text-stone-700 hover:bg-stone-50 px-2 py-1 rounded',
-        onClick: () => printApplicationLetter(p)
+        onClick: () => printApplicationLetter(p, state.project)
       }, '📄 申請公文稿'));
     }
   }
@@ -1347,8 +1347,154 @@ ${permit.reviewComment ? `<div class="kv"><b>審核附註：</b>${esc(permit.rev
   w.document.close();
 }
 
+// ===== v2.11.67：自製 SVG 作業位置圖（給申請公文稿附件區嵌入）=====
+//   設計選擇：用 SVG inline（非 leaflet-image / html2canvas）— 無 CORS 問題、無外部依賴、
+//   black/white 印表友善、確定性高。
+//   邏輯：
+//     1. 從 project.boundaryGeoJsonStr (FC) 找出 unitId 對應作業單元（紅色高亮）
+//     2. 收集 bbox 1.5× 範圍內的鄰近作業單元（灰色當 context）
+//     3. 緯度補償 (lon * cos(lat))，保留正確 aspect ratio
+//     4. 等比例縮放置中到 width × height 視窗
+//     5. 加 N 北方箭頭 + 中央 unitId 標籤
+function buildLocationSvg(project, meta, opts = {}) {
+  const width = opts.width || 420;
+  const height = opts.height || 300;
+  const padding = 12;
+  const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+  if (!project?.boundaryGeoJsonStr || !meta?.unitId) return null;
+  let geo;
+  try { geo = JSON.parse(project.boundaryGeoJsonStr); }
+  catch { return null; }
+  if (geo?.type !== 'FeatureCollection') return null;
+
+  // helpers
+  const collectCoords = (g, out) => {
+    if (!g) return;
+    if (g.type === 'Polygon') g.coordinates.forEach(ring => ring.forEach(c => out.push(c)));
+    else if (g.type === 'MultiPolygon') g.coordinates.forEach(p => p.forEach(ring => ring.forEach(c => out.push(c))));
+  };
+  const featureBbox = (f) => {
+    const cs = [];
+    collectCoords(f.geometry, cs);
+    if (cs.length === 0) return null;
+    let mnX=Infinity, mxX=-Infinity, mnY=Infinity, mxY=-Infinity;
+    for (const [x, y] of cs) {
+      if (x<mnX)mnX=x; if (x>mxX)mxX=x; if (y<mnY)mnY=y; if (y>mxY)mxY=y;
+    }
+    return { minX: mnX, maxX: mxX, minY: mnY, maxY: mxY };
+  };
+  const expandBbox = (b, factor) => {
+    const w = (b.maxX - b.minX) || 0.0001;
+    const h = (b.maxY - b.minY) || 0.0001;
+    return { minX: b.minX - w*factor, maxX: b.maxX + w*factor, minY: b.minY - h*factor, maxY: b.maxY + h*factor };
+  };
+  const bboxIntersects = (a, b) =>
+    !(a.maxX < b.minX || b.maxX < a.minX || a.maxY < b.minY || b.maxY < a.minY);
+
+  // 找目標作業單元
+  const targets = geo.features.filter(f => {
+    const code = f.properties?.['作業區'] || f.properties?.['標示'];
+    return code === meta.unitId;
+  });
+  if (targets.length === 0) return null;
+
+  // 合併目標 bbox
+  let tBbox = null;
+  for (const t of targets) {
+    const b = featureBbox(t);
+    if (!b) continue;
+    if (!tBbox) tBbox = { ...b };
+    else {
+      tBbox.minX = Math.min(tBbox.minX, b.minX); tBbox.maxX = Math.max(tBbox.maxX, b.maxX);
+      tBbox.minY = Math.min(tBbox.minY, b.minY); tBbox.maxY = Math.max(tBbox.maxY, b.maxY);
+    }
+  }
+  if (!tBbox) return null;
+
+  // 鄰近作業單元（1.5× target bbox 內）為 context
+  const ctxBbox = expandBbox(tBbox, 1.5);
+  const ctxs = geo.features.filter(f => {
+    if (targets.includes(f)) return false;
+    const b = featureBbox(f);
+    return b && bboxIntersects(b, ctxBbox);
+  });
+
+  // 視窗 bbox = ctxBbox 再加 5% 視覺 padding
+  const vBbox = expandBbox(ctxBbox, 0.05);
+
+  // 緯度補償：lon * cos(lat_center)
+  const latCenter = (vBbox.minY + vBbox.maxY) / 2;
+  const lonScale = Math.cos(latCenter * Math.PI / 180);
+  const dataW = (vBbox.maxX - vBbox.minX) * lonScale;
+  const dataH = vBbox.maxY - vBbox.minY;
+  const viewW = width - 2*padding, viewH = height - 2*padding;
+  const dataAspect = dataW / dataH;
+  const viewAspect = viewW / viewH;
+  let scale, offsetX, offsetY;
+  if (dataAspect > viewAspect) {
+    scale = viewW / dataW;
+    offsetX = padding;
+    offsetY = padding + (viewH - dataH * scale) / 2;
+  } else {
+    scale = viewH / dataH;
+    offsetX = padding + (viewW - dataW * scale) / 2;
+    offsetY = padding;
+  }
+  const toX = (lon) => offsetX + (lon - vBbox.minX) * lonScale * scale;
+  const toY = (lat) => offsetY + (vBbox.maxY - lat) * scale;
+
+  const geomToPath = (g) => {
+    const polys = [];
+    if (g.type === 'Polygon') polys.push(g.coordinates);
+    else if (g.type === 'MultiPolygon') g.coordinates.forEach(p => polys.push(p));
+    return polys.map(rings =>
+      rings.map(ring =>
+        'M ' + ring.map(([lon, lat]) => `${toX(lon).toFixed(1)},${toY(lat).toFixed(1)}`).join(' L ') + ' Z'
+      ).join(' ')
+    ).join(' ');
+  };
+
+  const ctxPaths = ctxs.map(f => `<path d="${geomToPath(f.geometry)}" fill="#e5e7eb" stroke="#6b7280" stroke-width="0.5" opacity="0.85"/>`).join('');
+  const tgtPaths = targets.map(f => `<path d="${geomToPath(f.geometry)}" fill="#fecaca" stroke="#991b1b" stroke-width="1.5"/>`).join('');
+
+  // 標籤：目標 unitId（粗體紅）+ 鄰近作業單元小灰標籤
+  const tLabel = (() => {
+    const cx = (tBbox.minX + tBbox.maxX) / 2;
+    const cy = (tBbox.minY + tBbox.maxY) / 2;
+    return `<text x="${toX(cx).toFixed(1)}" y="${(toY(cy) + 3).toFixed(1)}" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="bold" fill="#7f1d1d">${esc(meta.unitId)}</text>`;
+  })();
+  const ctxLabels = ctxs.map(f => {
+    const code = f.properties?.['作業區'] || f.properties?.['標示'] || '';
+    if (!code) return '';
+    const b = featureBbox(f);
+    if (!b) return '';
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    return `<text x="${toX(cx).toFixed(1)}" y="${(toY(cy) + 2).toFixed(1)}" text-anchor="middle" font-family="sans-serif" font-size="7" fill="#4b5563">${esc(code)}</text>`;
+  }).join('');
+
+  // 北方箭頭（右上）
+  const northArrow = `
+    <g transform="translate(${width - 22},${22})">
+      <polygon points="0,-12 -5,-2 0,-5 5,-2" fill="#111827" stroke="none"/>
+      <line x1="0" y1="-5" x2="0" y2="8" stroke="#111827" stroke-width="1"/>
+      <text x="0" y="-15" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="bold" fill="#111827">N</text>
+    </g>`;
+
+  // 邊框
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="background:#f9fafb;border:1px solid #6b7280;">
+    ${ctxPaths}
+    ${ctxLabels}
+    ${tgtPaths}
+    ${tLabel}
+    ${northArrow}
+  </svg>`;
+}
+
 // ===== 申請公文「函」稿（林農端，紙本正式發文用；與線上記錄同一資料來源）=====
-function printApplicationLetter(permit) {
+//   v2.11.67：accept project 參數，呼叫 buildLocationSvg 嵌入位置圖
+function printApplicationLetter(permit, project = null) {
   const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
   const today = new Date();
   const rocFull = d => `中華民國 ${d.getFullYear() - 1911} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`;
@@ -1359,6 +1505,10 @@ function printApplicationLetter(permit) {
     return `${d.getFullYear() - 1911} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`;
   };
   const v = x => (x == null || x === '') ? '—' : esc(x);
+  // v2.11.67：嘗試產生作業位置 SVG（需 project + permit.landParcelMeta.unitId）；失敗則 locationSvg=null
+  const locationSvg = (project && permit?.landParcelMeta?.unitId)
+    ? buildLocationSvg(project, permit.landParcelMeta, { width: 420, height: 300 })
+    : null;
   const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
 <title>土肉桂修枝申請函 ${v(permit.applicantName)}</title>
 <style>
@@ -1374,6 +1524,13 @@ ol{margin:4px 0 4px 0;padding-left:1.8em}ol li{margin:4px 0}
 .recv{margin-top:26px;border:1px solid #000;padding:8px 12px;font-size:14px}
 .recv .h{font-weight:bold;margin-bottom:6px}
 .line{display:inline-block;border-bottom:1px solid #000;min-width:8em}
+/* v2.11.67：作業位置示意圖 */
+.loc-map{margin:14px 0;padding:8px;border:1px solid #000;page-break-inside:avoid}
+.loc-map-title{font-weight:bold;font-size:15px;margin-bottom:4px}
+.loc-map-sub{font-size:12px;color:#374151;margin-bottom:6px;line-height:1.4}
+.loc-map-svg{text-align:center;margin:6px 0}
+.loc-map-svg svg{max-width:100%;height:auto}
+.loc-map-meta{font-size:13px;margin-top:6px;border-top:1px dashed #6b7280;padding-top:4px}
 .noprint{background:#f3f4f6;border:1px solid #ccc;border-radius:6px;padding:8px;margin:-1cm -1cm 18px;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;font-family:"Microsoft JhengHei",sans-serif}
 .noprint .hint{flex:1;font-size:12px;color:#666;min-width:140px}
 .noprint button{border:0;padding:9px 16px;border-radius:6px;font-size:15px;color:#fff;cursor:pointer}
@@ -1406,6 +1563,12 @@ ol{margin:4px 0 4px 0;padding-left:1.8em}ol li{margin:4px 0}
 <tr><th>修枝作業期間</th><td colspan="3">${permit.periodFrom ? esc(permit.periodFrom) : '—'} ~ ${permit.periodTo ? esc(permit.periodTo) : '—'}</td></tr>
 <tr><th>備註</th><td colspan="3">${v(permit.note)}</td></tr>
 </table>
+${locationSvg ? `<div class="loc-map">
+  <div class="loc-map-title">附圖：作業位置示意圖</div>
+  <div class="loc-map-sub">紅色實心區域為本次申請修枝作業單元；灰色為鄰近作業單元（context）。圖面上方為地理北方。</div>
+  <div class="loc-map-svg">${locationSvg}</div>
+  <div class="loc-map-meta">作業單元代碼：<b>${v(permit.landParcelMeta?.unitId)}</b>　│　專區：${v(permit.landParcelMeta?.zone)}　│　承租人：${v(permit.landParcelMeta?.lessee)}</div>
+</div>` : ''}
 <div class="sign">申請人：________________（簽章）<br>身分證／統一編號：________________<br>申請日期：${rocFull(today)}</div>
 <div class="recv">
 <div class="h">（以下由林業及自然保育署臺中分署收件填用）</div>
