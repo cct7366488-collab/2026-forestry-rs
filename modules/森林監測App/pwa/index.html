@@ -53,7 +53,7 @@
   <!-- proj4 (TWD97 ↔ WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
 
-  <link rel="stylesheet" href="style.css?v=21169">
+  <link rel="stylesheet" href="style.css?v=21170">
 </head>
 <body class="bg-stone-50 text-stone-900 min-h-screen">
 
@@ -66,7 +66,7 @@
         <span class="text-base font-bold tracking-wide flex items-baseline gap-1.5">
           ForestMRV
           <!-- v2.8.2：版本號顯示，方便快速辨識當前 prod 載入版本 -->
-          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.69</span>
+          <span id="app-version-badge" class="text-[10px] font-normal bg-amber-500/30 text-amber-100 px-1.5 py-0.5 rounded font-mono" title="當前載入版本（SW cache 對應）">v2.11.70</span>
         </span>
         <span class="text-[10px] text-stone-300 hidden sm:inline">智慧森林監測平臺</span>
       </span>
@@ -427,6 +427,18 @@
         <p class="text-xs text-stone-500 mb-2">列 = 樣區、欄 = 樹種；最後 1 欄 = 「其他」彙整尾部、最後 2 列 = 平均 / 總計。可橫向捲動。</p>
         <div id="species-matrix" class="overflow-x-auto text-xs"></div>
       </div>
+      <!-- v2.11.70（I-6）：複查成長報表 — 跨期年均成長 / 枯死率 / 進界木 / 淨 ΔC（價值出口）-->
+      <div class="bg-white rounded-lg shadow p-4" data-module="tree">
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h3 class="font-semibold">🔁 複查成長報表（I-6）</h3>
+          <div class="flex gap-2">
+            <button id="btn-resurvey-report" class="bg-forest-700 text-white px-3 py-1.5 rounded text-sm">產生複查報表</button>
+            <button id="btn-resurvey-csv" class="hidden border px-3 py-1.5 rounded text-sm">匯出 CSV</button>
+          </div>
+        </div>
+        <p class="text-xs text-stone-500 mb-2">跨期年均 DBH／樹高成長、枯死率、進界木與淨碳變化（ΔC）— 對應 AR-TMS0001／0002／0004 監測量化。需第二期起的逐期 measurement 歷史（或先執行 backfill 補建第一期）。</p>
+        <div id="resurvey-report-result" class="text-sm text-stone-500">按「產生複查報表」載入逐期歷史並計算。</div>
+      </div>
     </section>
 
     <section data-tab-content="map" class="hidden">
@@ -578,6 +590,9 @@
       </div>
     </div>
 
+    <!-- I-2（路 I 複查）：永久樣區複查期別 banner（renderPlotDetail 動態填入）-->
+    <div id="plot-period-banner" class="hidden"></div>
+
     <nav class="flex gap-2 border-b overflow-x-auto whitespace-nowrap">
       <a href="#" data-subtab="overview" class="subtab-link px-4 py-2 border-b-2 border-forest-700 font-medium">📊 樣區概況</a>
       <a href="#" data-subtab="trees" class="subtab-link px-4 py-2 border-b-2 border-transparent text-stone-600">🌳 立木調查</a>
@@ -624,6 +639,14 @@
       <div class="flex justify-between items-center mb-3">
         <h2 class="text-lg font-semibold">立木列表 <span id="tree-count" class="text-sm text-stone-500"></span></h2>
         <button id="btn-new-tree" class="bg-forest-700 text-white px-3 py-1.5 rounded-lg text-sm hidden" data-role-show="pi,surveyor">＋ 新立木</button>
+      </div>
+      <!-- I-3（v2.11.70）：樹牌號碼跳轉 — 複查現場面對數十棵立木免捲列表，輸入樹牌號秒跳編輯 -->
+      <div id="tree-jump-bar" class="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 flex items-center gap-2 hidden" data-role-show="pi,surveyor,admin">
+        <span class="text-sm font-medium text-blue-900 whitespace-nowrap">🔖 樹牌跳轉</span>
+        <input id="tree-jump-input" type="text" inputmode="numeric" autocomplete="off"
+          placeholder="輸入樹牌號（如 12 或完整 PLOT-012）"
+          class="flex-1 border border-blue-300 rounded px-2 py-1.5 text-sm" />
+        <button id="tree-jump-go" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm whitespace-nowrap">跳轉</button>
       </div>
       <div id="tree-summary" class="bg-white rounded-lg shadow p-3 mb-3 text-sm grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
       <div id="tree-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
@@ -728,6 +751,6 @@
 </div>
 
 <!-- ===== Scripts ===== -->
-<script type="module" src="js/app.js?v=21169"></script>
+<script type="module" src="js/app.js?v=21170"></script>
 </body>
 </html>

@@ -1,27 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge } from './app.js?v=21169';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21170';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21169';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21170';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21169';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21170';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21169';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21169';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21170';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21170';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21169';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21170';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21169';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21170';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21169';
+import { createSpeciesPicker } from './species-picker.js?v=21170';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21169';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21170';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21169';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21170';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21169';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21170';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -477,6 +477,239 @@ export async function quickAddPhoto(project, plot) {
   });
 
   input.click();
+}
+
+// ===== I-2（路 I 複查 / v2.11.70）：永久樣區複查期別管理 =====
+// 期別物件：{ seq, label, openedAt, openedBy, closedAt|null, note|null }
+//   openedAt/closedAt 一律 client Date（Firestore serverTimestamp 不可用於陣列元素內）。
+//   既有 plot 無 periods → UI 合成隱含第一期，不寫回 DB（零強制 migration、向後相容）。
+
+/** 從 plot 推導期別清單；既有 plot 無 periods → 合成隱含「第一期（原調查）」（不寫回 DB） */
+export function derivePlotPeriods(plot) {
+  const arr = Array.isArray(plot?.periods) ? plot.periods : [];
+  if (arr.length > 0) return arr;
+  return [{
+    seq: 1,
+    label: '第一期（原調查）',
+    openedAt: plot?.createdAt || plot?.establishedAt || null,
+    openedBy: plot?.createdBy || null,
+    closedAt: null,
+    note: null
+  }];
+}
+
+/** 目前作用中的期別物件 */
+export function currentPlotPeriod(plot) {
+  const periods = derivePlotPeriods(plot);
+  const cur = plot?.currentPeriod;
+  return periods.find(p => p.seq === cur) || periods[periods.length - 1];
+}
+
+/** 開啟新一期複查（I-2 期別模型 + I-2b 重啟採集）：
+ *  - append 一筆期別、把前一期標 closedAt、currentPeriod 指向新期；
+ *  - 若專案目前 locked（第 N-1 期已 verified+鎖）→ 同步重啟採集：先把該期查證狀態
+ *    存入 project.periodVerifications[] 期別查證簿（「曾查證」不遺失），再降回
+ *    status=active / locked=false / 清 verifiedAt-By。第 N-1 期測值已凍結於
+ *    measurements 子集合（I-1，delete=false）→ 重啟採集 MRV 安全。
+ *  - 第二期全 verified 後既有狀態機（applyStatusAfterQA）自動再 review+lock。 */
+export async function openNewPeriod(project, plot) {
+  if (!plot || !plot.id) { toast('找不到樣區資訊'); return; }
+  // 權限對齊 firestore.rules 後門：locked 狀態下僅 admin/pi 可改 periods/currentPeriod/updatedAt
+  if (!(isPi() || isSystemAdmin())) { toast('僅 PI 或系統管理員可開啟新一期複查'); return; }
+  // I-2b：已封存＝案件結束，複查不應靜默解封存
+  if (project.archived === true) { toast('已封存專案不可開啟新一期，請先解封存'); return; }
+
+  const existing = derivePlotPeriods(plot);
+  const maxSeq = existing.reduce((m, p) => Math.max(m, Number(p.seq) || 0), 0);
+  const nextSeq = maxSeq + 1;
+  const wasLocked = project.locked === true;  // I-2b：需重啟採集
+
+  const result = await new Promise(resolve => {
+    const f = el('form', { class: 'space-y-3' },
+      el('p', { class: 'text-sm font-medium' }, `為樣區「${plot.code}」開啟【第 ${nextSeq} 期複查】`),
+      el('p', { class: 'text-xs text-blue-800 bg-blue-50 border border-blue-200 p-2 rounded' },
+        '第 ' + nextSeq + ' 期立木調查存檔時，前一期測值已凍結於歷史測值（I-1，不可改），不會被覆蓋。'),
+      wasLocked ? el('p', { class: 'text-xs text-amber-900 bg-amber-50 border border-amber-300 p-2 rounded' },
+        `⚠ 本案目前已查證並鎖定（${project.status === 'verified' ? '已查證' : '審查中'}）。開啟第 ${nextSeq} 期將把專案重啟為「作業中」以進行第 ${nextSeq} 期採集；第 ${nextSeq - 1} 期之查證紀錄（查證人／時間）會存入「期別查證簿」留存，其測值已凍結不可改。`)
+        : null,
+      el('div', { class: 'field' },
+        el('label', {}, '備註（選填）：'),
+        el('input', { type: 'text', name: 'note', autocomplete: 'off', maxlength: '200',
+          class: 'border rounded px-2 py-1 w-full mt-1', placeholder: '例：2027 年第一次複查回訪' })
+      ),
+      el('div', { class: 'flex gap-2 pt-2' },
+        el('button', { type: 'submit', class: 'flex-1 bg-blue-600 text-white py-2 rounded' },
+          wasLocked ? `📅 開啟第 ${nextSeq} 期並重啟採集` : `📅 開啟第 ${nextSeq} 期`),
+        el('button', { type: 'button', class: 'flex-1 border py-2 rounded',
+          onclick: () => { closeModal(); resolve(false); } }, '取消')
+      )
+    );
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(f);
+      closeModal();
+      resolve({ note: (fd.get('note') || '').toString().trim() || null });
+    });
+    openModal('開啟新一期複查', f);
+  });
+  if (result === false) return;
+
+  const now = new Date();
+  const prevCurSeq = (typeof plot.currentPeriod === 'number')
+    ? plot.currentPeriod
+    : existing[existing.length - 1].seq;
+  const periods = existing.map(p => ({
+    seq: p.seq,
+    label: p.label,
+    openedAt: p.openedAt ?? null,
+    openedBy: p.openedBy ?? null,
+    closedAt: (p.seq === prevCurSeq && !p.closedAt) ? now : (p.closedAt ?? null),
+    note: p.note ?? null
+  }));
+  periods.push({
+    seq: nextSeq,
+    label: `第 ${nextSeq} 期複查`,
+    openedAt: now,
+    openedBy: state.user.uid,
+    closedAt: null,
+    note: result.note
+  });
+
+  // I-2b：期別查證簿 — 記錄關閉中那期的查證狀態（每期一筆完整稽核軌跡）
+  const ledgerEntry = {
+    period: prevCurSeq,
+    status: project.status ?? null,
+    verifiedAt: project.verifiedAt ?? null,
+    verifiedBy: project.verifiedBy ?? null,
+    lockedBy: project.lockedBy ?? null,
+    autoLockReason: project.autoLockReason ?? null,
+    closedAt: now,
+    closedBy: state.user.uid
+  };
+  const periodVerifications = [
+    ...(Array.isArray(project.periodVerifications) ? project.periodVerifications : []),
+    ledgerEntry
+  ];
+
+  try {
+    // 1) 先寫專案：存查證簿（+ 若 locked 則重啟採集）。失敗則中止，不在仍鎖定的專案上開期。
+    const projUpdates = { periodVerifications };
+    if (wasLocked) {
+      projUpdates.status = 'active';
+      projUpdates.statusChangedAt = fb.serverTimestamp();
+      projUpdates.statusChangedBy = state.user.uid;
+      projUpdates.locked = false;
+      projUpdates.lockedAt = null;
+      projUpdates.lockedBy = null;
+      projUpdates.autoLockReason = null;
+      projUpdates.verifiedAt = null;
+      projUpdates.verifiedBy = null;
+    }
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), projUpdates);
+    // sync 記憶體 project / state.project（讓解鎖即時生效、不必 reload 即可採集）
+    const applyProj = (o) => {
+      if (!o) return;
+      o.periodVerifications = periodVerifications;
+      if (wasLocked) {
+        o.status = 'active'; o.locked = false; o.lockedAt = null; o.lockedBy = null;
+        o.autoLockReason = null; o.verifiedAt = null; o.verifiedBy = null;
+        o.statusChangedBy = state.user.uid; o.statusChangedAt = now;
+      }
+    };
+    applyProj(project);
+    if (state.project && state.project.id === project.id && state.project !== project) applyProj(state.project);
+
+    // 2) 寫樣區期別
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id), {
+      periods,
+      currentPeriod: nextSeq,
+      updatedAt: fb.serverTimestamp()
+    });
+    // feedback_state_plot_stale_after_edit：state.plot 為 one-shot getDoc 無 onSnapshot → 必 refetch
+    if (state.plot?.id === plot.id) {
+      try {
+        const fresh = await fb.getDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id));
+        if (fresh.exists()) state.plot = { id: plot.id, ...fresh.data() };
+      } catch (e) { console.warn('[I-2 refresh state.plot]', e); }
+    }
+    toast(wasLocked
+      ? `已開啟第 ${nextSeq} 期並重啟採集（專案→作業中）`
+      : `已開啟第 ${nextSeq} 期複查`);
+    rerouteCurrentView();
+  } catch (e) {
+    console.error('openNewPeriod failed:', e);
+    toast('開啟新一期失敗：' + e.message);
+  }
+}
+
+// ===== I-1（v2.11.70）：立木逐期歷史測值保留（永久樣區複查地基）=====
+// 架構（reader-safe 完整版 A）：tree 文件維持「最新一期快照」（所有既有 reader 零遷移）；
+//   每次存檔同時 write-through 一筆 `trees/{treeId}/measurements/{periodId}` 逐期歷史。
+//   → 第二期立木調查覆蓋 tree 快照前，前一期已先被保留為 measurement doc（前提：backfill
+//     已為既有立木補建 period-1 measurement；backfill 由 scripts/backfill-i1-measurements.mjs
+//     一次性離線執行，owner token 繞 rules 可處理 locked 專案）。
+// measurement doc = 該期測值/位置/即算碳量快照 + 去正規化身分（treeCode 為跨期 join key），
+//   讓未來 ΔC（I-6 / AR-TMS）以 collectionGroup 直接查、且不需重算（存當期 equation 結果）。
+
+/** 純函式：由 tree 資料組出單期 measurement 快照（forms / import / backfill 共用單一真相）。
+ *  不含 recordedAt（caller 自行附 serverTimestamp 或 Date，保持本函式純粹）。 */
+export function buildMeasurementSnapshot(t, { periodId, recordedBy, source }) {
+  return {
+    periodId: Number(periodId) || 1,
+    // 身分（去正規化 — 跨期 collectionGroup 查詢 / 單檔可讀；treeCode 為 join key）
+    treeCode: t?.treeCode ?? null,
+    treeNum: t?.treeNum ?? null,
+    speciesZh: t?.speciesZh ?? null,
+    speciesSci: t?.speciesSci ?? null,
+    // 每期測值
+    dbh_cm: t?.dbh_cm ?? null,
+    height_m: t?.height_m ?? null,
+    branchHeight_m: t?.branchHeight_m ?? null,
+    vitality: t?.vitality ?? null,
+    pestSymptoms: Array.isArray(t?.pestSymptoms) ? t.pestSymptoms : [],
+    marking: t?.marking ?? null,
+    notes: t?.notes ?? null,
+    // 位置（GPS 模式為每期；快照供完整重建）
+    localX_m: t?.localX_m ?? null,
+    localY_m: t?.localY_m ?? null,
+    locationTWD97: t?.locationTWD97 ?? null,
+    location: t?.location ?? null,
+    positionSource: t?.positionSource ?? null,
+    gpsAccuracy_m: t?.gpsAccuracy_m ?? null,
+    manuallyAdjusted: t?.manuallyAdjusted ?? false,
+    // 即算碳量（存當期 equation 結果 → ΔC 不需重算、且不受日後係數變更影響）
+    basalArea_m2: t?.basalArea_m2 ?? null,
+    volume_m3: t?.volume_m3 ?? null,
+    biomass_kg: t?.biomass_kg ?? null,
+    carbon_kg: t?.carbon_kg ?? null,
+    co2_kg: t?.co2_kg ?? null,
+    // I-5：本期狀態 fate + recruitment 期別（逐期歷史，供 I-6 ΔC / 死亡率 / recruitment 報表）
+    resurveyFate: t?.resurveyFate ?? 'alive',
+    recruitedPeriod: t?.recruitedPeriod ?? null,
+    // meta
+    source: source || 'tree-form',
+    recordedBy: recordedBy ?? null,
+    createdBy: recordedBy ?? null   // rules willOwn() on measurement create
+  };
+}
+
+/** 存檔同時 write-through 當期 measurement（doc id = periodId；同期覆寫＝修正當期、新期＝歷史）。
+ *  失敗只 warn 不阻斷主存檔（純加性 plumbing，絕不可回歸既有 UX）。 */
+export async function writeTreeMeasurementSnapshot(project, plot, treeId, treeData, source = 'tree-form') {
+  try {
+    const period = currentPlotPeriod(plot);
+    const periodId = Number(period?.seq) || 1;
+    const snap = {
+      ...buildMeasurementSnapshot(treeData, { periodId, recordedBy: state.user.uid, source }),
+      recordedAt: fb.serverTimestamp()
+    };
+    await fb.setDoc(
+      fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', treeId, 'measurements', String(periodId)),
+      snap
+    );
+  } catch (e) {
+    console.warn('[I-1 measurement write-through]', e);
+  }
 }
 
 // ===== v1.6.19：封存 / 解封存 — 真實案件結束後使用，資料保留只是從作用中清單移除 =====
@@ -2496,14 +2729,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21169',
+        href: './img/gps-position-guide.svg?v=21170',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21169',
+          src: './img/gps-position-guide.svg?v=21170',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -3016,6 +3249,40 @@ export async function openTreeForm(project, plot, existing = null) {
   }
   const padNum = (n) => String(n).padStart(3, '0');
 
+  // ===== I-4 / I-5（v2.11.70）：複查脈絡 — 上期測值 + 跨期 delta + 本期狀態（fate）/ recruitment =====
+  const _periods = derivePlotPeriods(plot);
+  const _curPeriod = currentPlotPeriod(plot);
+  const curSeq = Number(_curPeriod?.seq) || 1;
+  const isResurvey = curSeq > 1;
+  const periodOpenedDate = (seq) => {
+    const p = _periods.find(x => Number(x.seq) === Number(seq));
+    const d = p?.openedAt;
+    if (!d) return null;
+    if (typeof d?.toDate === 'function') return d.toDate();
+    if (d instanceof Date) return d;
+    if (typeof d === 'string' || typeof d === 'number') { const dt = new Date(d); return isNaN(dt) ? null : dt; }
+    return null;
+  };
+  // 上期 measurement（periodId < 本期，取最近一期）— 僅編輯既有立木且處於複查期才抓
+  let priorMeas = null, priorSeq = null, deltaYears = null;
+  if (existing && existing.id && isResurvey) {
+    try {
+      const ms = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', existing.id, 'measurements'));
+      const arr = ms.docs.map(d => d.data())
+        .filter(x => Number.isFinite(Number(x.periodId)) && Number(x.periodId) < curSeq)
+        .sort((a, b) => Number(b.periodId) - Number(a.periodId));
+      if (arr.length) {
+        priorMeas = arr[0];
+        priorSeq = Number(priorMeas.periodId);
+        const dPrev = periodOpenedDate(priorSeq);
+        const dCur = periodOpenedDate(curSeq);
+        if (dPrev && dCur && dCur > dPrev) deltaYears = (dCur - dPrev) / (365.25 * 86400000);
+      }
+    } catch (e) { console.warn('[I-4 prior measurement fetch]', e); }
+  }
+  // recruitment：複查期「新增」立木（無上期 measurement = 本期才出現）
+  const isRecruit = isResurvey && (!existing || (existing && !priorMeas && !(existing.recruitedPeriod)));
+
   // v2.10.5：樹種搜尋（取代 datalist；資料源 = Firestore 224 種 + fallback 靜態 TREES）
   //   保留變數名 speciesInput 以最小化下方計算邏輯改動
   // v2.10.9：若 plot.elevation_m 已有 → 初始 band；不在 → fire & forget DEM lookup
@@ -3389,6 +3656,67 @@ export async function openTreeForm(project, plot, existing = null) {
   }
   treeNumInput.addEventListener('input', updateTreeCodePreview);
 
+  // ===== I-4：跨期 delta 即時警示（通用保守上下界 — 開場 Q3 已定；樹種別參考表留 I-6/後續）=====
+  // 軟警示（amber，永不擋存 — surveyor 記錄現場真實，警示促雙重確認）：
+  //   ΔDBH<0（樹幹不會縮）｜ΔDBH 年增 >5 cm/yr（極寬鬆通用上界）｜無期距時 ΔDBH>15 cm｜ΔH<−1 m（斷梢可能）
+  const I4_BOUND = { DBH_NEG_TOL: -0.05, DBH_YR_MAX: 5, DBH_ABS_MAX: 15, H_DROP: -1.0 };
+  const deltaLine = el('div', { class: 'text-xs mt-1' });
+  const resurveyPanel = priorMeas ? el('div', {
+    class: 'text-xs bg-indigo-50 border border-indigo-200 rounded p-2 my-2'
+  },
+    el('div', { class: 'font-medium text-indigo-900' },
+      `📊 上期（第 ${priorSeq} 期${(() => { const d = periodOpenedDate(priorSeq); return d ? ' @ ' + fmtDate(d) : ''; })()}）`),
+    el('div', { class: 'text-indigo-800 mt-0.5' },
+      `DBH ${priorMeas.dbh_cm ?? '—'} cm ｜ H ${priorMeas.height_m ?? '—'} m ｜ 活力 ${({ healthy: '健康', weak: '衰弱', 'standing-dead': '枯立', fallen: '倒伏' })[priorMeas.vitality] || priorMeas.vitality || '—'}`
+      + (deltaYears ? ` ｜ 期距 ${deltaYears.toFixed(1)} 年` : '')),
+    deltaLine
+  ) : null;
+  function updateDelta() {
+    if (!priorMeas) return;
+    const dbh = parseFloat(f.querySelector('[name=dbh_cm]')?.value);
+    const h = parseFloat(f.querySelector('[name=height_m]')?.value);
+    if (!Number.isFinite(dbh) && !Number.isFinite(h)) {
+      deltaLine.innerHTML = '<span class="text-stone-500">輸入本期 DBH / 樹高即時比對上期</span>';
+      return;
+    }
+    const warns = [];
+    const parts = [];
+    if (Number.isFinite(dbh) && Number.isFinite(priorMeas.dbh_cm)) {
+      const dd = dbh - priorMeas.dbh_cm;
+      const ddYr = deltaYears ? dd / deltaYears : null;
+      parts.push(`ΔDBH ${dd >= 0 ? '+' : ''}${dd.toFixed(1)} cm${ddYr != null ? `（${ddYr >= 0 ? '+' : ''}${ddYr.toFixed(2)}/yr）` : ''}`);
+      if (dd < I4_BOUND.DBH_NEG_TOL) warns.push(`DBH 負成長 ${dd.toFixed(1)} cm（樹幹不會縮；請確認量測或樹牌身分）`);
+      else if (ddYr != null && ddYr > I4_BOUND.DBH_YR_MAX) warns.push(`DBH 年增 ${ddYr.toFixed(1)} cm/yr 偏高（請確認）`);
+      else if (ddYr == null && dd > I4_BOUND.DBH_ABS_MAX) warns.push(`DBH 增量 ${dd.toFixed(1)} cm 偏大（無期距可年化；請確認）`);
+    }
+    if (Number.isFinite(h) && Number.isFinite(priorMeas.height_m)) {
+      const dh = h - priorMeas.height_m;
+      parts.push(`ΔH ${dh >= 0 ? '+' : ''}${dh.toFixed(1)} m`);
+      if (dh < I4_BOUND.H_DROP) warns.push(`樹高退縮 ${dh.toFixed(1)} m（斷梢可能；請確認）`);
+    }
+    if (warns.length) {
+      deltaLine.innerHTML = `<div class="text-amber-800 font-medium">⚠ ${parts.join(' ｜ ')}</div>`
+        + warns.map(w => `<div class="text-amber-700">• ${w}</div>`).join('');
+    } else {
+      deltaLine.innerHTML = `<span class="text-emerald-700">✅ ${parts.join(' ｜ ') || '—'}</span>`;
+    }
+  }
+
+  // ===== I-5：本期狀態（fate）+ recruitment 自動標記 =====
+  const fateField = (existing && existing.id && isResurvey) ? field({
+    label: `本期狀態（第 ${curSeq} 期複查）`, name: 'resurveyFate',
+    options: [
+      { value: 'alive', label: '存活（本期復測）' },
+      { value: 'dead', label: '本期死亡（枯死 / 倒伏）' },
+      { value: 'missing', label: '失蹤 — 無法尋獲' },
+      { value: 'tag-lost', label: '樹牌脫落 — 身分存疑' }
+    ],
+    value: existing?.resurveyFate || 'alive'
+  }) : null;
+  const recruitNote = isRecruit ? el('div', {
+    class: 'text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 rounded p-2 my-2'
+  }, `✨ 本樹於第 ${curSeq} 期新增 = recruitment（新進個體，系統自動標記 recruitedPeriod=${curSeq}）`) : null;
+
   const f = el('form', { class: 'space-y-2' },
     el('div', { class: 'field' },
       el('label', {}, '個體編號 ', el('span', { class: 'req' }, '*')),
@@ -3434,6 +3762,9 @@ export async function openTreeForm(project, plot, existing = null) {
     ),
     field({ label: '枝下高 (m)', name: 'branchHeight_m', type: 'number', step: '0.1', min: '0', value: existing?.branchHeight_m ?? '' }),
     calcOut,
+    recruitNote,        // I-5：複查期新增立木標記（null 安全）
+    resurveyPanel,      // I-4：上期值 + 跨期 delta 即時警示（null 安全）
+    fateField,          // I-5：本期狀態 fate（僅複查既有立木顯示，null 安全）
     field({ label: '活力', name: 'vitality', required: true,
       options: [
         { value: 'healthy', label: '健康' },
@@ -3464,6 +3795,12 @@ export async function openTreeForm(project, plot, existing = null) {
   f.querySelector('[name=height_m]').addEventListener('input', updateCalc);
   speciesInput.addEventListener('input', updateCalc);
   updateCalc();
+  // I-4：跨期 delta 即時比對（與 updateCalc 並行掛同樣 dbh/height input 事件）
+  if (priorMeas) {
+    f.querySelector('[name=dbh_cm]').addEventListener('input', updateDelta);
+    f.querySelector('[name=height_m]').addEventListener('input', updateDelta);
+    updateDelta();
+  }
   // v2.11.28：依 plot.positionMode 初始顯示 offset / GPS / mixed-toggle
   applyPosVisibility();
 
@@ -3574,6 +3911,9 @@ export async function openTreeForm(project, plot, existing = null) {
       // v2.11.31 (J-1)：GPS-mode 樹的「手動標記」— 來源：(a) 表單手填 lat/lng；(b) 編輯既有已 manually-adjusted 樹；(c) 地圖長壓微調（已存欄位）
       // offset 模式不適用 manuallyAdjusted 概念（皮尺本來就是手動定位），一律 false
       manuallyAdjusted: positionSource === 'gps' ? treeGpsManualEntry : false,
+      // I-5：本期狀態（複查期才有 fate select；新建/第一期 → alive）+ recruitment 期別自動標記
+      resurveyFate: fd.get('resurveyFate') || existing?.resurveyFate || 'alive',
+      recruitedPeriod: existing?.recruitedPeriod ?? (isRecruit ? curSeq : null),
       ...m,
       updatedAt: fb.serverTimestamp()
     };
@@ -3604,6 +3944,8 @@ export async function openTreeForm(project, plot, existing = null) {
         });
         await fb.updateDoc(fb.doc(colRef, treeId), { photos });
       }
+      // I-1（v2.11.70）：write-through 當期 measurement 逐期歷史（純加性、失敗只 warn 不阻斷）
+      await writeTreeMeasurementSnapshot(project, plot, treeId, data, 'tree-form');
       toast(existing
         ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
         : '已建立（待審核）');

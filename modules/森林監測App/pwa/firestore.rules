@@ -49,6 +49,13 @@ service cloud.firestore {
           && (!('slopeDegrees' in d) || d.slopeDegrees == null || (d.slopeDegrees is number && d.slopeDegrees >= 0 && d.slopeDegrees <= 90))
           && (!('slopeAspect' in d) || d.slopeAspect == null || (d.slopeAspect is number && d.slopeAspect >= 0 && d.slopeAspect <= 360));
     }
+    // I-2（路 I 複查 / v2.11.70）：複查期別欄位驗證（寬鬆 — 欄位不存在則跳過，向後相容既有 plot）
+    //   periods 為物件陣列（繞過 Firestore array-of-array 限制）；currentPeriod 為期序數字或 null
+    //   深層內容（每期 seq/label/openedAt…）不在 rules 檢，留 client 端保證
+    function validPlotPeriodFields(d) {
+      return (!('periods' in d) || d.periods is list)
+          && (!('currentPeriod' in d) || d.currentPeriod == null || d.currentPeriod is number);
+    }
     // 同樣的 enum 也套到 methodology（project doc 內）
     function validMethodologyGeomFields(d) {
       let m = d.get('methodology', {});
@@ -119,22 +126,27 @@ service cloud.firestore {
         // v2.7.8：拿掉 || isSystemAdmin() — canCollect 已 include
         // v2.7.15：plot 幾何欄位 enum 驗證（shape / dimensionType / slopeSource / slopeDegrees / slopeAspect）
         allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId)
-                      && validPlotGeomFields(request.resource.data);
+                      && validPlotGeomFields(request.resource.data)
+                      && validPlotPeriodFields(request.resource.data);
 
         // v1.7.1.3：systemAdmin god view，跨任何專案角色限制
         // v2.7.15：同 create 套 plot 幾何欄位 enum 驗證
         // v2.7.17：reviewer 可寫 qaqc 子結構（與既有 PI/surveyor 寫權限平行）
         //   - 既有路徑（PI/admin/surveyor）：須 !isLocked（防止鎖定後 surveyor 仍能改）
         //   - reviewer 路徑：允許 isLocked 狀態（鎖定是擋 surveyor 的，不擋查證）；diff 只能是 qaqc + updatedAt
+        // v2.11.70（路 I 複查）：admin/pi 可在 plot 鎖定後寫 periods/currentPeriod（開啟新一期複查後門；diff 僅限期別欄位）
         allow update: if isSignedIn()
-                      && validPlotGeomFields(request.resource.data) && (
+                      && validPlotGeomFields(request.resource.data)
+                      && validPlotPeriodFields(request.resource.data) && (
           (!isLocked(projectId) && (
             isSystemAdmin() ||
             isPi(projectId) ||
             (isSurveyor(projectId) && (isOwner() || resource.data.get('assignedTo', null) == request.auth.uid))
           )) ||
           (isReviewer(projectId)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt']))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt'])) ||
+          ((isSystemAdmin() || isPi(projectId))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['periods', 'currentPeriod', 'updatedAt']))
         );
 
         allow delete: if isSignedIn() && (
@@ -168,6 +180,24 @@ service cloud.firestore {
             isPi(projectId) ||
             (isSurveyor(projectId) && isOwner())
           );
+        }
+
+        // ===== I-1（v2.11.70）：立木逐期歷史測值子集合（永久樣區複查地基）=====
+        // 通用 match /{subColl}/{docId} 只比對單層 → 深層 trees/{id}/measurements/{periodId}
+        //   預設 deny，必須顯式 match。語意：append-only 歷史，client 不可刪（審計完整性）。
+        //   - read：成員可讀（同 trees）
+        //   - create：canCollect + willOwn（snapshot.createdBy==auth）+ !isLocked（同 trees 採集）
+        //   - update：未鎖定時 admin/pi/或本人 surveyor（修正「當期」measurement；關閉期凍結由 client 控）
+        //   - delete：一律 false（歷史不可從 client 銷毀；如需回收用 owner-token backfill --undo）
+        // I-2b：第一期 verified→專案 auto-Lock 後，forms.openNewPeriod 把專案降回 active/解鎖再開第二期，
+        //   故 create 的 !isLocked 在重啟採集後即放行；前一期測值已凍結（下方 delete:false）→ MRV 安全。
+        match /trees/{treeId}/measurements/{periodId} {
+          allow read:   if isSignedIn() && canRead(projectId);
+          allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId);
+          allow update: if isSignedIn() && !isLocked(projectId) && (
+            isSystemAdmin() || isPi(projectId) || (isSurveyor(projectId) && isOwner())
+          );
+          allow delete: if false;
         }
       }
 

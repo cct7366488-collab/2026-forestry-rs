@@ -95,7 +95,7 @@
 //   schema 保留 approvedAmount_kg 欄位（向後相容；既有兩筆 null/0.9 kg 不動，UI 隱藏不顯示
 //   即可）。rules 不動（清單 200 行 approvedAmount_kg 在白名單，可寫可不寫、寫 null 也合法）。
 //   結案閘門邏輯不變（totalLogged_kg > 0 才能結 completed，rules + client 雙擋）。
-//   ?v=21168 -> ?v=21169 全 15 檔。
+//   ?v=21168 -> ?v=21170 全 15 檔。
 // v2.11.67：申請函嵌入作業位置示意圖（地圖視覺優化 Phase 3 / 公文整合終章）
 //   harvest-permits.js 新增 buildLocationSvg(project, meta, opts) — 純 inline SVG 自製、無外部依賴：
 //     - 讀 project.boundaryGeoJsonStr (FC) 找出 meta.unitId 對應目標作業單元
@@ -267,7 +267,8 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.69';  // v2.11.69：拿掉「核准採收量」概念（業務拍板）；以下歷史
+const CACHE = 'forest-monitor-v2.11.70';  // v2.11.70：路 I 複查鏈路移植回 master（I-1~I-6）；以下歷史
+// v2.11.69（歷史）：拿掉「核准採收量」概念（業務拍板）。
 // v2.11.68（歷史）：純行政專案地圖頁藏立木/樣區 UI 殘留 + 修枝申請表單欄位順序調整（6/6 demo polish）。
 // v2.11.67（歷史）：申請函嵌入作業位置 SVG（buildLocationSvg）+ printApplicationLetter signature 改 (permit, project)。
 // v2.11.50（歷史）：立木定位模式三選項 RWD 真正修好（radio inline width 覆蓋 .field input）。
@@ -310,7 +311,7 @@ const CACHE = 'forest-monitor-v2.11.69';  // v2.11.69：拿掉「核准採收量
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21169';
+const JS_VERSION = '21170';
 const SHELL = [
   './',
   './index.html',

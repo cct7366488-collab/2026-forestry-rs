@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21169";
-import * as forms from "./forms.js?v=21169";
-import * as analytics from "./analytics.js?v=21169";
-import * as importWizard from "./import-wizard.js?v=21169";
+import { firebaseConfig } from "../firebase-config.js?v=21170";
+import * as forms from "./forms.js?v=21170";
+import * as analytics from "./analytics.js?v=21170";
+import * as importWizard from "./import-wizard.js?v=21170";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21169";
-import { renderTreeDistribution } from "./distribution.js?v=21169";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21169";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21169";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21170";
+import { renderTreeDistribution } from "./distribution.js?v=21170";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21170";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21170";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21169";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21169";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21170";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21170";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21169";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21170";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21169";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21170";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -369,7 +369,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21169');
+    const m = await import('./migration-v2715.js?v=21170');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -391,7 +391,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21169');
+    const m = await import('./migration-v2715.js?v=21170');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1134,6 +1134,10 @@ async function renderProjectHome(root, projectId) {
   // v2.9.1：dashboard 內樹種組成矩陣 — dropdown 切換 metric / topN 時即時重畫
   $('#species-matrix-metric')?.addEventListener('change', () => analytics.renderSpeciesCompositionMatrix(state.project));
   $('#species-matrix-topn')?.addEventListener('change', () => analytics.renderSpeciesCompositionMatrix(state.project));
+
+  // v2.11.70（I-6）：複查成長報表 — on-demand（重讀逐期 measurement 歷史）
+  $('#btn-resurvey-report')?.addEventListener('click', () => analytics.renderResurveyReport(state.project));
+  $('#btn-resurvey-csv')?.addEventListener('click', () => analytics.exportResurveyCsv());
 
   // 樣區清單（即時）
   $('#btn-new-plot').addEventListener('click', () => {
@@ -2760,6 +2764,39 @@ async function renderPlotDetail(root, projectId, plotId) {
     $('[data-bind="plot.code"]').parentElement.appendChild(photoBar);
   }
 
+  // ===== I-2（路 I 複查）：期別 banner — 顯示當期 + 歷期 + 「📅 開啟新一期複查」入口 =====
+  const periodBanner = $('#plot-period-banner');
+  if (periodBanner) {
+    const periods = forms.derivePlotPeriods(state.plot);
+    const cur = forms.currentPlotPeriod(state.plot);
+    const fmtP = (d) => d ? fmtDate(d) : '—';
+    const canOpenPeriod = isPi() || isSystemAdmin();
+    periodBanner.innerHTML = '';
+    periodBanner.className = 'bg-blue-50 border border-blue-200 rounded px-4 py-3 mt-3';
+    periodBanner.appendChild(el('div', { class: 'flex justify-between items-center gap-2 flex-wrap' },
+      el('div', { class: 'text-sm' },
+        el('span', { class: 'font-semibold text-blue-900' }, '📅 當期：'),
+        el('span', { class: 'text-blue-900' }, cur.label),
+        el('span', { class: 'text-xs text-blue-700 ml-2' },
+          `（開啟 ${fmtP(cur.openedAt)}${cur.note ? ' · ' + cur.note : ''}）`)
+      ),
+      canOpenPeriod ? el('button', {
+        class: 'bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm shadow-sm flex-shrink-0',
+        onclick: () => forms.openNewPeriod(state.project, state.plot)
+      }, '📅 開啟新一期複查') : null
+    ));
+    if (periods.length > 1) {
+      periodBanner.appendChild(el('details', { class: 'mt-2 text-xs text-blue-800' },
+        el('summary', { class: 'cursor-pointer select-none' }, `歷期紀錄（${periods.length} 期）`),
+        el('ul', { class: 'mt-1 space-y-0.5 list-disc list-inside' },
+          ...periods.slice().sort((a, b) => a.seq - b.seq).map(p =>
+            el('li', {}, `${p.label}：${fmtP(p.openedAt)} ～ ${p.closedAt ? fmtP(p.closedAt) : '進行中'}${p.note ? '（' + p.note + '）' : ''}`)
+          )
+        )
+      ));
+    }
+  }
+
   // sub-tabs
   $$('.subtab-link').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
@@ -2789,6 +2826,37 @@ async function renderPlotDetail(root, projectId, plotId) {
     if (isLocked()) return toast('資料已 Lock');
     forms.openTreeForm(state.project, state.plot);
   });
+
+  // I-3（v2.11.70）：樹牌號碼跳轉 — 查當前 onSnapshot 的 _lastTreesArr（即時、零額外 fetch）
+  //   秒開該樹編輯表單（複查現場走到樹牌 N → 輸入 N → 直接改 DBH/H 存檔，I-1 寫穿當期歷史）
+  const jumpToTree = () => {
+    const input = $('#tree-jump-input');
+    const raw = (input?.value || '').trim();
+    if (!raw) return;
+    if (isLocked()) return toast('資料已 Lock（如需複查請先「開啟新一期」重啟採集）');
+    const arr = _lastTreesArr || [];
+    const numIn = parseInt(raw, 10);
+    const rawUp = raw.toUpperCase();
+    const isPureNum = Number.isFinite(numIn) && /^\d+$/.test(raw);
+    let t = null;
+    if (isPureNum) t = arr.find(x => Number(x.treeNum) === numIn);
+    if (!t) {
+      const pad = isPureNum ? String(numIn).padStart(3, '0') : null;
+      t = arr.find(x => (x.treeCode || '').toUpperCase() === rawUp)
+        || (pad ? arr.find(x => (x.treeCode || '').toUpperCase().endsWith('-' + pad)) : null);
+    }
+    if (!t) {
+      toast(`查無樹牌號「${raw}」（本樣區 ${arr.length} 株；如為新增請用「＋ 新立木」）`);
+      return;
+    }
+    input.value = '';
+    forms.openTreeForm(state.project, state.plot, { id: t.id, ...t });
+  };
+  $('#tree-jump-go')?.addEventListener('click', jumpToTree);
+  $('#tree-jump-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); jumpToTree(); }
+  });
+
   $('#btn-new-regen').addEventListener('click', () => {
     if (isLocked()) return toast('資料已 Lock');
     forms.openRegenForm(state.project, state.plot);
@@ -3051,7 +3119,13 @@ function renderTreeList(snap, projectId, plotId) {
     const eqInfo = getEquationBadge(t.speciesZh, t.speciesSci, t.treeType);
     const eqTitle = `${eqInfo.level} | ${eqInfo.key} | BEF ${eqInfo.bef} CF ${eqInfo.cf} | ${eqInfo.source}`.replace(/"/g, '&quot;');
     const eqBadgeHtml = `<span title="${eqTitle}" style="cursor:help">${eqInfo.badge}</span>`;
-    const speciesCell = el('td', { html: eqBadgeHtml + ' ' + t.speciesZh + (t.conservationGrade ? ' ⚠' : '') + photoTag + ' ' + qaBadge(t.qaStatus) });
+    // I-5（v2.11.70）：複查狀態小徽章 — recruitment ✨ / 本期死亡 ☠ / 失蹤 ❓ / 樹牌脫落 🏷️
+    let resBadge = '';
+    if (t.recruitedPeriod && Number(t.recruitedPeriod) > 1) resBadge += ` <span title="第 ${t.recruitedPeriod} 期新進個體（recruitment）" style="font-size:11px;color:#047857">✨</span>`;
+    if (t.resurveyFate === 'dead') resBadge += ' <span title="本期死亡" style="font-size:11px;color:#b91c1c">☠</span>';
+    else if (t.resurveyFate === 'missing') resBadge += ' <span title="失蹤·無法尋獲" style="font-size:11px;color:#b45309">❓</span>';
+    else if (t.resurveyFate === 'tag-lost') resBadge += ' <span title="樹牌脫落·身分存疑" style="font-size:11px;color:#b45309">🏷️</span>';
+    const speciesCell = el('td', { html: eqBadgeHtml + ' ' + t.speciesZh + (t.conservationGrade ? ' ⚠' : '') + photoTag + resBadge + ' ' + qaBadge(t.qaStatus) });
     if (canQA() && !isLocked()) {
       appendQaButtons(speciesCell, plotId, { coll: 'trees', id: d.id });
     }

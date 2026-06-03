@@ -1,17 +1,18 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21169';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21170';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21169';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21170';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21169';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21170';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21169';
+import { getEquationBadge } from './species-equations.js?v=21170';
 // v2.11.19：irregular plot vertices 轉換用
-import { vertsToArrays } from './plot-polygon.js?v=21169';
+import { vertsToArrays } from './plot-polygon.js?v=21170';
 // v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
-import { openProjectForm } from './forms.js?v=21169';
+// v2.11.70（I-6）：複查報表用 derivePlotPeriods 取期別標籤
+import { openProjectForm, derivePlotPeriods } from './forms.js?v=21170';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -1775,4 +1776,258 @@ function fmtDate(ts) {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return d.toISOString().slice(0, 10);
+}
+
+// ===== I-6（v2.11.70）：複查成長報表（價值出口）=====
+//   讀 trees/{id}/measurements 逐期歷史 → 跨期年均成長 / 枯死率 / 進界木 / 淨 ΔC。
+//   對應 AR-TMS0001（造林）/0002（改良）/0004（竹林）的監測量化骨架。
+//   ΔC 直接用各期 measurement 內凍結的當期 carbon_kg（不重算、不受日後係數變更影響）。
+const _DEAD_FATES = new Set(['dead', 'missing', 'tag-lost']);
+const _rNum = v => (typeof v === 'number' && isFinite(v)) ? v
+  : (v != null && v !== '' && isFinite(Number(v)) ? Number(v) : null);
+function _rTsToDate(ts) {
+  if (!ts) return null;
+  if (typeof ts.toDate === 'function') { try { return ts.toDate(); } catch { return null; } }
+  if (typeof ts.seconds === 'number') return new Date(ts.seconds * 1000);
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? null : d;
+}
+function _rYears(a, b) {
+  if (!a || !b) return null;
+  const ms = b.getTime() - a.getTime();
+  return ms > 0 ? ms / (365.25 * 24 * 3600 * 1000) : null;
+}
+
+let _lastResurvey = null;  // 供 CSV 匯出
+
+// 逐 plot→tree→measurements 抓逐期歷史（on-demand，重讀；單期專案會優雅顯示「尚無複查」）
+async function fetchResurveyData(project) {
+  const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
+  const plots = [];
+  const timelines = [];   // { plotCode, treeCode, speciesZh, meas:[{seq,dbh,h,ba,v,c,co2,fate,recruited,date}] }
+  for (const pd of plotsSnap.docs) {
+    const plot = { id: pd.id, ...pd.data() };
+    plots.push(plot);
+    const tSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'trees'));
+    for (const td of tSnap.docs) {
+      const tree = td.data();
+      let mSnap;
+      try {
+        mSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'trees', td.id, 'measurements'));
+      } catch { continue; }
+      if (!mSnap || mSnap.empty) continue;
+      const meas = mSnap.docs.map(m => {
+        const d = m.data();
+        return {
+          seq: Number(d.periodId) || 1,
+          dbh: _rNum(d.dbh_cm), h: _rNum(d.height_m),
+          ba: _rNum(d.basalArea_m2), v: _rNum(d.volume_m3),
+          c: _rNum(d.carbon_kg), co2: _rNum(d.co2_kg),
+          fate: d.resurveyFate || 'alive',
+          recruited: d.recruitedPeriod ?? null,
+          date: _rTsToDate(d.recordedAt)
+        };
+      }).sort((a, b) => a.seq - b.seq);
+      timelines.push({
+        plotId: pd.id, plotCode: plot.code, treeId: td.id,
+        treeCode: tree.treeCode ?? null, treeNum: tree.treeNum ?? null,
+        speciesZh: tree.speciesZh ?? null, meas
+      });
+    }
+  }
+  return { plots, timelines };
+}
+
+// 純函式：把 timelines 聚合成「期別摘要」+「期間轉換」
+function computeResurveyStats(plots, timelines) {
+  // 期別中繼資料（seq → label / 代表日期），跨 plot 合併
+  const periodMeta = {};
+  plots.forEach(p => {
+    derivePlotPeriods(p).forEach(pr => {
+      const s = Number(pr.seq) || 1;
+      if (!periodMeta[s]) periodMeta[s] = { seq: s, label: pr.label || `第 ${s} 期`, date: _rTsToDate(pr.openedAt) };
+      else if (!periodMeta[s].date && pr.openedAt) periodMeta[s].date = _rTsToDate(pr.openedAt);
+    });
+  });
+  const seqs = [...new Set(timelines.flatMap(t => t.meas.map(m => m.seq)))].sort((a, b) => a - b);
+  seqs.forEach(s => { if (!periodMeta[s]) periodMeta[s] = { seq: s, label: `第 ${s} 期`, date: null }; });
+
+  // 期別摘要（僅計活立木）
+  const periodRows = seqs.map(s => {
+    const acc = { seq: s, label: periodMeta[s].label, date: periodMeta[s].date, alive: 0, dbhSum: 0, dbhN: 0, baSum: 0, vSum: 0, cSum: 0, co2Sum: 0 };
+    timelines.forEach(t => {
+      const m = t.meas.find(x => x.seq === s);
+      if (!m || _DEAD_FATES.has(m.fate)) return;
+      acc.alive++;
+      if (m.dbh != null) { acc.dbhSum += m.dbh; acc.dbhN++; }
+      if (m.ba != null) acc.baSum += m.ba;
+      if (m.v != null) acc.vSum += m.v;
+      if (m.c != null) acc.cSum += m.c;
+      if (m.co2 != null) acc.co2Sum += m.co2;
+    });
+    return acc;
+  });
+
+  // 期間轉換（連續期別配對）
+  const transitions = [];
+  for (let i = 0; i + 1 < seqs.length; i++) {
+    const sa = seqs[i], sb = seqs[i + 1];
+    let survN = 0, dbhRate = 0, hRate = 0, hN = 0, dyN = 0, dySum = 0;
+    let aliveStart = 0, deadCount = 0, recruitCount = 0;
+    timelines.forEach(t => {
+      const ma = t.meas.find(x => x.seq === sa);
+      const mb = t.meas.find(x => x.seq === sb);
+      const aAlive = ma && !_DEAD_FATES.has(ma.fate);
+      if (aAlive) aliveStart++;
+      // 枯死：期初活、期末轉死/失蹤/失牌
+      if (aAlive && mb && _DEAD_FATES.has(mb.fate)) deadCount++;
+      // 進界木：本期才出現（無期初測值）且活，或顯式 recruitedPeriod === sb
+      const isRecruit = (mb && !_DEAD_FATES.has(mb.fate)) && ((!ma) || mb.recruited === sb);
+      if (isRecruit) recruitCount++;
+      // 存活木年均成長（兩期皆有測值且皆活）
+      if (aAlive && mb && !_DEAD_FATES.has(mb.fate) && !isRecruit) {
+        const dy = _rYears(ma.date, mb.date) || _rYears(periodMeta[sa].date, periodMeta[sb].date);
+        if (dy && dy > 0) {
+          if (ma.dbh != null && mb.dbh != null) { dbhRate += (mb.dbh - ma.dbh) / dy; survN++; }
+          if (ma.h != null && mb.h != null) { hRate += (mb.h - ma.h) / dy; hN++; }
+          dySum += dy; dyN++;
+        } else if (ma.dbh != null && mb.dbh != null) {
+          survN++;  // 計入存活但缺日期→不納年均率
+        }
+      }
+    });
+    const meanDy = dyN > 0 ? dySum / dyN : (_rYears(periodMeta[sa].date, periodMeta[sb].date) || null);
+    const cA = periodRows.find(r => r.seq === sa)?.cSum ?? 0;
+    const cB = periodRows.find(r => r.seq === sb)?.cSum ?? 0;
+    const co2A = periodRows.find(r => r.seq === sa)?.co2Sum ?? 0;
+    const co2B = periodRows.find(r => r.seq === sb)?.co2Sum ?? 0;
+    transitions.push({
+      from: sa, to: sb,
+      label: `${periodMeta[sa].label} → ${periodMeta[sb].label}`,
+      years: meanDy,
+      survivors: survN,
+      dbhAnnual: survN > 0 ? dbhRate / survN : null,
+      hAnnual: hN > 0 ? hRate / hN : null,
+      aliveStart, deadCount,
+      mortalityPct: aliveStart > 0 ? 100 * deadCount / aliveStart : null,
+      recruitCount,
+      cStart_t: cA / 1000, cEnd_t: cB / 1000,
+      netDeltaC_t_yr: meanDy && meanDy > 0 ? (cB - cA) / 1000 / meanDy : null,
+      netDeltaCO2_t_yr: meanDy && meanDy > 0 ? (co2B - co2A) / 1000 / meanDy : null
+    });
+  }
+  return { seqs, periodRows, transitions };
+}
+
+const _f = (v, d = 2) => (v == null || !isFinite(v)) ? '—' : v.toFixed(d);
+
+export async function renderResurveyReport(project) {
+  const box = $('#resurvey-report-result');
+  if (!box) return;
+  box.innerHTML = '<div class="text-stone-500 text-sm">⏳ 讀取逐期歷史中…</div>';
+  const csvBtn = $('#btn-resurvey-csv');
+  let data;
+  try {
+    data = await fetchResurveyData(project);
+  } catch (e) {
+    console.warn('[resurvey-report]', e);
+    box.innerHTML = `<div class="text-red-600 text-sm">讀取失敗：${e.message || e}</div>`;
+    return;
+  }
+  const totalMeas = data.timelines.reduce((s, t) => s + t.meas.length, 0);
+  if (totalMeas === 0) {
+    box.innerHTML = '<div class="text-stone-500 text-sm">尚無逐期 measurement 歷史。第二期複查存檔（或執行 backfill 補建第一期）後即可產生。</div>';
+    if (csvBtn) csvBtn.classList.add('hidden');
+    _lastResurvey = null;
+    return;
+  }
+  const stats = computeResurveyStats(data.plots, data.timelines);
+  _lastResurvey = { project: project.code, ...stats };
+
+  // 期別摘要表
+  let html = '<div class="overflow-x-auto"><table class="w-full text-xs border-collapse">';
+  html += '<thead><tr class="bg-stone-100 text-stone-600">'
+    + ['期別', '日期', '活立木', '平均DBH(cm)', '總BA(m²)', '總材積(m³)', '活碳(t-C)', 'CO₂(t)']
+      .map(h => `<th class="border px-2 py-1 text-right first:text-left">${h}</th>`).join('')
+    + '</tr></thead><tbody>';
+  stats.periodRows.forEach(r => {
+    html += '<tr>'
+      + `<td class="border px-2 py-1">${r.label}</td>`
+      + `<td class="border px-2 py-1">${r.date ? fmtDate(r.date) : '—'}</td>`
+      + `<td class="border px-2 py-1 text-right">${r.alive}</td>`
+      + `<td class="border px-2 py-1 text-right">${r.dbhN > 0 ? _f(r.dbhSum / r.dbhN, 1) : '—'}</td>`
+      + `<td class="border px-2 py-1 text-right">${_f(r.baSum, 3)}</td>`
+      + `<td class="border px-2 py-1 text-right">${_f(r.vSum, 3)}</td>`
+      + `<td class="border px-2 py-1 text-right">${_f(r.cSum / 1000, 3)}</td>`
+      + `<td class="border px-2 py-1 text-right">${_f(r.co2Sum / 1000, 3)}</td>`
+      + '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // 期間轉換表
+  if (stats.transitions.length === 0) {
+    html += '<div class="mt-3 text-amber-700 text-xs">⚠ 僅單一期別 — 尚無跨期成長 / 死亡率 / 進界木可計算。完成第二期複查後再產生。</div>';
+  } else {
+    html += '<h4 class="font-semibold mt-4 mb-1 text-sm">期間轉換（年均成長 / 枯死 / 進界 / 淨碳變化）</h4>';
+    html += '<div class="overflow-x-auto"><table class="w-full text-xs border-collapse">';
+    html += '<thead><tr class="bg-emerald-50 text-stone-600">'
+      + ['期間', '間隔(年)', '存活木', '年均ΔDBH(cm)', '年均ΔH(m)', '枯死(株/率)', '進界(株)', '期初活碳(t-C)', '期末活碳(t-C)', '淨ΔC(t-C/yr)', '淨ΔCO₂(t/yr)']
+        .map(h => `<th class="border px-2 py-1 text-right first:text-left">${h}</th>`).join('')
+      + '</tr></thead><tbody>';
+    stats.transitions.forEach(tr => {
+      html += '<tr>'
+        + `<td class="border px-2 py-1">${tr.label}</td>`
+        + `<td class="border px-2 py-1 text-right">${_f(tr.years, 2)}</td>`
+        + `<td class="border px-2 py-1 text-right">${tr.survivors}</td>`
+        + `<td class="border px-2 py-1 text-right">${_f(tr.dbhAnnual, 2)}</td>`
+        + `<td class="border px-2 py-1 text-right">${_f(tr.hAnnual, 2)}</td>`
+        + `<td class="border px-2 py-1 text-right">${tr.deadCount}${tr.mortalityPct != null ? ` / ${_f(tr.mortalityPct, 1)}%` : ''}</td>`
+        + `<td class="border px-2 py-1 text-right">${tr.recruitCount}</td>`
+        + `<td class="border px-2 py-1 text-right">${_f(tr.cStart_t, 3)}</td>`
+        + `<td class="border px-2 py-1 text-right">${_f(tr.cEnd_t, 3)}</td>`
+        + `<td class="border px-2 py-1 text-right font-medium ${tr.netDeltaC_t_yr > 0 ? 'text-emerald-700' : tr.netDeltaC_t_yr < 0 ? 'text-red-600' : ''}">${_f(tr.netDeltaC_t_yr, 4)}</td>`
+        + `<td class="border px-2 py-1 text-right">${_f(tr.netDeltaCO2_t_yr, 4)}</td>`
+        + '</tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<p class="text-[11px] text-stone-500 mt-2">說明：年均ΔDBH/ΔH 為「存活木」逐棵年增量平均（排除枯死與進界木）；'
+      + '淨ΔC 為「期末活碳−期初活碳」÷ 平均間隔年，已含枯死扣減與進界增量，可直接對應 AR-TMS 監測期淨碳匯變化。'
+      + '碳量取各期 measurement 內凍結之當期 equation 結果。</p>';
+  }
+  box.innerHTML = html;
+  if (csvBtn) csvBtn.classList.remove('hidden');
+}
+
+export function exportResurveyCsv() {
+  if (!_lastResurvey) { toast('請先產生複查報表'); return; }
+  const { project, periodRows, transitions } = _lastResurvey;
+  const lines = [];
+  lines.push('# 期別摘要');
+  lines.push(['期別', '日期', '活立木', '平均DBH_cm', '總BA_m2', '總材積_m3', '活碳_tC', 'CO2_t'].join(','));
+  periodRows.forEach(r => lines.push([
+    r.label, r.date ? fmtDate(r.date) : '', r.alive,
+    r.dbhN > 0 ? (r.dbhSum / r.dbhN).toFixed(2) : '',
+    r.baSum.toFixed(4), r.vSum.toFixed(4), (r.cSum / 1000).toFixed(4), (r.co2Sum / 1000).toFixed(4)
+  ].join(',')));
+  lines.push('');
+  lines.push('# 期間轉換');
+  lines.push(['期間', '間隔年', '存活木', '年均dDBH_cm', '年均dH_m', '枯死株', '枯死率_pct', '進界株', '期初活碳_tC', '期末活碳_tC', '淨dC_tC_yr', '淨dCO2_t_yr'].join(','));
+  transitions.forEach(t => lines.push([
+    t.label.replace(/,/g, '；'),
+    t.years != null ? t.years.toFixed(2) : '', t.survivors,
+    t.dbhAnnual != null ? t.dbhAnnual.toFixed(3) : '',
+    t.hAnnual != null ? t.hAnnual.toFixed(3) : '',
+    t.deadCount, t.mortalityPct != null ? t.mortalityPct.toFixed(1) : '',
+    t.recruitCount, t.cStart_t.toFixed(4), t.cEnd_t.toFixed(4),
+    t.netDeltaC_t_yr != null ? t.netDeltaC_t_yr.toFixed(4) : '',
+    t.netDeltaCO2_t_yr != null ? t.netDeltaCO2_t_yr.toFixed(4) : ''
+  ].join(',')));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${project}_複查報表_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('複查報表已匯出');
 }
