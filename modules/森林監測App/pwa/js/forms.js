@@ -1,27 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21170';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21171';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21170';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21171';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21170';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21171';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21170';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21170';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21171';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21171';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21170';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21171';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21170';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21171';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21170';
+import { createSpeciesPicker } from './species-picker.js?v=21171';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21170';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21171';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21170';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21171';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21170';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21171';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -632,6 +632,35 @@ export async function openNewPeriod(project, plot) {
         if (fresh.exists()) state.plot = { id: plot.id, ...fresh.data() };
       } catch (e) { console.warn('[I-2 refresh state.plot]', e); }
     }
+
+    // P5b-1（I-4b）：開新期蓋印 tree.priorSnapshot — 凍結「上一期（第 prevCurSeq 期）」測值。
+    //   時機：此刻 tree 文件仍持上一期最新快照（第 nextSeq 期採集尚未覆寫）＝正確凍結點。
+    //   物件非陣列（避 Firestore array-of-array 限制）；冪等（再開期以新上期覆寫）；缺者 reader null-safe。
+    //   失敗只 warn 不擋開期（純加性脈絡強化）。rules：tree update 主路徑欄位無關，!isLocked 下
+    //   pi/admin 可寫任何欄位（openNewPeriod 已於上方先解鎖）→ priorSnapshot 寫入合法、無需改 rules。
+    try {
+      const treesSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees'));
+      const stampedAt = fb.serverTimestamp();
+      let batch = fb.writeBatch(fb.db);
+      let inBatch = 0, total = 0;
+      for (const d of treesSnap.docs) {
+        const t = d.data();
+        batch.update(d.ref, { priorSnapshot: {
+          fromPeriod: prevCurSeq,
+          dbh_cm: t?.dbh_cm ?? null,
+          height_m: t?.height_m ?? null,
+          vitality: t?.vitality ?? null,
+          stampedAt
+        }});
+        inBatch++; total++;
+        if (inBatch >= 450) { await batch.commit(); batch = fb.writeBatch(fb.db); inBatch = 0; }
+      }
+      if (inBatch > 0) await batch.commit();
+      if (total) console.log(`[P5b 蓋印 priorSnapshot] ${total} 株 ← 第 ${prevCurSeq} 期`);
+    } catch (e) {
+      console.warn('[P5b priorSnapshot 蓋印]', e);
+    }
+
     toast(wasLocked
       ? `已開啟第 ${nextSeq} 期並重啟採集（專案→作業中）`
       : `已開啟第 ${nextSeq} 期複查`);
@@ -710,6 +739,110 @@ export async function writeTreeMeasurementSnapshot(project, plot, treeId, treeDa
   } catch (e) {
     console.warn('[I-1 measurement write-through]', e);
   }
+}
+
+/** P5b-2（I-4b）：列印複查野外清單 — 永久樣區複查黃金實務：印上期清單帶現場逐棵核對身分與合理性。
+ *  資料源優先 tree.priorSnapshot（開新期已蓋印，fromPeriod===上一期；零額外查詢）；
+ *  缺者 fallback 平行讀 measurements/{prevSeq}（一次性列印可接受；無 backfill 的舊樣區會留空＝確實無上期資料）。
+ *  欄位：樹牌號 / 樹種 / 上期DBH / 上期H / 上期活力 / 上期位置 ＋ 本期DBH＿本期H＿狀態（留空手填）。
+ *  沿用 harvest-permits.printPermit 模板手法（window.open + document.write）；A4、斷網可印、無全形空格。 */
+export async function printResurveyFieldList(project, plot) {
+  if (!(isPi() || isSurveyor() || isSystemAdmin())) { toast('僅 PI / 調查員 / 系統管理員可列印複查野外清單'); return; }
+  if (!plot || !plot.id) { toast('找不到樣區資訊'); return; }
+  const cur = currentPlotPeriod(plot);
+  const curSeq = Number(cur?.seq) || 1;
+  if (curSeq < 2) { toast('目前為第一期（原調查），尚無上一期可供複查列印'); return; }
+  const prevSeq = curSeq - 1;
+
+  let trees;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees'));
+    trees = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { console.error('[P5b 列印] 讀立木失敗', e); toast('讀取立木失敗：' + e.message); return; }
+  if (!trees.length) { toast('本樣區尚無立木'); return; }
+
+  // 上期測值：優先 priorSnapshot（fromPeriod===prevSeq）；缺者 fallback 平行讀 measurements/{prevSeq}
+  const hasPrior = (t) => t.priorSnapshot && Number(t.priorSnapshot.fromPeriod) === prevSeq;
+  const needFallback = trees.filter(t => !hasPrior(t));
+  const fallbackMap = new Map();
+  if (needFallback.length) {
+    await Promise.all(needFallback.map(async t => {
+      try {
+        const m = await fb.getDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', t.id, 'measurements', String(prevSeq)));
+        if (m.exists()) fallbackMap.set(t.id, m.data());
+      } catch { /* 留空＝無上期資料 */ }
+    }));
+  }
+  const priorOf = (t) => hasPrior(t) ? t.priorSnapshot : (fallbackMap.get(t.id) || null);
+
+  const sortKey = (t) => {
+    if (t.treeNum != null && !isNaN(Number(t.treeNum))) return Number(t.treeNum);
+    const m = String(t.treeCode || '').match(/(\d+)\s*$/);
+    return m ? Number(m[1]) : 0;
+  };
+  trees.sort((a, b) => sortKey(a) - sortKey(b));
+
+  const esc = s => String(s ?? '—').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const numf = (v, d = 1) => (v == null || v === '' || isNaN(Number(v))) ? '—' : Number(v).toFixed(d);
+  const posOf = (t) => {
+    const x = t.localX_m, y = t.localY_m;  // 位置為定位輔助，取 live tree（priorSnapshot 不存位置）
+    return (x == null || y == null || x === '' || y === '') ? '—' : `(${numf(x)}, ${numf(y)})`;
+  };
+
+  const rowsHtml = trees.map(t => {
+    const p = priorOf(t);
+    const tag = esc(t.treeCode || t.treeNum);
+    const sp = esc(t.speciesZh || t.speciesSci);
+    return `<tr><td>${tag}</td><td>${sp}</td>`
+      + `<td style="text-align:right">${numf(p?.dbh_cm)}</td>`
+      + `<td style="text-align:right">${numf(p?.height_m)}</td>`
+      + `<td style="text-align:center">${esc(p?.vitality)}</td>`
+      + `<td>${posOf(t)}</td>`
+      + `<td class="blank"></td><td class="blank"></td><td class="blank"></td></tr>`;
+  }).join('');
+
+  const roc = new Date().getFullYear() - 1911;
+  const today = new Date().toLocaleDateString('zh-Hant', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<title>樣區複查野外調查清單 ${esc(plot.code)}</title>
+<style>@page{size:A4 portrait;margin:14mm}
+body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;margin:0;color:#222;font-size:12px}
+h1{text-align:center;font-size:18px;margin:0 0 4px}.sub{text-align:center;color:#555;margin-bottom:12px;font-size:12px}
+.meta{border:1px solid #888;padding:8px 12px;margin-bottom:10px;font-size:12px;line-height:1.6}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #888;padding:4px 6px;font-size:12px}
+th{background:#eee}.blank{min-width:48px}
+thead{display:table-header-group}tr{page-break-inside:avoid}
+.tip{font-size:11px;color:#666;margin-top:8px}
+.noprint{background:#f3f4f6;border:1px solid #ccc;border-radius:6px;padding:8px;margin-bottom:14px;display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.noprint .hint{flex:1;font-size:12px;color:#666;min-width:140px}
+.noprint button{border:0;padding:9px 16px;border-radius:6px;font-size:15px;color:#fff;cursor:pointer}
+@media print{.noprint{display:none!important}}</style>
+</head><body>
+<div class="noprint">
+<span class="hint">列印或存成 PDF 後，點「關閉並返回」回到系統。</span>
+<button style="background:#15803d" onclick="window.print()">🖨️ 列印 / 存 PDF</button>
+<button style="background:#555" onclick="window.close()">✕ 關閉並返回</button>
+</div>
+<h1>樣區複查野外調查清單</h1>
+<div class="sub">${esc(project.name)}　中華民國 ${roc} 年</div>
+<div class="meta">
+<div><b>樣區：</b>${esc(plot.code)}　<b>複查期別：</b>第 ${prevSeq} 期 → 第 ${curSeq} 期　<b>立木數：</b>${trees.length} 株</div>
+<div><b>列印日：</b>${esc(today)}　<b>調查員簽名：</b>________________</div>
+</div>
+<table>
+<thead><tr>
+<th>樹牌號</th><th>樹種</th><th>上期<br>DBH(cm)</th><th>上期<br>H(m)</th><th>上期<br>活力</th><th>上期位置<br>(x,y)m</th>
+<th>本期<br>DBH(cm)</th><th>本期<br>H(m)</th><th>狀態<br>(存/枯/失)</th>
+</tr></thead>
+<tbody>${rowsHtml}</tbody>
+</table>
+<div class="tip">說明：逐棵核對樹牌號與樹種身分，量測本期 DBH/H 填於空欄；狀態欄記「存活／枯死／失蹤／失牌」。「—」表示系統無上期測值（如未回填歷史之既有樣區）。</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('瀏覽器封鎖彈出視窗，請允許後重試'); return; }
+  w.document.write(html);
+  w.document.close();
 }
 
 // ===== v1.6.19：封存 / 解封存 — 真實案件結束後使用，資料保留只是從作用中清單移除 =====
@@ -2729,14 +2862,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21170',
+        href: './img/gps-position-guide.svg?v=21171',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21170',
+          src: './img/gps-position-guide.svg?v=21171',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
