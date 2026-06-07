@@ -1,27 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21171';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21172';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21171';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21172';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21171';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21172';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21171';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21171';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21172';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21172';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21171';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21172';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21171';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21172';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21171';
+import { createSpeciesPicker } from './species-picker.js?v=21172';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21171';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21172';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21171';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21172';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21171';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21172';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -761,19 +761,39 @@ export async function printResurveyFieldList(project, plot) {
   } catch (e) { console.error('[P5b 列印] 讀立木失敗', e); toast('讀取立木失敗：' + e.message); return; }
   if (!trees.length) { toast('本樣區尚無立木'); return; }
 
-  // 上期測值：優先 priorSnapshot（fromPeriod===prevSeq）；缺者 fallback 平行讀 measurements/{prevSeq}
+  // 上期測值來源優先序：
+  //   1) priorSnapshot（fromPeriod===prevSeq）— 開新期凍結，最權威（v2.11.71+ 開的期）
+  //   2) measurements/{prevSeq} — 逐期歷史（I-1 寫穿 / backfill 回填）
+  //   3) 活立木快照回退 — 既有樣區未蓋印且未回填時，tree 文件仍持「上一期最新快照」
+  //      （第 curSeq 期採集尚未覆寫才成立）→ 補此回退，讓上期 DBH/H/活力比照位置欄顯示，
+  //      不再因缺凍結歷史而整欄空白（既有樣區常態）。標 _live 供清單透明註記來源。
+  //      防呆：若該株本期已重測（measurements/{curSeq} 存在），live 值已是本期、不可當上期 → 留空。
   const hasPrior = (t) => t.priorSnapshot && Number(t.priorSnapshot.fromPeriod) === prevSeq;
+  const fallbackMap = new Map();        // tid -> 第 prevSeq 期 measurement
+  const measuredThisPeriod = new Set(); // tid 本期（curSeq）已重測 → 禁用 live 回退
   const needFallback = trees.filter(t => !hasPrior(t));
-  const fallbackMap = new Map();
   if (needFallback.length) {
     await Promise.all(needFallback.map(async t => {
+      const base = fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', t.id, 'measurements');
       try {
-        const m = await fb.getDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id, 'trees', t.id, 'measurements', String(prevSeq)));
-        if (m.exists()) fallbackMap.set(t.id, m.data());
+        const [mp, mc] = await Promise.all([
+          fb.getDoc(fb.doc(base, String(prevSeq))),
+          fb.getDoc(fb.doc(base, String(curSeq)))
+        ]);
+        if (mp.exists()) fallbackMap.set(t.id, mp.data());
+        if (mc.exists()) measuredThisPeriod.add(t.id);
       } catch { /* 留空＝無上期資料 */ }
     }));
   }
-  const priorOf = (t) => hasPrior(t) ? t.priorSnapshot : (fallbackMap.get(t.id) || null);
+  const priorOf = (t) => {
+    if (hasPrior(t)) return t.priorSnapshot;
+    if (fallbackMap.has(t.id)) return fallbackMap.get(t.id);
+    if (!measuredThisPeriod.has(t.id) &&
+        (t.dbh_cm != null || t.height_m != null || t.vitality != null)) {
+      return { dbh_cm: t.dbh_cm ?? null, height_m: t.height_m ?? null, vitality: t.vitality ?? null, _live: true };
+    }
+    return null;
+  };
 
   const sortKey = (t) => {
     if (t.treeNum != null && !isNaN(Number(t.treeNum))) return Number(t.treeNum);
@@ -789,14 +809,18 @@ export async function printResurveyFieldList(project, plot) {
     return (x == null || y == null || x === '' || y === '') ? '—' : `(${numf(x)}, ${numf(y)})`;
   };
 
+  let anyLive = false;  // 是否有列以活立木快照回退（決定是否顯示 * 註腳）
   const rowsHtml = trees.map(t => {
     const p = priorOf(t);
+    if (p?._live) anyLive = true;
+    const mk = p?._live ? '<sup style="color:#b45309">*</sup>' : '';
     const tag = esc(t.treeCode || t.treeNum);
     const sp = esc(t.speciesZh || t.speciesSci);
+    const cell = (v, align) => `<td style="text-align:${align}">${numf(v) === '—' ? '—' : numf(v) + mk}</td>`;
     return `<tr><td>${tag}</td><td>${sp}</td>`
-      + `<td style="text-align:right">${numf(p?.dbh_cm)}</td>`
-      + `<td style="text-align:right">${numf(p?.height_m)}</td>`
-      + `<td style="text-align:center">${esc(p?.vitality)}</td>`
+      + cell(p?.dbh_cm, 'right')
+      + cell(p?.height_m, 'right')
+      + `<td style="text-align:center">${p?.vitality != null && p?.vitality !== '' ? esc(p.vitality) + mk : '—'}</td>`
       + `<td>${posOf(t)}</td>`
       + `<td class="blank"></td><td class="blank"></td><td class="blank"></td></tr>`;
   }).join('');
@@ -836,7 +860,7 @@ thead{display:table-header-group}tr{page-break-inside:avoid}
 </tr></thead>
 <tbody>${rowsHtml}</tbody>
 </table>
-<div class="tip">說明：逐棵核對樹牌號與樹種身分，量測本期 DBH/H 填於空欄；狀態欄記「存活／枯死／失蹤／失牌」。「—」表示系統無上期測值（如未回填歷史之既有樣區）。</div>
+<div class="tip">說明：逐棵核對樹牌號與樹種身分，量測本期 DBH/H 填於空欄；狀態欄記「存活／枯死／失蹤／失牌」。「—」表示系統無上期測值（如該株本期已重測或無任何紀錄）。${anyLive ? '<br>標 <sup style="color:#b45309">*</sup> 之上期值取自立木最新紀錄（即本期重測前數值），非凍結歷史；待本期重測存檔後，系統將以逐期凍結歷史為準。' : ''}</div>
 </body></html>`;
 
   const w = window.open('', '_blank');
@@ -2862,14 +2886,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21171',
+        href: './img/gps-position-guide.svg?v=21172',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21171',
+          src: './img/gps-position-guide.svg?v=21172',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
