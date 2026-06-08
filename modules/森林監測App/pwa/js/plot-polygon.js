@@ -19,6 +19,9 @@
 
 export const VERTEX_MIN = 3;
 export const VERTEX_MAX = 50;
+// v2.11.74：local 座標（相對樣區中心的公尺偏移）合理上限。樣區是固定小面積調查單元，
+//   邊界頂點絕無可能離中心 1 km 以上；用此擋下「TWD97 絕對座標誤填」（差 2~3 個數量級）。
+export const LOCAL_COORD_MAX_M = 1000;
 
 // ===== 形式轉換 =====
 //   db 存 [{x, y}, ...]；演算法用 [[x, y], ...]
@@ -147,17 +150,32 @@ export function computeCentroid(verts) {
 
 // ===== 完整驗證（給 forms / rules 用）=====
 //   回傳 { ok, error?, vertices?（normalised CCW + 去重）}
-export function validatePolygon(verts) {
+//   v2.11.74：輸入端防呆 — 頂點為「local 座標（相對樣區中心的公尺偏移）」，任何合理樣區
+//     邊界都該在 ±LOCAL_COORD_MAX_M 內。若有人把 TWD97 絕對座標（X~20萬 / Y~250萬）誤填進來，
+//     在此硬擋下（根本原因），避免壞邊界流入 render 端造成散布圖 extent 暴衝→格線迴圈百萬次→
+//     主執行緒凍結 / 手機 OOM（2026-05-23、2026-06-08 兩次事故根因；見 memory feedback_forestmrv_input_validation）。
+//     maxBound 可由 caller 依樣區尺寸收緊（樣區邊長×4+100）；預設 1000 m 對任何樣區都極寬鬆，
+//     但仍把絕對座標（差 2~3 個數量級）擋在門外。
+export function validatePolygon(verts, maxBound = LOCAL_COORD_MAX_M) {
   if (!Array.isArray(verts)) return { ok: false, error: 'vertices 必須為陣列' };
   if (verts.length < VERTEX_MIN) return { ok: false, error: `頂點數需 ≥ ${VERTEX_MIN}（目前 ${verts.length}）` };
   if (verts.length > VERTEX_MAX) return { ok: false, error: `頂點數需 ≤ ${VERTEX_MAX}（目前 ${verts.length}）` };
-  // 數值有效性
+  const cap = Number.isFinite(maxBound) && maxBound > 0 ? maxBound : LOCAL_COORD_MAX_M;
+  // 數值有效性 + 範圍合理性（local 座標 sanity bound）
   for (let i = 0; i < verts.length; i++) {
     const v = verts[i];
     const x = Array.isArray(v) ? v[0] : v?.x;
     const y = Array.isArray(v) ? v[1] : v?.y;
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return { ok: false, error: `頂點 #${i + 1} 座標非有效數字` };
+    }
+    if (Math.abs(x) > cap || Math.abs(y) > cap) {
+      return {
+        ok: false,
+        error: `頂點 #${i + 1} 座標 (${Math.round(x)}, ${Math.round(y)}) m 超出合理範圍（±${cap} m）` +
+          ` — 這看起來像誤填了「TWD97 絕對座標」。邊界頂點應為「相對樣區中心的公尺偏移」（通常 ±數十公尺）。` +
+          `若要上傳整個計畫區，請改用「編輯專案 → 📐 專案邊界」。`
+      };
     }
   }
   // 移除連續重複頂點（誤填 / 上傳資料常見）
