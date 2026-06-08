@@ -1,5 +1,5 @@
 // v2.8.0：irregular plot 多邊形繪製 + 點對多邊形判斷
-import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=21172';
+import { vertsToArrays, isPointInPolygon } from './plot-polygon.js?v=21173';
 
 // ===== distribution.js — 立木分布散布圖（v2.6.2 / v2.5.1 backlog 🅲 落地）=====
 //
@@ -102,7 +102,13 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
     xExtentStored = w / 2; yExtentStored = l / 2;
   } else if (shape === 'irregular') {
     irregularVertsStored = vertsToArrays(dims.vertices || []);
-    if (irregularVertsStored.length >= 3) {
+    // 防呆：邊界頂點若落在合理範圍外（如誤填 TWD97 絕對座標、十幾萬公尺）→ 視為毀損，
+    //       丟棄不規則邊界、退回面積方框。否則 extent 暴衝到數十萬公尺，drawAxes 格線迴圈爆掉凍結
+    //       （桌機 renderer hang / 手機 Safari OOM「重複發生問題」）。比照立木 _sane 同一界線。
+    const vertsSane = irregularVertsStored.length >= 3 &&
+      irregularVertsStored.every(([x, y]) =>
+        Number.isFinite(x) && Number.isFinite(y) && Math.abs(x) <= _sane && Math.abs(y) <= _sane);
+    if (vertsSane) {
       const bbox = dims.bbox || (() => {
         let mnX = Infinity, mxX = -Infinity, mnY = Infinity, mxY = -Infinity;
         for (const [x, y] of irregularVertsStored) {
@@ -111,10 +117,20 @@ export function renderTreeDistribution(snap, plot, methodology, opts = {}) {
         }
         return { minX: mnX, maxX: mxX, minY: mnY, maxY: mxY };
       })();
-      xExtentStored = Math.max(Math.abs(bbox.minX), Math.abs(bbox.maxX));
-      yExtentStored = Math.max(Math.abs(bbox.minY), Math.abs(bbox.maxY));
+      // bbox 也可能本身毀損（vertices 正常但 bbox 欄位殘留舊壞值）→ 再夾一次
+      const bx = Math.max(Math.abs(bbox.minX), Math.abs(bbox.maxX));
+      const by = Math.max(Math.abs(bbox.minY), Math.abs(bbox.maxY));
+      if (bx <= _sane && by <= _sane) {
+        xExtentStored = bx;
+        yExtentStored = by;
+      } else {
+        irregularVertsStored = null;
+        xExtentStored = Math.sqrt(area) / 2;
+        yExtentStored = xExtentStored;
+      }
     } else {
-      xExtentStored = Math.sqrt(area) / 2;  // fallback
+      irregularVertsStored = null;          // 不畫毀損邊界
+      xExtentStored = Math.sqrt(area) / 2;  // fallback：面積方框
       yExtentStored = xExtentStored;
     }
   } else {  // unknown shape fallback
@@ -399,12 +415,16 @@ function drawAxes(ctx, size, originType, xMin, xMax, yMin, yMax, mxToPx, myToPy)
   ctx.fillStyle = '#78716c';     // stone-500
 
   // 計算合理的 tick step（讓 5-8 條 grid line）
-  const span = xMax - xMin;
+  const span = Math.max(xMax - xMin, 1e-6);
   const niceSteps = [0.5, 1, 2, 5, 10, 20, 25, 50, 100];
-  let step = niceSteps[0];
+  let step = niceSteps[niceSteps.length - 1];   // 預設取「最大」候選，而非最小
   for (const s of niceSteps) {
     if (span / s <= 8) { step = s; break; }
   }
+  // 🛡️ 終極防護網：若範圍異常大（連最大候選 step 仍 > 8 條格線，代表上游 extent 毀損），
+  //    改用動態 span/8，硬上限格線數，避免 step 退回 0.5 時迴圈跑數十萬圈 → renderer 凍結／手機 OOM。
+  if (span / step > 8) step = span / 8;
+  if (!(step > 0) || !Number.isFinite(step)) step = span;  // 最後保險：永不 0 或 NaN（否則無窮迴圈）
 
   // 垂直 grid + x 軸刻度（底部）
   for (let v = Math.ceil(xMin / step) * step; v <= xMax; v += step) {
