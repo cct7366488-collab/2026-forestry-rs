@@ -1,27 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21174';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21175';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21174';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21175';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21174';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21175';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21174';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21174';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21175';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21175';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21174';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21175';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21174';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21175';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21174';
+import { createSpeciesPicker } from './species-picker.js?v=21175';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21174';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21175';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21174';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21175';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21174';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21175';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -2886,14 +2886,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21174',
+        href: './img/gps-position-guide.svg?v=21175',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21174',
+          src: './img/gps-position-guide.svg?v=21175',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -3975,6 +3975,30 @@ export async function openTreeForm(project, plot, existing = null) {
     const h = parseFloat(fd.get('height_m'));
     const m = calcTreeMetrics({ dbh_cm: dbh, height_m: h, speciesZh, speciesSci, treeType });
     const treeNumVal = parseInt(fd.get('treeNum'), 10);
+    // v2.11.75：同樣區「重號」防呆 — 立木表單 nextNum 可被使用者覆寫，且無唯一性檢查
+    //   → 學生易把「既有立木」當「新立木」重打一筆相同 treeNum/treeCode（散布圖/I-6/統計會
+    //   雙重計數株數、BA、材積、碳量）。新建（!existing）才檢查；編輯沿用原號不擋。
+    if (!existing && Number.isFinite(treeNumVal)) {
+      let dupTree = null;
+      try {
+        const _ts = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees'));
+        const _d = _ts.docs.find(d => parseInt(d.data().treeNum, 10) === treeNumVal);
+        if (_d) dupTree = { id: _d.id, ...(_d.data()) };
+      } catch (e) { console.warn('[v2.11.75] dup-treeNum check failed', e); }
+      if (dupTree) {
+        const dupCode = dupTree.treeCode || `${plot.code}-${padNum(treeNumVal)}`;
+        if (isResurvey) {
+          // 複查期：很可能是要「重測」既有立木 → 導向既有立木的編輯/複查表單
+          const go = confirm(`本樣區已有立木「${dupCode}」（第 ${treeNumVal} 號）。\n\n複查期不應重新建立同號立木。要改為「重測既有立木 ${dupCode}」嗎？\n\n按「確定」開啟該株的複查表單；按「取消」回到目前表單修改編號。`);
+          if (go) { closeModal(); return void openTreeForm(project, plot, dupTree); }
+          toast(`第 ${treeNumVal} 號已存在，請改用其他編號，或重測既有立木。`);
+          return;
+        }
+        // 第一期/非複查：直接擋下，要求改號
+        toast(`本樣區已有立木「${dupCode}」（第 ${treeNumVal} 號），請改用其他編號。`);
+        return;
+      }
+    }
     // v2.5：立木座標換算（local X/Y → absolute TWD97 + WGS84 geopoint）
     // v2.11.28：依 currentPosSource 分支 — offset (X/Y→絕對) 或 gps (絕對→反算 X/Y)
     const positionSource = currentPosSource;
@@ -4050,6 +4074,27 @@ export async function openTreeForm(project, plot, existing = null) {
           }
         } catch (e) { console.warn('[v2.5 tree wgs84]', e); }
       }
+    }
+
+    // v2.11.75：座標鄰近「軟」提示 — 新樹/編輯後 local 座標若與另一株 < 0.5 m，可能是重複定位
+    //   （配合重號防呆抓另一種「同位置兩棵」的輸入錯誤）。可忽略，按確定仍可儲存。
+    if (Number.isFinite(localX) && Number.isFinite(localY)) {
+      const PROX_M = 0.5;
+      try {
+        const _ts2 = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plot.id, 'trees'));
+        let near = null, nearD = Infinity;
+        for (const d of _ts2.docs) {
+          if (d.id === existing?.id) continue;   // 編輯自己不比
+          const t = d.data();
+          if (!Number.isFinite(t.localX_m) || !Number.isFinite(t.localY_m)) continue;
+          const dist = Math.hypot(t.localX_m - localX, t.localY_m - localY);
+          if (dist < PROX_M && dist < nearD) { near = { code: t.treeCode || `#${t.treeNum}`, dist }; nearD = dist; }
+        }
+        if (near) {
+          const ok = confirm(`此座標 (${localX}, ${localY}) 與既有立木「${near.code}」僅相距約 ${near.dist.toFixed(2)} m，可能是重複定位或量錯。\n\n仍要儲存嗎？`);
+          if (!ok) return;
+        }
+      } catch (e) { console.warn('[v2.11.75] proximity check failed', e); }
     }
 
     const data = {
