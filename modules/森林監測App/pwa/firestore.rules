@@ -141,7 +141,9 @@ service cloud.firestore {
           (!isLocked(projectId) && (
             isSystemAdmin() ||
             isPi(projectId) ||
-            (isSurveyor(projectId) && (isOwner() || resource.data.get('assignedTo', null) == request.auth.uid))
+            (isSurveyor(projectId) && (isOwner()
+              || resource.data.get('assignedTo', null) == request.auth.uid
+              || request.auth.uid in resource.data.get('assignedToUids', [])))  // v2.11.77 多人指派
           )) ||
           (isReviewer(projectId)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt'])) ||

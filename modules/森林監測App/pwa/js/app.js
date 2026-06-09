@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21176";
-import * as forms from "./forms.js?v=21176";
-import * as analytics from "./analytics.js?v=21176";
-import * as importWizard from "./import-wizard.js?v=21176";
+import { firebaseConfig } from "../firebase-config.js?v=21177";
+import * as forms from "./forms.js?v=21177";
+import * as analytics from "./analytics.js?v=21177";
+import * as importWizard from "./import-wizard.js?v=21177";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21176";
-import { renderTreeDistribution } from "./distribution.js?v=21176";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21176";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21176";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21177";
+import { renderTreeDistribution } from "./distribution.js?v=21177";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21177";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21177";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21176";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21176";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21177";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21177";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21176";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21177";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21176";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21177";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -237,6 +237,16 @@ export function userLabel(uid, fallback = '?') {
   return _userLabelCache.get(uid) || uid.slice(0, 8);
 }
 
+// v2.11.77：多人指派 — 樣區指派人讀取（向後相容）
+//   新資料：assignedToUids（字串陣列）。舊資料：assignedTo（單一 UID 字串）。
+//   一律回傳「乾淨的 UID 陣列」；空 = 未指派。寫入見 forms.setPlotAssignees。
+export function plotAssignees(dd) {
+  if (!dd) return [];
+  if (Array.isArray(dd.assignedToUids)) return dd.assignedToUids.filter(Boolean);
+  if (dd.assignedTo) return [dd.assignedTo];
+  return [];
+}
+
 // v2.3：狀態列 banner（取代原本只顯示 lock 的 banner，加 status 顏色 + 原因）
 function renderStatusBanner() {
   const banner = $('#lock-banner');
@@ -369,7 +379,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21176');
+    const m = await import('./migration-v2715.js?v=21177');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -391,7 +401,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21176');
+    const m = await import('./migration-v2715.js?v=21177');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1200,7 +1210,7 @@ async function renderProjectHome(root, projectId) {
     const visible = surveyorView
       ? allDocs.filter(d => {
           const dd = d.data();
-          return dd.assignedTo === state.user.uid || dd.createdBy === state.user.uid;
+          return plotAssignees(dd).includes(state.user.uid) || dd.createdBy === state.user.uid;
         })
       : allDocs;
     $('#plot-progress').textContent = target
@@ -1210,7 +1220,7 @@ async function renderProjectHome(root, projectId) {
     // v1.7.1：PI 視角偵測「有空殼但沒 surveyor」→ 顯示提示 banner
     if (canQA() && !isLocked()) {
       const shellCount = allDocs.filter(d => !d.data().location).length;
-      const unassignedShells = allDocs.filter(d => !d.data().location && !d.data().assignedTo).length;
+      const unassignedShells = allDocs.filter(d => !d.data().location && plotAssignees(d.data()).length === 0).length;
       if (shellCount > 0 && surveyors.length === 0) {
         list.appendChild(el('div', {
           class: 'col-span-2 bg-blue-50 border border-blue-300 rounded-lg p-3 text-sm flex items-center justify-between gap-2 flex-wrap'
@@ -1246,8 +1256,10 @@ async function renderProjectHome(root, projectId) {
     visible.forEach(d => {
       const dd = d.data();
       const isShell = !dd.location;  // 沒 GPS = 空殼
-      const assignedLabel = dd.assignedTo
-        ? (dd.assignedTo === state.user.uid ? '指派給我' : `指派給 ${userLabel(dd.assignedTo, dd.assignedTo.slice(0,6))}`)
+      // v2.11.77：多人指派 — label 列出全部指派人（含「我」）
+      const assignees = plotAssignees(dd);
+      const assignedLabel = assignees.length
+        ? '指派給 ' + assignees.map(u => userLabel(u, u.slice(0, 6))).join('、')
         : null;
       // 卡片標頭：code + badges
       const headerRight = el('div', { class: 'flex items-center gap-1 flex-wrap' });
@@ -1267,7 +1279,7 @@ async function renderProjectHome(root, projectId) {
         });
       }
       // v1.7.1：未指派 shell 補「📌 待指派」紅字（PI 視角）
-      if (isShell && !dd.assignedTo && canQA()) {
+      if (isShell && assignees.length === 0 && canQA()) {
         headerRight.appendChild(el('span', { class: 'text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded' }, '📌 待指派'));
       }
       // v2.7.16：migrationPending=true 補「🏷️ 待補登幾何」（admin / PI 視角；提示 v2.6 schema 欄位未填）
@@ -1297,24 +1309,36 @@ async function renderProjectHome(root, projectId) {
             ? '尚未開始調查'
             : `${fmtDate(dd.establishedAt)} · ${isReviewer() ? anonName(dd.createdBy) : userLabel(dd.createdBy, '—')}`)
       );
-      // PI 視角：加指派下拉（不讓進入連結 stopPropagation）
+      // PI 視角：加多人指派 checkbox 清單（v2.11.77；不讓進入連結 — 整個區塊吃掉點擊）
       if (canQA() && surveyors.length > 0 && !isLocked()) {
-        const sel = el('select', {
-          class: 'mt-2 text-xs border rounded px-1 py-0.5 w-full',
-          onclick: (ev) => ev.preventDefault(),
-          onchange: (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            forms.assignPlotToSurveyor(state.project, { id: d.id, ...dd }, ev.target.value || null);
-          }
+        const swallow = (ev) => { ev.preventDefault(); ev.stopPropagation(); };
+        // 收集目前勾選 → 寫回 assignedToUids 陣列
+        const collectAndSave = (wrap) => {
+          const uids = Array.from(wrap.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(cb => cb.value);
+          forms.setPlotAssignees(state.project, { id: d.id, ...dd }, uids);
+        };
+        const wrap = el('div', {
+          class: 'mt-2 border rounded p-1.5',
+          onclick: swallow
         });
-        sel.appendChild(el('option', { value: '' }, '— 未指派 —'));
+        wrap.appendChild(el('div', { class: 'text-[11px] text-stone-500 mb-1' }, '指派調查員（可多選）'));
+        const assignedSet = new Set(assignees);
         surveyors.forEach(s => {
-          const opt = el('option', { value: s.uid }, s.label);
-          if (s.uid === dd.assignedTo) opt.setAttribute('selected', 'true');
-          sel.appendChild(opt);
+          const cb = el('input', {
+            type: 'checkbox', value: s.uid,
+            class: 'w-4 h-4 accent-forest-700',
+            style: 'width:1rem;height:1rem;',  // 防全域 input 寬度覆蓋
+            onclick: (ev) => ev.stopPropagation(),
+            onchange: (ev) => { ev.stopPropagation(); collectAndSave(wrap); }
+          });
+          if (assignedSet.has(s.uid)) cb.checked = true;
+          wrap.appendChild(el('label', {
+            class: 'flex items-center gap-1.5 text-xs py-0.5 cursor-pointer',
+            onclick: (ev) => ev.stopPropagation()
+          }, cb, el('span', {}, s.label)));
         });
-        card.appendChild(sel);
+        card.appendChild(wrap);
       } else if (assignedLabel) {
         card.appendChild(el('p', { class: 'text-xs text-blue-700 mt-1' }, `📌 ${assignedLabel}`));
       }
