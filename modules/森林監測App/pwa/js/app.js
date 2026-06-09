@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21175";
-import * as forms from "./forms.js?v=21175";
-import * as analytics from "./analytics.js?v=21175";
-import * as importWizard from "./import-wizard.js?v=21175";
+import { firebaseConfig } from "../firebase-config.js?v=21176";
+import * as forms from "./forms.js?v=21176";
+import * as analytics from "./analytics.js?v=21176";
+import * as importWizard from "./import-wizard.js?v=21176";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21175";
-import { renderTreeDistribution } from "./distribution.js?v=21175";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21175";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21175";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21176";
+import { renderTreeDistribution } from "./distribution.js?v=21176";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21176";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21176";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21175";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21175";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21176";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21176";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21175";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21176";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21175";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21176";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -369,7 +369,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21175');
+    const m = await import('./migration-v2715.js?v=21176');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -391,7 +391,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21175');
+    const m = await import('./migration-v2715.js?v=21176');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -3098,6 +3098,82 @@ function rerenderDistribution() {
   });
 }
 
+// v2.11.76（I-6b）：逐棵立木「歷期測值」明細 — 看該樹 P1..Pn 的 DBH/H/活力/斷面積/材積/碳逐期值
+//   資料源 = trees/{id}/measurements 子集合（I-1 凍結快照）；期別 label/season/date 取自 state.plot.periods
+async function openTreeHistory(tree) {
+  const projectId = state.project?.id, plotId = state.plot?.id;
+  if (!projectId || !plotId || !tree?.id) return;
+  const periods = Array.isArray(state.plot?.periods) ? state.plot.periods : [];
+  const pmeta = {};
+  periods.forEach(p => { pmeta[Number(p.seq)] = p; });
+  const fmtD = (v) => {
+    if (!v) return '—';
+    const d = (typeof v?.toDate === 'function') ? v.toDate() : (v instanceof Date ? v : new Date(v));
+    return isNaN(d) ? '—' : d.toISOString().slice(0, 10);
+  };
+  const vMap = { healthy: '健康', weak: '衰弱', 'standing-dead': '枯立', fallen: '倒伏' };
+  const fateMap = { alive: '存活', dead: '枯死', missing: '失蹤', 'tag-lost': '樹牌脫落' };
+  const fnum = (x, d = 1) => (x == null || !isFinite(x)) ? '—' : Number(x).toFixed(d);
+  const body = el('div', { class: 'space-y-2 text-sm' });
+  body.appendChild(el('div', { class: 'text-stone-500' }, '⏳ 讀取逐期歷史…'));
+  openModal(`📊 ${tree.treeCode || tree.treeNum || ''} 歷期測值`, body);
+  let docs = [];
+  try {
+    const ms = await fb.getDocs(fb.collection(fb.db, 'projects', projectId, 'plots', plotId, 'trees', tree.id, 'measurements'));
+    docs = ms.docs.map(d => d.data()).sort((a, b) => Number(a.periodId) - Number(b.periodId));
+  } catch (e) {
+    console.warn('[tree-history]', e);
+    body.innerHTML = '';
+    body.appendChild(el('div', { class: 'text-red-600' }, `讀取失敗：${e.message || e}`));
+    return;
+  }
+  body.innerHTML = '';
+  if (!docs.length) {
+    body.appendChild(el('div', { class: 'text-stone-500' }, '此立木尚無逐期 measurement 歷史。'));
+    return;
+  }
+  let prevDbh = null;
+  const rows = docs.map(m => {
+    const seq = Number(m.periodId);
+    const pm = pmeta[seq] || {};
+    const dbh = m.dbh_cm;
+    let dDbh = '—';
+    if (dbh != null && prevDbh != null) { const dd = dbh - prevDbh; dDbh = (dd >= 0 ? '+' : '') + dd.toFixed(1); }
+    if (dbh != null) prevDbh = dbh;
+    const carbon = m.carbonSkipped ? '—' : fnum(m.carbon_kg, 1);
+    const co2 = m.carbonSkipped ? '—' : fnum(m.co2_kg, 1);
+    return el('tr', {},
+      el('td', { class: 'border px-2 py-1' }, `第${seq}期${pm.season ? `（${pm.season}）` : ''}`),
+      el('td', { class: 'border px-2 py-1 text-stone-500' }, fmtD(m.recordedAt || m.recordedDate || pm.openedAt)),
+      el('td', { class: 'border px-2 py-1' }, fateMap[m.resurveyFate] || vMap[m.vitality] || m.vitality || '—'),
+      el('td', { class: 'border px-2 py-1 text-right' }, fnum(dbh, 1)),
+      el('td', { class: 'border px-2 py-1 text-right text-emerald-700' }, dDbh),
+      el('td', { class: 'border px-2 py-1 text-right' }, fnum(m.height_m, 1)),
+      el('td', { class: 'border px-2 py-1 text-right' }, m.nstem != null ? String(m.nstem) : '—'),
+      el('td', { class: 'border px-2 py-1 text-right' }, fnum(m.basalArea_m2, 4)),
+      el('td', { class: 'border px-2 py-1 text-right' }, fnum(m.volume_m3, 3)),
+      el('td', { class: 'border px-2 py-1 text-right' }, carbon),
+      el('td', { class: 'border px-2 py-1 text-right' }, co2)
+    );
+  });
+  const tbl = el('table', { class: 'w-full text-xs border-collapse' },
+    el('thead', {},
+      el('tr', { class: 'bg-stone-100 text-stone-600' },
+        ...['期別', '日期', '狀態', 'DBH(cm)', 'ΔDBH', 'H(m)', '莖數', '斷面積(m²)', '材積(m³)', '碳(kg)', 'CO₂(kg)']
+          .map(h => el('th', { class: 'border px-2 py-1' }, h)))),
+    el('tbody', {}, ...rows)
+  );
+  body.appendChild(el('div', { class: 'overflow-x-auto' }, tbl));
+  if (docs.some(m => m.carbonSkipped)) {
+    body.appendChild(el('div', { class: 'text-[11px] text-stone-500 mt-1' },
+      '註：本樣區量測為地徑（幼齡），依設定僅算斷面積，材積／碳未估。'));
+  }
+  if (docs.some(m => m.dateProvisional)) {
+    body.appendChild(el('div', { class: 'text-[11px] text-stone-500' },
+      '＊日期為推定季末（provisional），待回填實際調查日。'));
+  }
+}
+
 function renderTreeList(snap, projectId, plotId) {
   _lastTreeSnap = snap;   // v2.6.2：留給 distribution 用
   const list = $('#tree-list');
@@ -3112,6 +3188,8 @@ function renderTreeList(snap, projectId, plotId) {
     return;
   }
   let totalBA = 0, totalV = 0, sumDbh = 0, sumH = 0;
+  // v2.11.76（I-6b）：複查樣區（≥2 期）才顯示「歷期」明細鈕
+  const hasMultiPeriod = (Array.isArray(state.plot?.periods) ? state.plot.periods.length : (Number(state.plot?.currentPeriod) || 1)) >= 2;
   const rows = snap.docs.map(d => {
     const t = d.data();
     totalBA += t.basalArea_m2 || 0;
@@ -3156,6 +3234,13 @@ function renderTreeList(snap, projectId, plotId) {
     if (t.manuallyAdjusted === true) {
       posBadge += ' <span title="在地圖頁長壓微調過位置" style="font-size:11px;color:#7c3aed">✋</span>';
     }
+    const histCell = hasMultiPeriod
+      ? el('td', {}, el('button', {
+          class: 'text-xs border rounded px-1.5 py-0.5 hover:bg-stone-100',
+          title: '逐期歷史測值（P1…Pn）',
+          onclick: (e) => { e.stopPropagation(); openTreeHistory({ id: d.id, ...t }); }
+        }, '📊'))
+      : null;
     return el('tr', {
       onclick: () => {
         if (isLocked()) return toast('資料已 Lock');
@@ -3169,7 +3254,8 @@ function renderTreeList(snap, projectId, plotId) {
       el('td', {}, (t.height_m || 0).toFixed(1)),
       el('td', { class: 'text-xs text-stone-600 font-mono', html: `${posBadge} ${xyText}` }),  // v2.5 + v2.11.28 badge
       el('td', {}, el('span', { class: `badge badge-${v}` }, vlabel)),
-      el('td', {}, (t.volume_m3 || 0).toFixed(3))
+      el('td', {}, (t.volume_m3 || 0).toFixed(3)),
+      histCell
     );
   });
   const tbl = el('table', { class: 'tbl' },
@@ -3178,7 +3264,8 @@ function renderTreeList(snap, projectId, plotId) {
         el('th', {}, '#'), el('th', {}, '樹種 / QA'),
         el('th', {}, 'DBH (cm)'), el('th', {}, 'H (m)'),
         el('th', {}, '位置 (X, Y m)'),  // v2.5 + v2.11.28 加定位來源 badge
-        el('th', {}, '活力'), el('th', {}, '材積 (m³)')
+        el('th', {}, '活力'), el('th', {}, '材積 (m³)'),
+        hasMultiPeriod ? el('th', {}, '歷期') : null
       )
     ),
     el('tbody', {}, ...rows)
