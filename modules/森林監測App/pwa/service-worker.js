@@ -267,7 +267,7 @@
 //   wildlife/harvest 子集合訂閱仍引用 mods → ReferenceError 在 render 中段 throw → router
 //   render promise reject、route 卡鎖 → 進樣區詳情後無法返回、無法新增立木。修：補回 mods 宣告。
 //   ?v=21145 -> ?v=21146 全檔。
-const CACHE = 'forest-monitor-v2.11.77';  // v2.11.77：樣區「多人指派」— 卡片指派改 checkbox 多選，資料寫 assignedToUids[]（向後相容鏡像 assignedTo=首位）；surveyor 清單過濾/開期 rules 改陣列成員判定；空殼預設 assignedToUids:[]。以下歷史 // v2.11.76：逐棵立木「歷期測值」明細（I-6b）— 立木清單複查樣區(≥2期)每列加 📊 鈕，點開看該樹 P1..Pn 的 DBH/ΔDBH/H/活力/斷面積/材積/碳逐期值（資料源 trees/{id}/measurements）；v2.11.75：立木表單「同樣區重號」防呆 — 新立木 submit 檢查 treeNum 是否已存在；複查期導向「重測既有立木」、第一期直接擋下改號（修 D3 重號雙重計數）＋座標鄰近(<0.5m)軟提示；v2.11.74：輸入端防呆 — validatePolygon 加 local 座標 ±1000m 硬擋（絕對座標誤填當場退回，附「改用專案邊界」提示）＋立木 GPS 反算 local 爆量改記 null（補 v2.11.73 只修 render 端的根本缺口）；v2.11.73：立木分布圖防壞座標凍結（不規則邊界 extent 加 _sane + drawAxes 格線數硬上限）；v2.11.72：複查野外清單上期值加活立木快照回退；v2.11.71：P5b 開新期蓋印 tree.priorSnapshot + 可列印複查野外清單；以下歷史
+const CACHE = 'forest-monitor-v2.11.78';  // v2.11.78：修 v2.11.77 指派 checkbox 顯示 UID 片段（如 pCayLwz5）— 名稱快取 race：loadProject 的 prefetchUserLabels 是 fire-and-forget，樣區清單 render 可能搶先於快取就緒。改在 plot-list onSnapshot handler 內 await prefetchUserLabels(surveyorUids) 後才解析 label（generation guard 仍護）。以下歷史 // v2.11.77：樣區「多人指派」— 卡片指派改 checkbox 多選，資料寫 assignedToUids[]（向後相容鏡像 assignedTo=首位）；surveyor 清單過濾/開期 rules 改陣列成員判定；空殼預設 assignedToUids:[]。以下歷史 // v2.11.76：逐棵立木「歷期測值」明細（I-6b）— 立木清單複查樣區(≥2期)每列加 📊 鈕，點開看該樹 P1..Pn 的 DBH/ΔDBH/H/活力/斷面積/材積/碳逐期值（資料源 trees/{id}/measurements）；v2.11.75：立木表單「同樣區重號」防呆 — 新立木 submit 檢查 treeNum 是否已存在；複查期導向「重測既有立木」、第一期直接擋下改號（修 D3 重號雙重計數）＋座標鄰近(<0.5m)軟提示；v2.11.74：輸入端防呆 — validatePolygon 加 local 座標 ±1000m 硬擋（絕對座標誤填當場退回，附「改用專案邊界」提示）＋立木 GPS 反算 local 爆量改記 null（補 v2.11.73 只修 render 端的根本缺口）；v2.11.73：立木分布圖防壞座標凍結（不規則邊界 extent 加 _sane + drawAxes 格線數硬上限）；v2.11.72：複查野外清單上期值加活立木快照回退；v2.11.71：P5b 開新期蓋印 tree.priorSnapshot + 可列印複查野外清單；以下歷史
 // v2.11.69（歷史）：拿掉「核准採收量」概念（業務拍板）。
 // v2.11.68（歷史）：純行政專案地圖頁藏立木/樣區 UI 殘留 + 修枝申請表單欄位順序調整（6/6 demo polish）。
 // v2.11.67（歷史）：申請函嵌入作業位置 SVG（buildLocationSvg）+ printApplicationLetter signature 改 (permit, project)。
@@ -311,7 +311,7 @@ const CACHE = 'forest-monitor-v2.11.77';  // v2.11.77：樣區「多人指派」
 //   情境（直接帶設備到山上訓練、駐地無 wifi）會崩潰 — JS 沒 cache → 離線 fetch fail → app 黑屏。
 //   現在 SHELL 一次 addAll() 把所有 JS 預快取，install 完成就保證離線可開。
 //   缺點：每次版號 bump 整批重下載（~200KB 級，可接受；行動網路 ~3 秒）
-const JS_VERSION = '21177';
+const JS_VERSION = '21178';
 const SHELL = [
   './',
   './index.html',

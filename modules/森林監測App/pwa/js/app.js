@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21177";
-import * as forms from "./forms.js?v=21177";
-import * as analytics from "./analytics.js?v=21177";
-import * as importWizard from "./import-wizard.js?v=21177";
+import { firebaseConfig } from "../firebase-config.js?v=21178";
+import * as forms from "./forms.js?v=21178";
+import * as analytics from "./analytics.js?v=21178";
+import * as importWizard from "./import-wizard.js?v=21178";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21177";
-import { renderTreeDistribution } from "./distribution.js?v=21177";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21177";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21177";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21178";
+import { renderTreeDistribution } from "./distribution.js?v=21178";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21178";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21178";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21177";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21177";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21178";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21178";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21177";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21178";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21177";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21178";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -379,7 +379,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21177');
+    const m = await import('./migration-v2715.js?v=21178');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -401,7 +401,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21177');
+    const m = await import('./migration-v2715.js?v=21178');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1158,9 +1158,11 @@ async function renderProjectHome(root, projectId) {
   const plotsRef = collection(db, 'projects', projectId, 'plots');
   const qPlots = query(plotsRef, orderBy('createdAt', 'desc'));
   // v1.7.0：取得專案 surveyor 清單（給 PI 指派用）
-  const surveyors = Object.entries(state.project.members || {})
+  // v2.11.78：只先取 uid；label 解析移到 handler 內（await prefetchUserLabels 後），
+  //   避免名稱快取尚未就緒（loadProject 的 prefetch 是 fire-and-forget）→ 指派清單顯示 UID 片段。
+  const surveyorUids = Object.entries(state.project.members || {})
     .filter(([uid, role]) => role === 'surveyor')
-    .map(([uid]) => ({ uid, label: userLabel(uid, uid.slice(0, 6)) }));
+    .map(([uid]) => uid);
 
   // v2.11.48：本 handler 是 async（await 子集合統計）；Firestore onSnapshot 會先回 cache 再回 server
   //   兩次 fire 若都「先清空、各自 await 後再 append」→ 樣區卡片重複/閃爍（user 實測：001/002 各出現兩張）。
@@ -1200,9 +1202,13 @@ async function renderProjectHome(root, projectId) {
         qaByPlot.get(s.plotId).set(s.coll, { total: s.total, verified: s.verified });
       });
     } catch (e) { console.warn('[v2.7.2 subcoll qa stats]', e); }
+    // v2.11.78：確保指派 checkbox / 卡片標籤拿到 displayName/email（race 修：loadProject 的 prefetch 可能尚未就緒）
+    await prefetchUserLabels(surveyorUids);
     // 較新的 snapshot 已進來（cache→server 或快速連續更新）→ 放棄這次（舊）render，避免重複 append
     if (mySeq !== _plotListSeq) return;
     list.innerHTML = '';
+    // v2.11.78：name 快取就緒後才解析指派清單 label（避免顯示 UID 片段）
+    const surveyors = surveyorUids.map(uid => ({ uid, label: userLabel(uid, uid.slice(0, 6)) }));
     const target = state.project.methodology?.targetPlotCount;
     // v1.7.0：surveyor 視角過濾 — 只看被指派 + 自己 createdBy 的
     // v1.7.1.3：admin 不被過濾（god view 永遠看全部）
