@@ -69,3 +69,8 @@ modules/土肉桂修枝施肥試驗/analysis/output/
 
 # 會議意見原檔（與會者回饋，依 Cloud.md 屬資料、非 GitHub；已歸檔至 5/20 demo 夾，2026-06-11）
 reports/2026-05-mid-demo/520教育訓練後之意見.docx
+
+# 操作手冊產出（docx/pdf/截圖）依 Cloud.md 屬資料＋含學員姓名截圖、public repo→留 GDrive 不進 GitHub；產生器 .py 仍追蹤
+reports/2026-06-forestmrv-manual/*.docx
+reports/2026-06-forestmrv-manual/*.pdf
+reports/2026-06-forestmrv-manual/images/
