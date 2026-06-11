@@ -66,3 +66,6 @@ data/*.cpg
 # 土肉桂試驗 — 資料產出（payload/報表/圖/快取）依 Cloud.md 屬資料，正本走 Firebase，不進 GitHub
 modules/土肉桂修枝施肥試驗/dry-run/
 modules/土肉桂修枝施肥試驗/analysis/output/
+
+# 會議意見原檔（與會者回饋，依 Cloud.md 屬資料、非 GitHub；已歸檔至 5/20 demo 夾，2026-06-11）
+reports/2026-05-mid-demo/520教育訓練後之意見.docx
