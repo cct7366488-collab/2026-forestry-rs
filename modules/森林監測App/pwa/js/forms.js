@@ -1,27 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21179';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21180';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21179';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21180';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21179';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21180';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21179';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21179';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21180';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21180';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21179';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21180';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21179';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21180';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21179';
+import { createSpeciesPicker } from './species-picker.js?v=21180';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21179';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21180';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21179';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21180';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21179';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21180';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -2892,14 +2892,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21179',
+        href: './img/gps-position-guide.svg?v=21180',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21179',
+          src: './img/gps-position-guide.svg?v=21180',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -3674,38 +3674,106 @@ export async function openTreeForm(project, plot, existing = null) {
     type: 'number', step: '0.000001', placeholder: '經度 lng',
     style: 'width:130px;border:1px solid #d6d3d1;border-radius:4px;padding:4px 6px;font-size:13px'
   });
+  // v2.11.80 (J-1b)：TWD97 X/Y 手動輸入 — 與 lat/lng 並列的第二種座標來源
+  //   台灣圖資（QGIS / 紙本地形圖 / 政府開放資料）多為 TWD97 二度分帶（TM2 / EPSG:3826）X/Y，
+  //   野外無 GPS 時可直接讀圖上 X/Y 輸入，免手算換經緯度。轉回 WGS84 後與 lat/lng 走同一套 apply。
+  const treeManualXInput = el('input', {
+    type: 'number', step: '0.01', placeholder: 'X 東距 (m)',
+    style: 'width:130px;border:1px solid #d6d3d1;border-radius:4px;padding:4px 6px;font-size:13px'
+  });
+  const treeManualYInput = el('input', {
+    type: 'number', step: '0.01', placeholder: 'Y 北距 (m)',
+    style: 'width:130px;border:1px solid #d6d3d1;border-radius:4px;padding:4px 6px;font-size:13px'
+  });
+  let treeManualCoordMode = 'latlng';   // 'latlng' | 'twd97'
+
+  // 共用收尾：手動座標（不論來源）→ 套用 + Taiwan 範圍軟提示 + ✋ 標記
+  function applyTreeManualLatLng(lat, lng, sourceLabel) {
+    treeGpsManualEntry = true;
+    applyTreeGpsResult(lat, lng, null);   // accuracy=null → 不顯示 ±Nm
+    const outOfTaiwan = (lat < 21 || lat > 26 || lng < 119 || lng > 123);
+    const taiwanWarn = outOfTaiwan
+      ? '<br><span class="text-amber-700 text-[11px]">⚠ 座標不在台灣範圍（21-26°N / 119-123°E），仍套用。若用 TWD97 請確認 X / Y 沒填反</span>'
+      : '';
+    gpsStatusTree.innerHTML += ` <span class="text-amber-700 text-[11px]">✋ ${sourceLabel}</span>${taiwanWarn}`;
+  }
+
   const treeApplyManualBtn = el('button', {
     type: 'button',
     class: 'bg-stone-200 hover:bg-stone-300 text-stone-800 px-3 py-1 rounded text-xs font-medium'
   }, '套用');
   treeApplyManualBtn.addEventListener('click', () => {
-    const lat = parseFloat(treeManualLatInput.value);
-    const lng = parseFloat(treeManualLngInput.value);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 緯度 / 經度必填且為數字</span>';
-      return;
+    if (treeManualCoordMode === 'twd97') {
+      const x = parseFloat(treeManualXInput.value);
+      const y = parseFloat(treeManualYInput.value);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        gpsStatusTree.innerHTML = '<span class="text-red-700">❌ TWD97 X / Y 必填且為數字</span>';
+        return;
+      }
+      let w = null;
+      try { w = twd97ToWgs84(x, y); } catch (e) { w = null; }
+      if (!w || !Number.isFinite(w.lat) || !Number.isFinite(w.lng)) {
+        gpsStatusTree.innerHTML = '<span class="text-red-700">❌ TWD97 座標轉換失敗，請確認 X / Y 數值</span>';
+        return;
+      }
+      applyTreeManualLatLng(w.lat, w.lng, '手動輸入 TWD97');
+    } else {
+      const lat = parseFloat(treeManualLatInput.value);
+      const lng = parseFloat(treeManualLngInput.value);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 緯度 / 經度必填且為數字</span>';
+        return;
+      }
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 座標超出範圍（lat -90~90 / lng -180~180）</span>';
+        return;
+      }
+      applyTreeManualLatLng(lat, lng, '手動輸入');
     }
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      gpsStatusTree.innerHTML = '<span class="text-red-700">❌ 座標超出範圍（lat -90~90 / lng -180~180）</span>';
-      return;
-    }
-    const outOfTaiwan = (lat < 21 || lat > 26 || lng < 119 || lng > 123);
-    treeGpsManualEntry = true;
-    applyTreeGpsResult(lat, lng, null);  // accuracy=null → 不顯示 ±Nm
-    const taiwanWarn = outOfTaiwan
-      ? '<br><span class="text-amber-700 text-[11px]">⚠ 座標不在台灣範圍（21-26°N / 119-123°E），仍套用</span>'
-      : '';
-    gpsStatusTree.innerHTML += ` <span class="text-amber-700 text-[11px]">✋ 手動輸入</span>${taiwanWarn}`;
   });
+
+  // 兩種座標型式的輸入列 + 提示（切換時互相顯隱）
+  const treeLatLngRow = el('div', { class: 'flex flex-wrap gap-2 items-center mt-2' },
+    el('span', { class: 'text-xs' }, 'lat:'), treeManualLatInput,
+    el('span', { class: 'text-xs' }, 'lng:'), treeManualLngInput);
+  const treeTwd97Row = el('div', { class: 'flex flex-wrap gap-2 items-center mt-2', style: 'display:none' },
+    el('span', { class: 'text-xs' }, 'X:'), treeManualXInput,
+    el('span', { class: 'text-xs' }, 'Y:'), treeManualYInput);
+  const treeLatLngHint = el('div', { class: 'text-xs text-stone-500 mt-1' },
+    '小技巧：Google Maps（含離線地圖）長按位置 → 出現座標 → 複製貼上。lat 在前、lng 在後。或從紙本地圖讀。手動輸入會標記 ✋（manuallyAdjusted=true）。');
+  const treeTwd97Hint = el('div', { class: 'text-xs text-stone-500 mt-1', style: 'display:none' },
+    'TWD97 二度分帶（TM2 / EPSG:3826）：X 東距約 150000–350000、Y 北距約 2400000–2800000（7 位數）。可從 QGIS、紙本地形圖或政府圖資讀取。系統會自動轉為經緯度並標記 ✋（manuallyAdjusted=true）。');
+
+  function setTreeManualMode(mode) {
+    treeManualCoordMode = mode;
+    treeLatLngRow.style.display  = mode === 'latlng' ? '' : 'none';
+    treeTwd97Row.style.display   = mode === 'twd97'  ? '' : 'none';
+    treeLatLngHint.style.display = mode === 'latlng' ? '' : 'none';
+    treeTwd97Hint.style.display  = mode === 'twd97'  ? '' : 'none';
+  }
+
+  // 座標型式切換（radio）— inline width:auto 覆蓋全域 .field input{width:100%}（見 memory feedback_forestmrv_ui_gotchas）
+  const treeManualModeToggle = el('div', { class: 'flex gap-4 items-center mt-2 text-xs' },
+    el('label', { class: 'flex items-center gap-1 cursor-pointer' },
+      el('input', { type: 'radio', name: 'treeManualCoordMode', value: 'latlng', checked: 'true',
+        style: 'width:auto', class: 'accent-forest-700',
+        onchange: (e) => { if (e.target.checked) setTreeManualMode('latlng'); } }),
+      '經緯度 (lat/lng)'),
+    el('label', { class: 'flex items-center gap-1 cursor-pointer' },
+      el('input', { type: 'radio', name: 'treeManualCoordMode', value: 'twd97',
+        style: 'width:auto', class: 'accent-forest-700',
+        onchange: (e) => { if (e.target.checked) setTreeManualMode('twd97'); } }),
+      'TWD97 (X/Y)'));
+
   const treeManualEntryDetails = el('details', { class: 'mt-2' },
     el('summary', { class: 'cursor-pointer text-xs text-blue-700 hover:text-blue-900' },
-      '✏️ 無 GPS 訊號？手動輸入座標（lat / lng）'),
-    el('div', { class: 'flex flex-wrap gap-2 items-center mt-2' },
-      el('span', { class: 'text-xs' }, 'lat:'), treeManualLatInput,
-      el('span', { class: 'text-xs' }, 'lng:'), treeManualLngInput,
-      treeApplyManualBtn),
-    el('div', { class: 'text-xs text-stone-500 mt-1' },
-      '小技巧：Google Maps（含離線地圖）長按位置 → 出現座標 → 複製貼上。lat 在前、lng 在後。或從紙本地圖讀。手動輸入會標記 ✋（manuallyAdjusted=true）。')
+      '✏️ 無 GPS 訊號？手動輸入座標（經緯度 或 TWD97 X/Y）'),
+    treeManualModeToggle,
+    treeLatLngRow,
+    treeTwd97Row,
+    el('div', { class: 'mt-2' }, treeApplyManualBtn),
+    treeLatLngHint,
+    treeTwd97Hint
   );
 
   // 編輯既有 GPS-mode 樹：還原顯示
