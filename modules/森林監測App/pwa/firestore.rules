@@ -37,6 +37,16 @@ service cloud.firestore {
     function isLocked(pid)        { return projectDoc(pid).locked == true; }
     function isOwner()            { return resource.data.createdBy == request.auth.uid; }
     function willOwn()            { return request.resource.data.createdBy == request.auth.uid; }
+    // v2.11.81：同樣區協作 — 取父樣區指派名單，讓「被指派到該樣區的 surveyor」可互編子集合
+    //   （立木/更新/地被…）；沿用 plot update 既有 assignedToUids/assignedTo 語意。
+    //   背景：多人同步調查一個樣區時，surveyor 原本只能改「自己建的」立木（isOwner），
+    //   改到隊友（或 PI 代錄）建的樹就撞 permission denied（D4 缺口）。此 helper 放行同組互編。
+    //   注意：需一次 get() 父 plot（每次寫入多一次讀取，成本可接受）。delete 仍維持 isOwner（保守）。
+    function isPlotAssignee(pid, plotId) {
+      let p = get(/databases/$(database)/documents/projects/$(pid)/plots/$(plotId)).data;
+      return request.auth.uid in p.get('assignedToUids', [])
+          || p.get('assignedTo', null) == request.auth.uid;
+    }
 
     // v2.7.15：樣區幾何 schema 升級的欄位驗證（plot create/update 用）
     // v2.8.0：plotShape enum 加 'irregular'（不規則多邊形）
@@ -171,7 +181,8 @@ service cloud.firestore {
             (!isLocked(projectId) && (
               isSystemAdmin() ||
               isPi(projectId) ||
-              (isSurveyor(projectId) && isOwner())
+              // v2.11.81：本人建的 || 被指派到同樣區的 surveyor（多人同步調查互編）
+              (isSurveyor(projectId) && (isOwner() || isPlotAssignee(projectId, plotId)))
             )) ||
             (isReviewer(projectId) && subColl == 'trees'
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qaqc', 'updatedAt']))
@@ -197,7 +208,8 @@ service cloud.firestore {
           allow read:   if isSignedIn() && canRead(projectId);
           allow create: if isSignedIn() && canCollect(projectId) && willOwn() && !isLocked(projectId);
           allow update: if isSignedIn() && !isLocked(projectId) && (
-            isSystemAdmin() || isPi(projectId) || (isSurveyor(projectId) && isOwner())
+            // v2.11.81：同樣區指派 surveyor 可互編當期 measurement（比照 trees 更新）
+            isSystemAdmin() || isPi(projectId) || (isSurveyor(projectId) && (isOwner() || isPlotAssignee(projectId, plotId)))
           );
           allow delete: if false;
         }
