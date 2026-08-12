@@ -1,27 +1,27 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21180';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21181';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21180';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21181';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21180';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21181';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21180';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21180';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21181';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21181';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21180';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21181';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21180';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21181';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21180';
+import { createSpeciesPicker } from './species-picker.js?v=21181';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21180';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21181';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21180';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21181';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21180';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21181';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -669,6 +669,257 @@ export async function openNewPeriod(project, plot) {
     console.error('openNewPeriod failed:', e);
     toast('開啟新一期失敗：' + e.message);
   }
+}
+
+// ===== I-2c（v2.11.82）：批次開期 + 撤銷最新一期（開期的安全網）=====
+
+/** 蓋印 priorSnapshot（凍結 fromPeriod 期測值）到某樣區全部立木。純加性、失敗只 warn。回傳蓋印株數。
+ *  （由 openNewPeriod 內聯邏輯抽出，供批次開期共用；單樣區 openNewPeriod 仍保留其內聯版以降回歸風險。） */
+async function stampPriorSnapshot(project, plotId, fromPeriod) {
+  try {
+    const treesSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plotId, 'trees'));
+    const stampedAt = fb.serverTimestamp();
+    let batch = fb.writeBatch(fb.db);
+    let inBatch = 0, total = 0;
+    for (const d of treesSnap.docs) {
+      const t = d.data();
+      batch.update(d.ref, { priorSnapshot: {
+        fromPeriod, dbh_cm: t?.dbh_cm ?? null, height_m: t?.height_m ?? null, vitality: t?.vitality ?? null, stampedAt
+      }});
+      inBatch++; total++;
+      if (inBatch >= 450) { await batch.commit(); batch = fb.writeBatch(fb.db); inBatch = 0; }
+    }
+    if (inBatch > 0) await batch.commit();
+    return total;
+  } catch (e) { console.warn('[stampPriorSnapshot]', e); return 0; }
+}
+
+/** 檢查某樣區「指定期別」已錄立木資料筆數（measurements/{seq} 存在的株數）。
+ *  0 = 該期尚無資料、可安全撤銷。撤銷為罕用動作，逐株讀取（分塊平行）成本可接受。
+ *  ⚠ 這是撤銷不刪資料的安全閘：tree 文件本身無期別欄位，唯一權威來源是逐期 measurement 子文件。 */
+async function countPeriodMeasurements(project, plotId, seq) {
+  const treesSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', plotId, 'trees'));
+  const ids = treesSnap.docs.map(d => d.id);
+  let hit = 0;
+  const CHUNK = 100;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const results = await Promise.all(ids.slice(i, i + CHUNK).map(tid =>
+      fb.getDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plotId, 'trees', tid, 'measurements', String(seq)))
+        .then(s => s.exists()).catch(() => false)
+    ));
+    hit += results.filter(Boolean).length;
+  }
+  return hit;
+}
+
+/** 簡易確認對話框（promise）：resolve(true/false）。 */
+function confirmDialog(title, messageNodes, confirmLabel, danger = false) {
+  return new Promise(resolve => {
+    const box = el('div', { class: 'space-y-3' },
+      ...messageNodes,
+      el('div', { class: 'flex gap-2 pt-2' },
+        el('button', { type: 'button',
+          class: (danger ? 'bg-red-600' : 'bg-blue-600') + ' text-white py-2 rounded flex-1',
+          onclick: () => { closeModal(); resolve(true); } }, confirmLabel),
+        el('button', { type: 'button', class: 'flex-1 border py-2 rounded',
+          onclick: () => { closeModal(); resolve(false); } }, '取消'))
+    );
+    openModal(title, box);
+  });
+}
+
+/** 批次：為專案「全部樣區」各開啟下一期複查（各自 currentSeq+1）。
+ *  專案層解鎖 + 期別查證簿只做一次；再逐樣區 append 期別並蓋印 priorSnapshot。 */
+export async function openNewPeriodAllPlots(project) {
+  if (!(isPi() || isSystemAdmin())) { toast('僅 PI 或系統管理員可開啟新一期複查'); return; }
+  if (project.archived === true) { toast('已封存專案不可開啟新一期，請先解封存'); return; }
+
+  const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
+  const plots = plotsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (plots.length === 0) { toast('本專案尚無樣區'); return; }
+  const wasLocked = project.locked === true;
+
+  const note = await new Promise(resolve => {
+    const f = el('form', { class: 'space-y-3' },
+      el('p', { class: 'text-sm font-medium' }, `將為本專案全部 ${plots.length} 個樣區各開啟「下一期複查」`),
+      el('p', { class: 'text-xs text-blue-800 bg-blue-50 border border-blue-200 p-2 rounded' },
+        '每個樣區各自從其當期 +1；前一期測值已凍結於歷史測值（I-1，不可改），不會被覆蓋。'),
+      wasLocked ? el('p', { class: 'text-xs text-amber-900 bg-amber-50 border border-amber-300 p-2 rounded' },
+        '⚠ 本案目前已查證並鎖定，開啟後將重啟為「作業中」；前一期查證紀錄會存入「期別查證簿」留存。') : null,
+      el('p', { class: 'text-xs text-red-800 bg-red-50 border border-red-200 p-2 rounded' },
+        '⚠ 開期無法自動回復；若按錯，可用「↩️ 撤銷全部樣區最新一期」在「該期尚未錄任何資料」前收回。'),
+      el('div', { class: 'field' },
+        el('label', {}, '備註（選填，套用到所有樣區）：'),
+        el('input', { type: 'text', name: 'note', autocomplete: 'off', maxlength: '200',
+          class: 'border rounded px-2 py-1 w-full mt-1', placeholder: '例：2027 年第一次複查回訪' })),
+      el('div', { class: 'flex gap-2 pt-2' },
+        el('button', { type: 'submit', class: 'flex-1 bg-blue-600 text-white py-2 rounded' }, `📅 全部開新一期（${plots.length} 樣區）`),
+        el('button', { type: 'button', class: 'flex-1 border py-2 rounded', onclick: () => { closeModal(); resolve(false); } }, '取消'))
+    );
+    f.addEventListener('submit', (e) => {
+      e.preventDefault(); const fd = new FormData(f); closeModal();
+      resolve((fd.get('note') || '').toString().trim() || null);
+    });
+    openModal('全部樣區開啟新一期複查', f);
+  });
+  if (note === false) return;
+
+  const now = new Date();
+  try {
+    // 1) 專案層一次：若原鎖定 → 存查證簿 + 解鎖重啟採集
+    if (wasLocked) {
+      const ledgerEntry = {
+        period: null, batchAdvance: true,  // 批次：跨樣區期別可能不一，period 記 null；batchAdvance 供撤銷辨識
+        status: project.status ?? null, verifiedAt: project.verifiedAt ?? null, verifiedBy: project.verifiedBy ?? null,
+        lockedBy: project.lockedBy ?? null, lockedAt: project.lockedAt ?? null, autoLockReason: project.autoLockReason ?? null,
+        closedAt: now, closedBy: state.user.uid
+      };
+      const periodVerifications = [...(Array.isArray(project.periodVerifications) ? project.periodVerifications : []), ledgerEntry];
+      await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), {
+        periodVerifications, status: 'active', statusChangedAt: fb.serverTimestamp(), statusChangedBy: state.user.uid,
+        locked: false, lockedAt: null, lockedBy: null, autoLockReason: null, verifiedAt: null, verifiedBy: null
+      });
+      const applyProj = (o) => { if (!o) return; o.periodVerifications = periodVerifications; o.status = 'active';
+        o.locked = false; o.lockedAt = null; o.lockedBy = null; o.autoLockReason = null; o.verifiedAt = null; o.verifiedBy = null; };
+      applyProj(project);
+      if (state.project && state.project.id === project.id && state.project !== project) applyProj(state.project);
+    }
+
+    // 2) 逐樣區 append 期別 + 蓋印 priorSnapshot（部分失敗不中止）
+    let ok = 0; const failed = [];
+    for (const plot of plots) {
+      try {
+        const existing = derivePlotPeriods(plot);
+        const maxSeq = existing.reduce((m, p) => Math.max(m, Number(p.seq) || 0), 0);
+        const nextSeq = maxSeq + 1;
+        const prevCurSeq = (typeof plot.currentPeriod === 'number') ? plot.currentPeriod : existing[existing.length - 1].seq;
+        const periods = existing.map(p => ({ seq: p.seq, label: p.label, openedAt: p.openedAt ?? null, openedBy: p.openedBy ?? null,
+          closedAt: (p.seq === prevCurSeq && !p.closedAt) ? now : (p.closedAt ?? null), note: p.note ?? null }));
+        periods.push({ seq: nextSeq, label: `第 ${nextSeq} 期複查`, openedAt: now, openedBy: state.user.uid, closedAt: null, note });
+        await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id),
+          { periods, currentPeriod: nextSeq, updatedAt: fb.serverTimestamp() });
+        await stampPriorSnapshot(project, plot.id, prevCurSeq);
+        ok++;
+      } catch (e) { console.error('[batch open]', plot.code || plot.id, e); failed.push(plot.code || plot.id); }
+    }
+    // 若目前正看某樣區 → refetch state.plot（feedback_state_plot_stale_after_edit）
+    if (state.plot?.id) {
+      try { const fresh = await fb.getDoc(fb.doc(fb.db, 'projects', project.id, 'plots', state.plot.id));
+        if (fresh.exists()) state.plot = { id: state.plot.id, ...fresh.data() }; } catch {}
+    }
+    toast(failed.length
+      ? `批次開期：${ok} 成功、${failed.length} 失敗（${failed.join('、')}）`
+      : `已為全部 ${ok} 個樣區開啟新一期複查`);
+    rerouteCurrentView();
+  } catch (e) { console.error('openNewPeriodAllPlots failed:', e); toast('批次開期失敗：' + e.message); }
+}
+
+/** 撤銷某樣區「最新一期」複查：僅在該期尚無立木資料時放行。
+ *  只還原樣區期別，不動專案鎖定（批次撤銷才處理專案層還原，避免多樣區時誤鎖）。 */
+export async function undoLatestPeriod(project, plot) {
+  if (!(isPi() || isSystemAdmin())) { toast('僅 PI 或系統管理員可撤銷複查期別'); return; }
+  if (!Array.isArray(plot.periods) || plot.periods.length < 2) { toast('此樣區尚未開啟複查期，無可撤銷'); return; }
+  const maxSeq = plot.periods.reduce((m, p) => Math.max(m, Number(p.seq) || 0), 0);
+  if (maxSeq < 2) { toast('第一期為原始調查，不可撤銷'); return; }
+
+  toast(`檢查第 ${maxSeq} 期是否已有資料…`);
+  const dataCount = await countPeriodMeasurements(project, plot.id, maxSeq);
+  if (dataCount > 0) { toast(`第 ${maxSeq} 期已有 ${dataCount} 筆立木資料，不能撤銷（避免刪除已錄資料）`); return; }
+
+  const newCur = maxSeq - 1;
+  const projActive = project.locked === false && project.status === 'active';
+  const confirmed = await confirmDialog('撤銷最新一期複查', [
+    el('p', { class: 'text-sm font-medium' }, `樣區「${plot.code}」：撤銷【第 ${maxSeq} 期】，回到第 ${newCur} 期？`),
+    el('p', { class: 'text-xs text-stone-600' }, `已確認第 ${maxSeq} 期尚無立木資料（0 筆），可安全撤銷。`),
+    projActive ? el('p', { class: 'text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2 rounded' },
+      '註：專案目前為「作業中」。單樣區撤銷不會回復專案鎖定；如整輪開錯要連鎖定一起復原，請用「撤銷全部樣區最新一期」。') : null
+  ], `↩️ 撤銷第 ${maxSeq} 期`, true);
+  if (!confirmed) return;
+
+  const newPeriods = plot.periods.filter(p => Number(p.seq) !== maxSeq)
+    .map(p => (Number(p.seq) === newCur ? { ...p, closedAt: null } : p));
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id),
+      { periods: newPeriods, currentPeriod: newCur, updatedAt: fb.serverTimestamp() });
+    if (state.plot?.id === plot.id) {
+      try { const fresh = await fb.getDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plot.id));
+        if (fresh.exists()) state.plot = { id: plot.id, ...fresh.data() }; } catch {}
+    }
+    toast(`已撤銷第 ${maxSeq} 期，回到第 ${newCur} 期`);
+    rerouteCurrentView();
+  } catch (e) { console.error('undoLatestPeriod failed:', e); toast('撤銷失敗：' + e.message); }
+}
+
+/** 批次：撤銷「全部樣區最新一期」。all-or-nothing 資料安全檢查；並還原專案鎖定（pop 批次查證簿）。 */
+export async function undoLatestPeriodAllPlots(project) {
+  if (!(isPi() || isSystemAdmin())) { toast('僅 PI 或系統管理員可撤銷複查期別'); return; }
+  const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
+  const plots = plotsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // 只考慮「已實體開過複查期」的樣區（periods 陣列且 currentPeriod≥2）
+  const targets = plots.filter(p => Array.isArray(p.periods) && p.periods.length >= 2 && Number(p.currentPeriod) >= 2);
+  if (targets.length === 0) { toast('沒有可撤銷的複查期（各樣區皆在第一期）'); return; }
+
+  // all-or-nothing 資料安全檢查：任一樣區最新期已有資料 → 整批取消
+  toast(`檢查 ${targets.length} 個樣區的最新期是否已有資料…`);
+  const blocked = [];
+  for (const p of targets) {
+    const seq = Number(p.currentPeriod);
+    const c = await countPeriodMeasurements(project, p.id, seq);
+    if (c > 0) blocked.push(`${p.code}（第${seq}期 ${c}筆）`);
+  }
+  if (blocked.length) { toast(`下列樣區最新期已有資料，整批撤銷已取消：${blocked.join('、')}`); return; }
+
+  const ledger = Array.isArray(project.periodVerifications) ? [...project.periodVerifications] : [];
+  const last = ledger[ledger.length - 1];
+  const willRelock = !!(last && last.batchAdvance === true && project.locked === false);
+  const confirmed = await confirmDialog('撤銷全部樣區最新一期', [
+    el('p', { class: 'text-sm font-medium' }, `將撤銷 ${targets.length} 個樣區的最新一期複查（各自回到前一期）？`),
+    el('p', { class: 'text-xs text-stone-600' }, '已確認這些樣區的最新期皆尚無立木資料（0 筆），可安全撤銷。'),
+    willRelock ? el('p', { class: 'text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2 rounded' },
+      '註：偵測到上一步是「整批開期並解鎖」，撤銷後會把專案回復為原本的「已查證／鎖定」狀態。') : null
+  ], `↩️ 撤銷 ${targets.length} 個樣區`, true);
+  if (!confirmed) return;
+
+  try {
+    // 1) 逐樣區還原（部分失敗不中止）
+    let ok = 0; const failed = [];
+    for (const p of targets) {
+      try {
+        const seq = Number(p.currentPeriod); const newCur = seq - 1;
+        const newPeriods = p.periods.filter(x => Number(x.seq) !== seq)
+          .map(x => (Number(x.seq) === newCur ? { ...x, closedAt: null } : x));
+        await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', p.id),
+          { periods: newPeriods, currentPeriod: newCur, updatedAt: fb.serverTimestamp() });
+        ok++;
+      } catch (e) { console.error('[batch undo]', p.code || p.id, e); failed.push(p.code || p.id); }
+    }
+    // 2) 專案層還原鎖定（僅當上一步為批次開期解鎖）
+    let relocked = false;
+    if (willRelock && failed.length === 0) {
+      ledger.pop();
+      const projUpdates = {
+        periodVerifications: ledger, status: last.status ?? 'verified', locked: true,
+        lockedAt: last.lockedAt ?? fb.serverTimestamp(), lockedBy: last.lockedBy ?? null,
+        autoLockReason: last.autoLockReason ?? null, verifiedAt: last.verifiedAt ?? null, verifiedBy: last.verifiedBy ?? null,
+        statusChangedAt: fb.serverTimestamp(), statusChangedBy: state.user.uid
+      };
+      await fb.updateDoc(fb.doc(fb.db, 'projects', project.id), projUpdates);
+      const applyProj = (o) => { if (!o) return; o.periodVerifications = ledger; o.status = projUpdates.status;
+        o.locked = true; o.lockedBy = projUpdates.lockedBy; o.autoLockReason = projUpdates.autoLockReason;
+        o.verifiedAt = projUpdates.verifiedAt; o.verifiedBy = projUpdates.verifiedBy; };
+      applyProj(project);
+      if (state.project && state.project.id === project.id && state.project !== project) applyProj(state.project);
+      relocked = true;
+    }
+    if (state.plot?.id) {
+      try { const fresh = await fb.getDoc(fb.doc(fb.db, 'projects', project.id, 'plots', state.plot.id));
+        if (fresh.exists()) state.plot = { id: state.plot.id, ...fresh.data() }; } catch {}
+    }
+    toast((failed.length
+      ? `批次撤銷：${ok} 成功、${failed.length} 失敗（${failed.join('、')}）`
+      : `已撤銷全部 ${ok} 個樣區最新一期`) + (relocked ? '；專案已回復鎖定（已查證）' : ''));
+    rerouteCurrentView();
+  } catch (e) { console.error('undoLatestPeriodAllPlots failed:', e); toast('批次撤銷失敗：' + e.message); }
 }
 
 // ===== I-1（v2.11.70）：立木逐期歷史測值保留（永久樣區複查地基）=====
@@ -2892,14 +3143,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21180',
+        href: './img/gps-position-guide.svg?v=21181',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21180',
+          src: './img/gps-position-guide.svg?v=21181',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
