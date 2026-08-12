@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21184";
-import * as forms from "./forms.js?v=21184";
-import * as analytics from "./analytics.js?v=21184";
-import * as importWizard from "./import-wizard.js?v=21184";
+import { firebaseConfig } from "../firebase-config.js?v=21185";
+import * as forms from "./forms.js?v=21185";
+import * as analytics from "./analytics.js?v=21185";
+import * as importWizard from "./import-wizard.js?v=21185";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21184";
-import { renderTreeDistribution } from "./distribution.js?v=21184";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21184";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21184";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21185";
+import { renderTreeDistribution } from "./distribution.js?v=21185";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21185";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21185";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21184";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21184";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21185";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21185";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21184";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21185";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21184";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21185";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -379,7 +379,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21184');
+    const m = await import('./migration-v2715.js?v=21185');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -401,7 +401,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21184');
+    const m = await import('./migration-v2715.js?v=21185');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -3238,8 +3238,23 @@ function renderTreeList(snap, projectId, plotId) {
   let totalBA = 0, totalV = 0, sumDbh = 0, sumH = 0;
   // v2.11.76（I-6b）：複查樣區（≥2 期）才顯示「歷期」明細鈕
   const hasMultiPeriod = (Array.isArray(state.plot?.periods) ? state.plot.periods.length : (Number(state.plot?.currentPeriod) || 1)) >= 2;
+  // I-6c（v2.11.86）：複查期別「本期已複查」判斷 — 未複查者 DBH/H 顯示紅字（＝仍是上期資料）
+  const curSeq = Number(state.plot?.currentPeriod) || 1;
+  const _tsMs = (x) => x?.toMillis ? x.toMillis() : (typeof x?.seconds === 'number' ? x.seconds * 1000 : null);
+  const isMeasuredThisPeriod = (t) => {
+    if (!hasMultiPeriod) return true;                       // 第一期：無「上期/本期」之分，全黑
+    if (Number(t.lastMeasuredPeriod) === curSeq) return true;  // 主判斷：本期存檔蓋的期號
+    // 回退（本功能上線前、本期已重測但無 lastMeasuredPeriod 的樹）：updatedAt 晚於開期蓋印時間
+    const s = _tsMs(t.priorSnapshot?.stampedAt), u = _tsMs(t.updatedAt);
+    return (s != null && u != null && u > s);
+  };
+  let pendingCount = 0;
   const rows = snap.docs.map(d => {
     const t = d.data();
+    const measured = isMeasuredThisPeriod(t);
+    if (hasMultiPeriod && !measured) pendingCount++;
+    // 未複查（仍是上期值）→ 紅字；已複查（本期更新）→ 預設黑字
+    const pendCls = (hasMultiPeriod && !measured) ? 'text-red-600 font-semibold' : '';
     totalBA += t.basalArea_m2 || 0;
     totalV += t.volume_m3 || 0;
     sumDbh += t.dbh_cm || 0;
@@ -3296,10 +3311,10 @@ function renderTreeList(snap, projectId, plotId) {
       }
     },
       // v2.3.3：# 欄位顯示完整 treeCode（舊資料 fallback：plot.code + 補零 treeNum）
-      el('td', {}, t.treeCode || `${state.plot.code}-${String(t.treeNum || 0).padStart(3, '0')}`),
+      el('td', { class: pendCls }, t.treeCode || `${state.plot.code}-${String(t.treeNum || 0).padStart(3, '0')}`),
       speciesCell,
-      el('td', {}, (t.dbh_cm || 0).toFixed(1)),
-      el('td', {}, (t.height_m || 0).toFixed(1)),
+      el('td', { class: pendCls, title: pendCls ? '尚未本期複查（顯示為上一期值）' : '' }, (t.dbh_cm || 0).toFixed(1)),
+      el('td', { class: pendCls, title: pendCls ? '尚未本期複查（顯示為上一期值）' : '' }, (t.height_m || 0).toFixed(1)),
       el('td', { class: 'text-xs text-stone-600 font-mono', html: `${posBadge} ${xyText}` }),  // v2.5 + v2.11.28 badge
       el('td', {}, el('span', { class: `badge badge-${v}` }, vlabel)),
       el('td', {}, (t.volume_m3 || 0).toFixed(3)),
@@ -3319,6 +3334,18 @@ function renderTreeList(snap, projectId, plotId) {
     el('tbody', {}, ...rows)
   );
   list.innerHTML = '';
+  // I-6c（v2.11.86）：複查期別顯示「本期複查進度」+ 紅/黑字圖例
+  if (hasMultiPeriod) {
+    const doneCount = snap.size - pendingCount;
+    list.appendChild(el('div', {
+      class: 'text-xs px-3 py-2 mb-2 bg-blue-50 border border-blue-200 rounded flex items-center gap-x-2 gap-y-1 flex-wrap'
+    },
+      el('span', { class: 'font-semibold text-blue-900' }, `📅 第 ${curSeq} 期複查進度：已複查 ${doneCount} / ${snap.size} 株`),
+      el('span', { class: 'text-stone-500' }, '｜圖例：'),
+      el('span', { class: 'text-red-600 font-semibold' }, '紅字 DBH/H'),
+      el('span', { class: 'text-stone-600' }, '＝尚未本期複查（仍是上一期值）；本期更新存檔後自動轉黑。')
+    ));
+  }
   list.appendChild(tbl);
 
   const n = snap.size;
