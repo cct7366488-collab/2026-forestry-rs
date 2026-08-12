@@ -12,7 +12,7 @@
 //   🆔d CSV bulk import：上傳 CSV → 預覽 → setDoc(merge:true) 平行寫入
 //   🆔e 變更歷史：每次儲存寫一筆到 species/{id}/history sub-collection + modal 檢視
 
-import { fb, $, $$, el, toast, state } from './app.js?v=21183';
+import { fb, $, $$, el, toast, state } from './app.js?v=21184';
 
 const CONS_GRADES = ['', 'I', 'II', 'III'];  // '' = 無保育級
 const BATCH_OP_LIMIT = 450;  // Firestore writeBatch 上限 500，預留 buffer
@@ -340,7 +340,7 @@ async function runInBatches(ids, addOps, opsPerItem = 1) {
 function openAliasModal(d) {
   // 用主畫面外層 modal slot — 為避開既有 forms.js 的 expand/restore 邏輯，這裡用簡易自訂 overlay
   const tpl = $('#tpl-species-alias-set').content.cloneNode(true);
-  const wrap = el('div', { class: 'fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4' });
+  const wrap = el('div', { class: 'app-overlay fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4' });
   const card = el('div', { class: 'bg-white rounded-lg shadow-lg p-4 max-w-md w-full' });
   card.appendChild(tpl);
   wrap.appendChild(card);
@@ -413,7 +413,7 @@ function openAliasModal(d) {
 // ===== 🆔d CSV 批次匯入 modal =====
 function openCsvImportModal() {
   const tpl = $('#tpl-species-csv-import').content.cloneNode(true);
-  const wrap = el('div', { class: 'fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4' });
+  const wrap = el('div', { class: 'app-overlay fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4' });
   const card = el('div', { class: 'bg-white rounded-lg shadow-lg p-4 max-w-2xl w-full' });
   card.appendChild(tpl);
   wrap.appendChild(card);
@@ -672,7 +672,7 @@ function parseSpeciesCSV(text) {
 // ===== 🆔e 變更歷史 modal =====
 function openHistoryModal(d) {
   const tpl = $('#tpl-species-history').content.cloneNode(true);
-  const wrap = el('div', { class: 'fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4' });
+  const wrap = el('div', { class: 'app-overlay fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4' });
   const card = el('div', { class: 'bg-white rounded-lg shadow-lg p-4 max-w-2xl w-full' });
   card.appendChild(tpl);
   wrap.appendChild(card);
