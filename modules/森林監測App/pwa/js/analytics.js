@@ -1,18 +1,18 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21181';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21183';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21181';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21183';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21181';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21183';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21181';
+import { getEquationBadge } from './species-equations.js?v=21183';
 // v2.11.19：irregular plot vertices 轉換用
-import { vertsToArrays } from './plot-polygon.js?v=21181';
+import { vertsToArrays } from './plot-polygon.js?v=21183';
 // v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
 // v2.11.70（I-6）：複查報表用 derivePlotPeriods 取期別標籤
-import { openProjectForm, derivePlotPeriods } from './forms.js?v=21181';
+import { openProjectForm, derivePlotPeriods } from './forms.js?v=21183';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -1998,9 +1998,8 @@ export async function renderResurveyReport(project) {
   if (csvBtn) csvBtn.classList.remove('hidden');
 }
 
-export function exportResurveyCsv() {
-  if (!_lastResurvey) { toast('請先產生複查報表'); return; }
-  const { project, periodRows, transitions } = _lastResurvey;
+// 共用：把期別摘要 + 期間轉換組成 CSV 並觸發下載（供 view-tied 與 standalone 兩入口共用）
+function _downloadResurveyCsv(projectCode, periodRows, transitions) {
   const lines = [];
   lines.push('# 期別摘要');
   lines.push(['期別', '日期', '活立木', '平均DBH_cm', '總BA_m2', '總材積_m3', '活碳_tC', 'CO2_t'].join(','));
@@ -2026,8 +2025,103 @@ export function exportResurveyCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${project}_複查報表_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${projectCode}_複查報表_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   toast('複查報表已匯出');
+}
+
+// view-tied（儀表板）：用已產生的報表狀態下載
+export function exportResurveyCsv() {
+  if (!_lastResurvey) { toast('請先產生複查報表'); return; }
+  _downloadResurveyCsv(_lastResurvey.project, _lastResurvey.periodRows, _lastResurvey.transitions);
+}
+
+// standalone（匯出分頁）：不需先產生報表，點擊即抓+算+下載
+export async function exportResurveyCsvStandalone(project) {
+  toast('準備匯出複查成長摘要…');
+  try {
+    const data = await fetchResurveyData(project);
+    const totalMeas = data.timelines.reduce((s, t) => s + t.meas.length, 0);
+    if (totalMeas === 0) { toast('尚無逐期 measurement 資料（需第二期起，或先執行 backfill 補建第一期）'); return; }
+    const stats = computeResurveyStats(data.plots, data.timelines);
+    _downloadResurveyCsv(project.code, stats.periodRows, stats.transitions);
+  } catch (e) {
+    console.error('[exportResurveyCsvStandalone]', e);
+    toast('匯出失敗：' + e.message);
+  }
+}
+
+// ===== v2.11.83（B）：逐棵逐期原始值匯出（長格式 Excel）=====
+//   一列 = 一棵樹 × 一期，含各期完整原始測值。tree 文件僅保留最新一期快照，
+//   故第 1…N-1 期原始值只能從 trees/{id}/measurements/{periodId} 逐期歷史還原。
+//   與「複查報表（I-6，聚合摘要）」互補：此為原始資料出口（可自行做統計 / 送查證）。
+export async function exportPerTreeMeasurements(project) {
+  toast('準備匯出逐棵逐期原始值…');
+  try {
+    const plotsSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots'));
+    const rows = [];
+    for (const pd of plotsSnap.docs) {
+      const plot = { id: pd.id, ...pd.data() };
+      const pmeta = {};
+      derivePlotPeriods(plot).forEach(pr => {
+        pmeta[Number(pr.seq) || 1] = { label: pr.label || `第 ${pr.seq} 期`, date: _rTsToDate(pr.openedAt) };
+      });
+      const tSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'trees'));
+      for (const td of tSnap.docs) {
+        let mSnap;
+        try { mSnap = await fb.getDocs(fb.collection(fb.db, 'projects', project.id, 'plots', pd.id, 'trees', td.id, 'measurements')); }
+        catch { continue; }
+        if (!mSnap || mSnap.empty) continue;
+        mSnap.docs.forEach(m => {
+          const d = m.data();
+          const seq = Number(d.periodId) || 1;
+          const recAt = _rTsToDate(d.recordedAt);
+          rows.push({
+            樣區: plot.code ?? '',
+            期別: seq,
+            期別標籤: pmeta[seq]?.label ?? `第 ${seq} 期`,
+            期別日期: pmeta[seq]?.date ? fmtDate(pmeta[seq].date) : '',
+            立木編號: d.treeNum ?? '',
+            treeCode: d.treeCode ?? '',
+            樹種: d.speciesZh ?? '',
+            學名: d.speciesSci ?? '',
+            DBH_cm: _rNum(d.dbh_cm) ?? '',
+            樹高_m: _rNum(d.height_m) ?? '',
+            枝下高_m: _rNum(d.branchHeight_m) ?? '',
+            活力: d.vitality ?? '',
+            病蟲害: Array.isArray(d.pestSymptoms) ? d.pestSymptoms.join('；') : '',
+            標記: d.marking ?? '',
+            狀態: d.resurveyFate ?? 'alive',
+            進界期別: d.recruitedPeriod ?? '',
+            斷面積_m2: _rNum(d.basalArea_m2) ?? '',
+            材積_m3: _rNum(d.volume_m3) ?? '',
+            生物量_kg: _rNum(d.biomass_kg) ?? '',
+            碳_kg: _rNum(d.carbon_kg) ?? '',
+            CO2_kg: _rNum(d.co2_kg) ?? '',
+            localX_m: _rNum(d.localX_m) ?? '',
+            localY_m: _rNum(d.localY_m) ?? '',
+            記錄者UID: d.recordedBy ?? d.createdBy ?? '',
+            記錄時間: recAt ? recAt.toISOString().slice(0, 19).replace('T', ' ') : '',
+            備註: d.notes ?? ''
+          });
+        });
+      }
+    }
+    if (rows.length === 0) {
+      toast('尚無逐期 measurement 資料（需第二期起，或先執行 backfill 補建第一期）');
+      return;
+    }
+    rows.sort((a, b) =>
+      String(a.樣區).localeCompare(String(b.樣區)) ||
+      ((Number(a.立木編號) || 0) - (Number(b.立木編號) || 0)) ||
+      (a.期別 - b.期別));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), '逐棵逐期原始值');
+    XLSX.writeFile(wb, `${project.code}_逐棵逐期原始值_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast(`已匯出 ${rows.length} 筆逐期原始值`);
+  } catch (e) {
+    console.error('[exportPerTreeMeasurements]', e);
+    toast('匯出失敗：' + e.message);
+  }
 }
