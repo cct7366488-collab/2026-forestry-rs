@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21186";
-import * as forms from "./forms.js?v=21186";
-import * as analytics from "./analytics.js?v=21186";
-import * as importWizard from "./import-wizard.js?v=21186";
+import { firebaseConfig } from "../firebase-config.js?v=21188";
+import * as forms from "./forms.js?v=21188";
+import * as analytics from "./analytics.js?v=21188";
+import * as importWizard from "./import-wizard.js?v=21188";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21186";
-import { renderTreeDistribution } from "./distribution.js?v=21186";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21186";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21186";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21188";
+import { renderTreeDistribution } from "./distribution.js?v=21188";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21188";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21188";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21186";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21186";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21188";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21188";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21186";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21188";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21186";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21188";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -379,7 +379,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21186');
+    const m = await import('./migration-v2715.js?v=21188');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -401,7 +401,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21186');
+    const m = await import('./migration-v2715.js?v=21188');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -627,6 +627,23 @@ window.addEventListener('online', async () => {
 // 流程：新 SW install 完進 waiting → updatefound 偵測到 → 顯示橫幅 → user click → postMessage
 //       SKIP_WAITING → SW activate → controllerchange → 自動 reload。對手機 PWA 友善（不用記
 //       「下拉重整 2 次」），且 user 控制何時更新（避免表單填一半被打斷）。
+// v2.11.89：手機 PWA「新版本不出現」修 — 除了 SW updatefound，加「前景版本輪詢」。
+//   根因：手機把 PWA 切到背景後不會重新導覽、也不觸發 reg.update()，SW 生命週期事件在手機上不可靠，
+//   故一直偵測不到新版、更沒有通知。作法：讀 import.meta.url 的 ?v= 為「目前執行版本」，比對線上
+//   service-worker.js 的 JS_VERSION；不同 → 顯示更新橫幅。於 載入 / 分頁重新可見 / 每 15 分 各查一次。
+const RUNNING_VER = (() => { try { return new URL(import.meta.url).searchParams.get('v'); } catch { return null; } })();
+async function checkForNewVersion(reg) {
+  try {
+    const r = await fetch('./service-worker.js?cb=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const m = (await r.text()).match(/JS_VERSION\s*=\s*'(\d+)'/);
+    if (m && RUNNING_VER && m[1] !== RUNNING_VER) {
+      try { reg && reg.update(); } catch {}
+      showUpdateBanner(reg);
+    }
+  } catch { /* 離線 / 網路失敗 — 安靜略過 */ }
+}
+
 if ('serviceWorker' in navigator) {
   // updateViaCache:'none'：SW 腳本更新檢查一律繞過瀏覽器 HTTP 快取（v2.11.43 修 max-age=3600 釘住舊 SW 死鎖）
   navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' }).then(reg => {
@@ -643,8 +660,12 @@ if ('serviceWorker' in navigator) {
         }
       });
     });
-    // 長期 PWA session（手機常見）每 30 min 主動戳一次檢查更新
-    setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+    // v2.11.89：前景版本輪詢 — 載入時、每次分頁重新可見（手機從背景回前景）、每 15 分 各查一次
+    checkForNewVersion(reg);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') checkForNewVersion(reg);
+    });
+    setInterval(() => { reg.update().catch(() => {}); checkForNewVersion(reg); }, 15 * 60 * 1000);
   }).catch(err => console.warn('SW reg failed', err));
 
   // user 按更新按鈕 → SW skipWaiting → activate → controllerchange → reload
@@ -666,7 +687,12 @@ function showUpdateBanner(reg) {
     btn.addEventListener('click', () => {
       btn.disabled = true;
       btn.textContent = '⏳ 更新中…';
-      reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
+      // 有 waiting SW → skipWaiting（→ controllerchange → reload）；
+      // 無 waiting（版本輪詢先偵測到、SW 尚未 install 完）→ 直接重載（導航 network-first 取新殼 + 新 ?v= JS）
+      if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      else location.reload();
+      // 保險：3 秒內若沒因 controllerchange 重載（手機 SW 生命週期偶爾不觸發）→ 強制重載
+      setTimeout(() => { try { location.reload(); } catch {} }, 3000);
     });
   }
 }
@@ -688,28 +714,37 @@ function renderTopnav() {
 
 onAuthStateChanged(auth, async (user) => {
   state.user = user;
-  if (user) {
-    const uref = doc(db, 'users', user.uid);
-    const usnap = await getDoc(uref);
-    if (!usnap.exists()) {
-      await setDoc(uref, {
-        email: user.email,
-        displayName: user.displayName || user.email.split('@')[0],
-        systemRole: 'member',
-        createdAt: serverTimestamp()
-      });
-      state.userDoc = (await getDoc(uref)).data();
+  // v2.11.88：整個 user-doc 載入包 try/catch — 手機重登時若 getDoc(users/uid) 因網路不穩 throw，
+  //   原本會讓 handler 直接中斷、renderTopnav()/route() 永不執行 → 停在空白/登入畫面「回不去」。
+  //   改為即使載入失敗也一定往下 renderTopnav()+route()，至少不卡死（重新整理可重試）。
+  try {
+    if (user) {
+      const uref = doc(db, 'users', user.uid);
+      const usnap = await getDoc(uref);
+      if (!usnap.exists()) {
+        await setDoc(uref, {
+          email: user.email,
+          displayName: user.displayName || user.email.split('@')[0],
+          systemRole: 'member',
+          createdAt: serverTimestamp()
+        });
+        state.userDoc = (await getDoc(uref)).data();
+      } else {
+        state.userDoc = usnap.data();
+      }
+      // v2.11.30：登入後立刻記下 token 到期時間 — 給設定頁「🔑 登入有效至」顯示
+      try {
+        const res = await user.getIdTokenResult();
+        state.tokenExpiresAt = res.expirationTime ? new Date(res.expirationTime) : null;
+      } catch { state.tokenExpiresAt = null; }
     } else {
-      state.userDoc = usnap.data();
+      state.userDoc = null;
+      state.tokenExpiresAt = null;
     }
-    // v2.11.30：登入後立刻記下 token 到期時間 — 給設定頁「🔑 登入有效至」顯示
-    try {
-      const res = await user.getIdTokenResult();
-      state.tokenExpiresAt = res.expirationTime ? new Date(res.expirationTime) : null;
-    } catch { state.tokenExpiresAt = null; }
-  } else {
-    state.userDoc = null;
-    state.tokenExpiresAt = null;
+  } catch (e) {
+    console.error('[onAuthStateChanged] 載入使用者資料失敗（不中斷導覽）', e);
+    if (user) toast('載入使用者資料失敗（網路不穩？）— 請下拉重新整理');
+    // state.userDoc 維持前值/ null；仍往下 route()，避免整個 App 卡在空白畫面
   }
   renderTopnav();
   route();
@@ -1292,9 +1327,11 @@ async function renderProjectHome(root, projectId) {
       const headerRight = el('div', { class: 'flex items-center gap-1 flex-wrap' });
       if (isShell) headerRight.appendChild(el('span', { class: 'text-xs bg-stone-200 text-stone-700 px-2 py-0.5 rounded' }, '🔘 待調查'));
       else headerRight.appendChild(el('div', { html: qaBadge(dd.qaStatus) }));
-      // I-6c（v2.11.87）：複查樣區「本期複查進度」狀態徽章 — 全部立木本期已複查 → ✅ 已複查；否則 ⏳ 待複查 Y/X
+      // I-6c（v2.11.87 / v2.11.88 修）：複查樣區「本期複查進度」狀態徽章 — 全部立木本期已複查 → ✅ 已複查；否則 ⏳ 待複查 Y/X
+      //   v2.11.88：條件由 !isShell 改為「有立木（total>0）」— 研究樣區（如土肉桂）location=null 被判 isShell，
+      //   但有 30 株 4 期資料，不是空殼；有立木就該顯示複查進度，不受無 GPS 邊界影響。
       const rs = resurveyByPlot.get(d.id);
-      if (rs && rs.total > 0 && !isShell) {
+      if (rs && rs.total > 0) {
         const done = rs.measured >= rs.total;
         headerRight.appendChild(el('span', {
           class: `text-xs px-2 py-0.5 rounded font-semibold ${done ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'}`,
