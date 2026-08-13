@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21185";
-import * as forms from "./forms.js?v=21185";
-import * as analytics from "./analytics.js?v=21185";
-import * as importWizard from "./import-wizard.js?v=21185";
+import { firebaseConfig } from "../firebase-config.js?v=21186";
+import * as forms from "./forms.js?v=21186";
+import * as analytics from "./analytics.js?v=21186";
+import * as importWizard from "./import-wizard.js?v=21186";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21185";
-import { renderTreeDistribution } from "./distribution.js?v=21185";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21185";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21185";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21186";
+import { renderTreeDistribution } from "./distribution.js?v=21186";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21186";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21186";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21185";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21185";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21186";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21186";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21185";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21186";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21185";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21186";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -379,7 +379,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21185');
+    const m = await import('./migration-v2715.js?v=21186');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -401,7 +401,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21185');
+    const m = await import('./migration-v2715.js?v=21186');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -1191,25 +1191,36 @@ async function renderProjectHome(root, projectId) {
     const enabledColls = SUBCOLL_CHIP_META.filter(m => mods[m.modKey]).map(m => m.coll);
     // qaByPlot: plotId → Map<coll, { total, verified }>
     const qaByPlot = new Map();
+    // I-6c（v2.11.87）：複查樣區「本期複查進度」— 沿用同一圈 tree fetch（零額外讀取）算 measured/total
+    const resurveyByPlot = new Map();  // plotId → { total, measured, curSeq }
     try {
       const statsList = await Promise.all(
-        allDocs.flatMap(d =>
-          enabledColls.map(async coll => {
+        allDocs.flatMap(d => {
+          const pdata = d.data();
+          const pMulti = plotHasMultiPeriod(pdata);
+          const pCurSeq = Number(pdata.currentPeriod) || 1;
+          return enabledColls.map(async coll => {
             const ref = fb.collection(fb.db, 'projects', projectId, 'plots', d.id, coll);
             const csnap = await fb.getDocs(ref);
-            let total = 0, verified = 0;
+            let total = 0, verified = 0, measured = 0;
             csnap.forEach(td => {
               total++;
-              if (td.data().qaStatus === 'verified') verified++;
+              const tdd = td.data();
+              if (tdd.qaStatus === 'verified') verified++;
+              // 只在複查樣區（≥2 期）的 trees 子集合算「本期已複查」
+              if (coll === 'trees' && pMulti && treeMeasuredInPeriod(tdd, pCurSeq, pMulti)) measured++;
             });
-            return { plotId: d.id, coll, total, verified };
-          })
-        )
+            return { plotId: d.id, coll, total, verified, measured, multi: pMulti, curSeq: pCurSeq };
+          });
+        })
       );
       statsList.forEach(s => {
         if (s.total === 0) return;
         if (!qaByPlot.has(s.plotId)) qaByPlot.set(s.plotId, new Map());
         qaByPlot.get(s.plotId).set(s.coll, { total: s.total, verified: s.verified });
+        if (s.coll === 'trees' && s.multi) {
+          resurveyByPlot.set(s.plotId, { total: s.total, measured: s.measured, curSeq: s.curSeq });
+        }
       });
     } catch (e) { console.warn('[v2.7.2 subcoll qa stats]', e); }
     // v2.11.78：確保指派 checkbox / 卡片標籤拿到 displayName/email（race 修：loadProject 的 prefetch 可能尚未就緒）
@@ -1281,6 +1292,15 @@ async function renderProjectHome(root, projectId) {
       const headerRight = el('div', { class: 'flex items-center gap-1 flex-wrap' });
       if (isShell) headerRight.appendChild(el('span', { class: 'text-xs bg-stone-200 text-stone-700 px-2 py-0.5 rounded' }, '🔘 待調查'));
       else headerRight.appendChild(el('div', { html: qaBadge(dd.qaStatus) }));
+      // I-6c（v2.11.87）：複查樣區「本期複查進度」狀態徽章 — 全部立木本期已複查 → ✅ 已複查；否則 ⏳ 待複查 Y/X
+      const rs = resurveyByPlot.get(d.id);
+      if (rs && rs.total > 0 && !isShell) {
+        const done = rs.measured >= rs.total;
+        headerRight.appendChild(el('span', {
+          class: `text-xs px-2 py-0.5 rounded font-semibold ${done ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'}`,
+          title: `第 ${rs.curSeq} 期複查進度：已複查 ${rs.measured} / 共 ${rs.total} 株${done ? '（本樣區本期已完成）' : '（尚缺 ' + (rs.total - rs.measured) + ' 株）'}`
+        }, done ? `✅ 已複查 ${rs.measured}/${rs.total}` : `⏳ 待複查 ${rs.measured}/${rs.total}`));
+      }
       // v2.6.1：sub-collection 子計數 chip（避免 plot.qaStatus 誤導：plot ✓ 但子集合未審）
       // v2.6.1b：chip 加 data-* 屬性，event listener 才能定位增量更新
       // v2.7.2：從 trees-only 擴成依 methodology.modules 動態，每個有資料的模組各一個 chip
@@ -3222,6 +3242,19 @@ async function openTreeHistory(tree) {
   }
 }
 
+// I-6c（v2.11.86/87）：複查「本期是否已複查」共用判斷 — 立木清單紅/黑字 + 樣區清單進度共用，兩處邏輯必須一致
+function plotHasMultiPeriod(plot) {
+  return (Array.isArray(plot?.periods) ? plot.periods.length : (Number(plot?.currentPeriod) || 1)) >= 2;
+}
+function treeMeasuredInPeriod(t, curSeq, hasMulti) {
+  if (!hasMulti) return true;                          // 第一期：無「上期/本期」之分
+  if (Number(t.lastMeasuredPeriod) === curSeq) return true;  // 主判斷：本期存檔蓋的期號
+  // 回退（本功能上線前、本期已重測但無 lastMeasuredPeriod 的樹）：updatedAt 晚於開期蓋印時間
+  const toMs = (x) => x?.toMillis ? x.toMillis() : (typeof x?.seconds === 'number' ? x.seconds * 1000 : null);
+  const s = toMs(t.priorSnapshot?.stampedAt), u = toMs(t.updatedAt);
+  return (s != null && u != null && u > s);
+}
+
 function renderTreeList(snap, projectId, plotId) {
   _lastTreeSnap = snap;   // v2.6.2：留給 distribution 用
   const list = $('#tree-list');
@@ -3237,21 +3270,13 @@ function renderTreeList(snap, projectId, plotId) {
   }
   let totalBA = 0, totalV = 0, sumDbh = 0, sumH = 0;
   // v2.11.76（I-6b）：複查樣區（≥2 期）才顯示「歷期」明細鈕
-  const hasMultiPeriod = (Array.isArray(state.plot?.periods) ? state.plot.periods.length : (Number(state.plot?.currentPeriod) || 1)) >= 2;
+  const hasMultiPeriod = plotHasMultiPeriod(state.plot);
   // I-6c（v2.11.86）：複查期別「本期已複查」判斷 — 未複查者 DBH/H 顯示紅字（＝仍是上期資料）
   const curSeq = Number(state.plot?.currentPeriod) || 1;
-  const _tsMs = (x) => x?.toMillis ? x.toMillis() : (typeof x?.seconds === 'number' ? x.seconds * 1000 : null);
-  const isMeasuredThisPeriod = (t) => {
-    if (!hasMultiPeriod) return true;                       // 第一期：無「上期/本期」之分，全黑
-    if (Number(t.lastMeasuredPeriod) === curSeq) return true;  // 主判斷：本期存檔蓋的期號
-    // 回退（本功能上線前、本期已重測但無 lastMeasuredPeriod 的樹）：updatedAt 晚於開期蓋印時間
-    const s = _tsMs(t.priorSnapshot?.stampedAt), u = _tsMs(t.updatedAt);
-    return (s != null && u != null && u > s);
-  };
   let pendingCount = 0;
   const rows = snap.docs.map(d => {
     const t = d.data();
-    const measured = isMeasuredThisPeriod(t);
+    const measured = treeMeasuredInPeriod(t, curSeq, hasMultiPeriod);
     if (hasMultiPeriod && !measured) pendingCount++;
     // 未複查（仍是上期值）→ 紅字；已複查（本期更新）→ 預設黑字
     const pendCls = (hasMultiPeriod && !measured) ? 'text-red-600 font-semibold' : '';
