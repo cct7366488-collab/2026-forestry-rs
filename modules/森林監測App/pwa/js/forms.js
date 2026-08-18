@@ -1,29 +1,29 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21190';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21191';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21190';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21191';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21190';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21191';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21190';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21190';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21191';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21191';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21190';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21191';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21190';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21191';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21190';
+import { createSpeciesPicker } from './species-picker.js?v=21191';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21190';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21191';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21190';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21191';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21190';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21191';
 // v2.11.91：專案邊界支援 ESRI Shapefile（.zip 或 .shp/.shx/.dbf/.prj/.cpg 多檔）
-import { SHAPEFILE_ACCEPT, looksLikeShapefile, shapefileFilesToGeoJson } from './shapefile-loader.js?v=21190';
+import { SHAPEFILE_ACCEPT, looksLikeShapefile, shapefileFilesToGeoJson } from './shapefile-loader.js?v=21191';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -3133,25 +3133,43 @@ export async function openPlotForm(project, existing = null) {
     previewBox.innerHTML = `不規則多邊形（${dimTypeLabel}）：頂點 <b>${v.vertices.length}</b>　│　Shoelace 面積 <b>${area.toFixed(1)} m²</b>` + slopeNote;
   }
 
-  // GeoJSON 上傳
-  const geoFileInput = el('input', { type: 'file', accept: '.geojson,.json,application/geo+json,application/json', class: 'text-xs' });
+  // GeoJSON / Shapefile 上傳
+  // v2.11.92：比照專案邊界，樣區不規則多邊形也吃 Shapefile（.zip 或多選 .shp/.shx/.dbf/.prj）。
+  //   轉出的 GeoJSON 走既有那條路（looksLikeProjectBoundary 防呆 → parseGeoJsonPolygon
+  //   → local 座標 → VERTEX_MAX 檢查），所以樣區這邊的所有既有防呆一條都沒少。
+  const geoFileInput = el('input', {
+    type: 'file',
+    accept: `.geojson,.json,application/geo+json,application/json,${SHAPEFILE_ACCEPT}`,
+    multiple: 'true',
+    class: 'text-xs',
+  });
   geoFileInput.addEventListener('change', async () => {
-    const file = geoFileInput.files?.[0];
-    if (!file) return;
+    const files = Array.from(geoFileInput.files || []);
+    if (files.length === 0) return;
+    const preNotes = [];      // Shapefile 解析提醒（編碼偵測 / 缺 .prj…），併進最後那則訊息一起顯示
     try {
-      const text = await file.text();
-      const json = JSON.parse(text);
+      let json, srcName;
+      if (looksLikeShapefile(files)) {
+        const { geojson, meta } = await shapefileFilesToGeoJson(files);
+        json = geojson;
+        srcName = files.length === 1 ? files[0].name : meta.layers.join('、');
+        for (const n of meta.notes) preNotes.push({ level: 'info', text: n });
+      } else {
+        if (files.length > 1) toast('GeoJSON 只會採用第一個檔案：' + files[0].name);
+        srcName = files[0].name;
+        json = JSON.parse(await files[0].text());
+      }
       // v2.11.52：UX 防呆 — 偵測「這檔看起來是專案邊界、不是樣區」並建議改去專案邊界上傳
       //   原本只在頂點 > VERTEX_MAX 時 toast 一行，使用者常分不清「樣區」「專案邊界」差異
       //   ＿觸發條件（任一即提示）：FeatureCollection > 1 feature / MultiPolygon 多 polygon / 頂點 > 50 / bbox 跨度 > 500 m
       const susp = looksLikeProjectBoundary(json);
       if (susp.suspect) {
         const ok = confirm(
-          '⚠️ 這個 GeoJSON 看起來是「專案邊界 / 計畫區 / 林班 / 作業單元」，不像「樣區」：\n\n' +
+          '⚠️ 這個檔看起來是「專案邊界 / 計畫區 / 林班 / 作業單元」，不像「樣區」：\n\n' +
           susp.reasons.map(r => '・' + r).join('\n') +
           '\n\n樣區（plot）= 固定面積的調查樣點（通常 < 50 頂點、< 100 m 邊長）\n' +
           '專案邊界 = 整個計畫區（支援 MultiPolygon、無頂點上限）\n\n' +
-          '建議：取消這次上傳 → 回主畫面按「編輯專案」→ 在「📐 專案邊界（GeoJSON，選填）」上傳同一檔案\n\n' +
+          '建議：取消這次上傳 → 回主畫面按「編輯專案」→ 在「📐 專案邊界（GeoJSON / Shapefile，選填）」上傳同一檔案\n\n' +
           '仍要以樣區方式繼續嘗試嗎？（多數情況會被頂點上限擋下）'
         );
         if (!ok) {
@@ -3163,7 +3181,7 @@ export async function openPlotForm(project, existing = null) {
       const lng = parseFloat(lngInput.value);
       const lat = parseFloat(latInput.value);
       if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-        showFormMessages([{ level: 'error', text: '請先設定樣區 GPS（GeoJSON 解析時要計算 local 偏移）' }]);
+        showFormMessages([{ level: 'error', text: '請先設定樣區 GPS（解析邊界時要計算 local 偏移）' }]);
         return;
       }
       const center = wgs84ToTwd97(lng, lat);
@@ -3173,14 +3191,14 @@ export async function openPlotForm(project, existing = null) {
         return;
       }
       irregularVertices = result.vertices.map(v => ({ x: v.x, y: v.y }));
-      irregularSrcInfo = `${file.name}（${result.srcSystem}，${result.vertices.length} 頂點）`;
+      irregularSrcInfo = `${srcName}（${result.srcSystem}，${result.vertices.length} 頂點）`;
       // v2.11.11：記錄上傳當下的 GPS 中心，之後若 user 重新定位 GPS 可自動平移多邊形
       uploadCenterTwd97 = { x: center.x, y: center.y };
       renderIrregularTable();
       validateAndPreviewIrregular();
       // v2.11.11：警示多邊形跟 GPS 中心距離（合理應小於 200 m，超過提示可能 GPS 設錯位置）
       const v = validatePolygon(irregularVertices);
-      const msgs = [{ level: 'info', text: `已從 ${file.name} 載入 ${result.vertices.length} 頂點（${result.srcSystem}）` }];
+      const msgs = [...preNotes, { level: 'info', text: `已從 ${srcName} 載入 ${result.vertices.length} 頂點（${result.srcSystem}）` }];
       if (v.ok) {
         const cx = v.vertices.reduce((s, p) => s + p.x, 0) / v.vertices.length;
         const cy = v.vertices.reduce((s, p) => s + p.y, 0) / v.vertices.length;
@@ -3194,8 +3212,8 @@ export async function openPlotForm(project, existing = null) {
       }
       showFormMessages(msgs, { autoHide: 8000 });
     } catch (e) {
-      showFormMessages([{ level: 'error', text: 'GeoJSON 解析失敗：' + e.message }]);
-      console.error('[GeoJSON]', e);
+      showFormMessages([{ level: 'error', text: '邊界檔解析失敗：' + e.message }]);
+      console.error('[plot boundary]', e);
     }
     geoFileInput.value = '';  // reset for re-upload
   });
@@ -3212,14 +3230,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21190',
+        href: './img/gps-position-guide.svg?v=21191',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21190',
+          src: './img/gps-position-guide.svg?v=21191',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -3234,8 +3252,8 @@ export async function openPlotForm(project, existing = null) {
   const irregularFields = el('div', { class: 'field', style: 'display:none;background:#fefce8;border:1px solid #fde047;border-radius:6px;padding:8px' },
     el('div', { class: 'flex items-center justify-between gap-2 mb-2' },
       el('span', { style: 'font-weight:600;font-size:13px' }, `🗺️ 不規則多邊形邊界 (${VERTEX_MIN}–${VERTEX_MAX} 頂點)`),
-      el('label', { class: 'border px-2 py-1 rounded text-xs cursor-pointer hover:bg-stone-50', title: '上傳 GeoJSON 檔（自動偵測 WGS84 / TWD97 / 轉成 local m）' },
-        '📂 GeoJSON 上傳', geoFileInput
+      el('label', { class: 'border px-2 py-1 rounded text-xs cursor-pointer hover:bg-stone-50', title: '上傳 GeoJSON，或 Shapefile（.zip / 多選 .shp+.dbf+.prj）— 自動偵測 WGS84 / TWD97、轉成 local m' },
+        '📂 GeoJSON / Shapefile 上傳', geoFileInput
       )
     ),
     gpsHelpDetails,                       // v2.11.11：GPS 量測位置說明（折疊式）
