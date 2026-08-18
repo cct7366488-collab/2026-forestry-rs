@@ -1,0 +1,4 @@
+# 測試 fixtures：二進位、隨時可用 make_fixtures.py 重生 → 不進 repo
+fixtures/
+# 第三方 UMD（shpjs / proj4）執行時自 CDN 下載
+.cache/

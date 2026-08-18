@@ -1,0 +1,84 @@
+<!doctype html>
+<!-- ===== shapefile-loader 真瀏覽器驗證 =====
+     Node 測不到的三件事只有瀏覽器算數：
+       (1) TextDecoder('big5') 在瀏覽器的行為
+       (2) 原生 DecompressionStream('deflate-raw') 解 zip
+       (3) shpjs 走 <script> CDN lazy load
+     跑法（從 modules/森林監測App/ 這一層起服務，讓 ../pwa 與 ./fixtures 都拿得到）：
+       python -m http.server 8765
+       開 http://localhost:8765/tests/browser-shapefile-loader.html
+     本檔位於 tests/，不在 firebase hosting public（pwa/）底下 → 不會被部署。 -->
+<meta charset="utf-8">
+<title>shapefile-loader 真瀏覽器驗證</title>
+<style>
+  body { font: 13px/1.7 ui-monospace, monospace; padding: 16px; }
+  .ok { color: #15803d } .bad { color: #b91c1c } .note { color: #b45309 } .hd { font-weight: 700; margin-top: 10px }
+</style>
+<h3>shapefile-loader 真瀏覽器驗證</h3>
+<div id="log">執行中…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+<script type="module">
+import { looksLikeShapefile, shapefileFilesToGeoJson } from '../pwa/js/shapefile-loader.js';
+import { parseProjectBoundaryGeoJson } from '../pwa/js/plot-polygon.js';
+
+const log = document.getElementById('log');
+log.textContent = '';
+const put = (cls, msg) => { const d = document.createElement('div'); d.className = cls; d.textContent = msg; log.appendChild(d); };
+let pass = 0, fail = 0;
+const check = (label, cond, detail = '') => {
+  const tail = detail ? ' — ' + detail : '';
+  if (cond) { pass++; put('ok', `✅ ${label}${tail}`); } else { fail++; put('bad', `❌ ${label}${tail}`); }
+};
+
+// 比照 app.js 的 TWD97 → WGS84
+proj4.defs('EPSG:3826', '+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +units=m +no_defs');
+const twd97ToWgs84 = (x, y) => { const [lng, lat] = proj4('EPSG:3826', 'WGS84', [x, y]); return { lng, lat }; };
+
+async function fetchFile(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url} → HTTP ${r.status}（fixtures 產了嗎？先跑 python make_fixtures.py）`);
+  return new File([await r.arrayBuffer()], url.split('/').pop());
+}
+
+async function run(name, urls, expect) {
+  put('hd', `=== ${name} ===`);
+  try {
+    const files = await Promise.all(urls.map(fetchFile));
+    check('looksLikeShapefile', looksLikeShapefile(files));
+    const { geojson, meta } = await shapefileFilesToGeoJson(files);
+    meta.notes.forEach(n => put('note', `   note: ${n}`));
+    check('編碼偵測', meta.encoding === expect.encoding, `得 ${meta.encoding} / 期望 ${expect.encoding}`);
+    const props = JSON.stringify(geojson.features[0].properties);
+    check('中文屬性正確', props.includes('陳') && props.includes('橫流溪'), props);
+    check('無 U+FFFD', !props.includes('�'));
+    const parsed = parseProjectBoundaryGeoJson(geojson, twd97ToWgs84);
+    const [w, s, e, n] = parsed.bbox;
+    check('落在橫流溪一帶', w > 120.68 && e < 120.73 && s > 24.16 && n < 24.19,
+      `srcSystem=${parsed.srcSystem} bbox=[${w.toFixed(4)}, ${s.toFixed(4)}, ${e.toFixed(4)}, ${n.toFixed(4)}]`);
+  } catch (err) {
+    if (expect.throws && String(err.message).includes(expect.throws)) { pass++; put('ok', `✅ 如預期擋下 — ${err.message}`); }
+    else { fail++; put('bad', `❌ 例外：${err.message}`); }
+  }
+}
+
+const F = './fixtures';
+await run('TWD97 + Big5 無 .cpg（散檔）', [
+  `${F}/case2_twd97_big5_nocpg/case2_twd97_big5_nocpg.shp`,
+  `${F}/case2_twd97_big5_nocpg/case2_twd97_big5_nocpg.dbf`,
+  `${F}/case2_twd97_big5_nocpg/case2_twd97_big5_nocpg.prj`,
+  `${F}/case2_twd97_big5_nocpg/case2_twd97_big5_nocpg.shx`,
+], { encoding: 'big5' });
+
+await run('ZIP deflate（TWD97 + Big5）', [`${F}/case5_zip_deflate.zip`], { encoding: 'big5' });
+await run('ZIP stored 未壓縮（WGS84 + UTF-8）', [`${F}/case6_zip_stored.zip`], { encoding: 'utf-8' });
+
+await run('線圖層（應擋下）', [
+  `${F}/case4_line/case4_line.shp`,
+  `${F}/case4_line/case4_line.dbf`,
+  `${F}/case4_line/case4_line.prj`,
+], { throws: '專案邊界需要面' });
+
+put(fail ? 'bad hd' : 'ok hd', `===== 通過 ${pass} / 失敗 ${fail} =====`);
+window.__RESULT__ = { pass, fail };
+</script>
