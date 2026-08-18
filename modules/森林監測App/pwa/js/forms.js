@@ -1,27 +1,29 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21189';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21190';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21189';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21190';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21189';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21190';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21189';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21189';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21190';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21190';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21189';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21190';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21189';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21190';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21189';
+import { createSpeciesPicker } from './species-picker.js?v=21190';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21189';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21190';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21189';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21190';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21189';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21190';
+// v2.11.91：專案邊界支援 ESRI Shapefile（.zip 或 .shp/.shx/.dbf/.prj/.cpg 多檔）
+import { SHAPEFILE_ACCEPT, looksLikeShapefile, shapefileFilesToGeoJson } from './shapefile-loader.js?v=21190';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -1285,6 +1287,9 @@ export async function deleteProjectCascade(project) {
 //   ⚠ PII 風險已知：合併檔含承租人姓名與契約書號；放 Hosting 靜態檔意味著有 URL 的人都可下載。
 //   現階段判定：合作社契約屬半公開資料（林業署有開放類似 dataset），demo 風險可接受。
 //   若 6/6 後要轉嚴格路 → 改放 Firestore boundaryPresets/{id} + rules 鎖 admin 才能讀。
+// 專案邊界寫在 project 文件的 boundaryGeoJsonStr 欄位 → 受 Firestore 單一文件 1 MiB 限制
+const BOUNDARY_MAX_BYTES = 1024 * 1024;
+
 const BOUNDARY_PRESETS = [
   {
     id: 'cinnamon-zones',
@@ -1296,9 +1301,12 @@ const BOUNDARY_PRESETS = [
 
 function buildBoundarySection({ existingBoundary, onChange }) {
   const wrap = el('div', { class: 'border border-stone-200 rounded p-2 space-y-2 bg-stone-50' });
-  wrap.appendChild(el('div', { class: 'text-sm font-medium' }, '📐 專案邊界（GeoJSON，選填）'));
+  wrap.appendChild(el('div', { class: 'text-sm font-medium' }, '📐 專案邊界（GeoJSON / Shapefile，選填）'));
   wrap.appendChild(el('div', { class: 'text-xs text-stone-600' },
     '上傳後地圖分頁會疊加邊界圖層，並自動 zoom 到邊界範圍。支援 Polygon / MultiPolygon、自動偵測 WGS84 / TWD97（EPSG:3826）座標系。'));
+  // v2.11.91：Shapefile 是多檔格式，講清楚怎麼給檔，免得使用者只丟一個 .shp 才發現屬性空的
+  wrap.appendChild(el('div', { class: 'text-xs text-stone-500' },
+    'Shapefile 請上傳 .zip，或一次多選 .shp／.shx／.dbf／.prj（Ctrl 或 Shift 複選）。屬性中文為 Big5 時會自動偵測。'));
 
   // 狀態顯示區
   const statusBox = el('div', { class: 'text-xs' });
@@ -1306,6 +1314,13 @@ function buildBoundarySection({ existingBoundary, onChange }) {
     statusBox.innerHTML = '';
     statusBox.className = `text-xs ${cls}`;
     statusBox.textContent = text;
+  }
+  // v2.11.91：Shapefile 解析過程的提醒（自動偵測編碼、缺 .prj、混合幾何…）另起一區，
+  //   不跟主狀態列擠同一行——這些是「有做事但要讓你知道」的訊息，不是錯誤。
+  const noteBox = el('div', { class: 'text-xs text-amber-700 space-y-0.5' });
+  function renderNotes(notes) {
+    noteBox.innerHTML = '';
+    for (const n of notes || []) noteBox.appendChild(el('div', {}, `・${n}`));
   }
 
   if (existingBoundary) {
@@ -1317,27 +1332,59 @@ function buildBoundarySection({ existingBoundary, onChange }) {
     renderStatus('（尚未上傳）', 'text-stone-500');
   }
   wrap.appendChild(statusBox);
+  wrap.appendChild(noteBox);
 
   // v2.11.54：抽 helper — file/preset 共用 parse + status + onChange 流程
-  async function processGeojsonText(text, displayName) {
-    if (text.length > 1024 * 1024) {
-      renderStatus(`✗ 檔案過大（${(text.length / 1024 / 1024).toFixed(2)} MB），上限 1 MB（Firestore doc 限制）`, 'text-red-700');
-      onChange(null);
-      return;
-    }
+  // v2.11.91：再抽一層 processGeojsonObject，讓 Shapefile 轉出的 GeoJSON 物件走同一條路
+  //   （解析 → 大小檢查 → 狀態列 → onChange），GeoJSON 與 Shapefile 兩種來源行為一致。
+  async function processGeojsonObject(json, displayName, notes = []) {
     renderStatus('⏳ 解析中...', 'text-blue-600');
     try {
-      const json = JSON.parse(text);
       const result = parseProjectBoundaryGeoJson(json, twd97ToWgs84);
+      // v2.11.91：大小改量「實際要寫進 Firestore 的字串 UTF-8 位元組」。
+      //   舊版量上傳原始檔的 JS 字元數，有兩個問題：(a) 中文屬性 UTF-8 佔 3 bytes → 低估、
+      //   (b) 縮排排版的 GeoJSON 會高估；而 Shapefile 根本沒有「原始文字大小」可量。
+      //   量輸出才是真正對上 Firestore 單一文件 1 MiB 限制的那個數字。
+      const bytes = new TextEncoder().encode(JSON.stringify(result.geojson)).length;
+      if (bytes > BOUNDARY_MAX_BYTES) {
+        renderStatus(
+          `✗ 轉出的邊界資料 ${(bytes / 1024 / 1024).toFixed(2)} MB，超過 Firestore 單一文件 1 MB 上限`
+          + ' — 請先在 GIS 軟體簡化節點（QGIS「向量 → 幾何工具 → 簡化」）或只保留需要的圖徵後再上傳',
+          'text-red-700');
+        renderNotes(notes);
+        onChange(null);
+        return;
+      }
       result.fileName = displayName;
-      const sizeKb = (text.length / 1024).toFixed(1);
+      const sizeKb = (bytes / 1024).toFixed(1);
       renderStatus(`✓ ${displayName}（${result.srcSystem}, ${result.polygonCount} 多邊形 / ${result.ringCount} 環 / ${result.vertexCount} 頂點 / ${sizeKb} KB）— 儲存後生效`, 'text-green-700');
+      renderNotes(notes);
       onChange(result);
     } catch (e) {
       console.error('[boundary GeoJSON]', e);
       renderStatus(`✗ 解析失敗：${e.message}`, 'text-red-700');
+      renderNotes(notes);
       onChange(null);
     }
+  }
+
+  async function processGeojsonText(text, displayName) {
+    // 純保護瀏覽器不被超大檔 JSON.parse 卡死；真正的 1 MB 判斷在 processGeojsonObject（量輸出）
+    if (text.length > 16 * 1024 * 1024) {
+      renderStatus(`✗ 檔案過大（${(text.length / 1024 / 1024).toFixed(1)} MB），無法解析`, 'text-red-700');
+      onChange(null);
+      return;
+    }
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      console.error('[boundary GeoJSON]', e);
+      renderStatus(`✗ 不是有效的 JSON：${e.message}`, 'text-red-700');
+      onChange(null);
+      return;
+    }
+    await processGeojsonObject(json, displayName);
   }
 
   // v2.11.54：預設邊界一鍵載入（下拉選單 + 載入按鈕）
@@ -1376,16 +1423,37 @@ function buildBoundarySection({ existingBoundary, onChange }) {
   wrap.appendChild(presetRow);
 
   // 檔案輸入
+  // v2.11.91：加 multiple — Shapefile 是多檔格式（.shp 幾何 / .dbf 屬性 / .prj 座標系分開存），
+  //   單選會逼使用者只能走 .zip；GeoJSON 仍只取第一個檔，行為不變。
   const fileInput = el('input', {
     type: 'file',
-    accept: '.geojson,.json,application/geo+json,application/json',
+    accept: `.geojson,.json,application/geo+json,application/json,${SHAPEFILE_ACCEPT}`,
+    multiple: 'true',
     class: 'text-xs block w-full',
   });
   fileInput.addEventListener('change', async () => {
-    const f = fileInput.files?.[0];
-    if (!f) return;
-    const text = await f.text();
-    await processGeojsonText(text, f.name);
+    const files = Array.from(fileInput.files || []);
+    if (files.length === 0) return;
+
+    if (looksLikeShapefile(files)) {
+      renderStatus('⏳ 讀取 Shapefile...', 'text-blue-600');
+      renderNotes([]);
+      try {
+        const { geojson, meta } = await shapefileFilesToGeoJson(files);
+        const label = files.length === 1 ? files[0].name : meta.layers.join('、');
+        await processGeojsonObject(geojson, label, meta.notes);
+      } catch (e) {
+        console.error('[boundary shapefile]', e);
+        renderStatus(`✗ Shapefile 解析失敗：${e.message}`, 'text-red-700');
+        onChange(null);
+      }
+      return;
+    }
+
+    // GeoJSON：單檔（多選時只取第一個）
+    if (files.length > 1) toast('GeoJSON 只會採用第一個檔案：' + files[0].name);
+    const text = await files[0].text();
+    await processGeojsonText(text, files[0].name);
   });
   wrap.appendChild(el('div', { class: 'text-xs text-stone-500' }, '或上傳自己的檔案：'));
   wrap.appendChild(fileInput);
@@ -1399,6 +1467,7 @@ function buildBoundarySection({ existingBoundary, onChange }) {
     clearBtn.addEventListener('click', () => {
       if (!confirm('確定清除既有專案邊界？\n（清除後地圖將回到 plot 點位定位；可隨時重新上傳）')) return;
       fileInput.value = '';
+      renderNotes([]);
       renderStatus('⚠ 已標記清除（按儲存後寫入 Firestore）', 'text-amber-700');
       onChange('CLEAR');
     });
@@ -3143,14 +3212,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21189',
+        href: './img/gps-position-guide.svg?v=21190',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21189',
+          src: './img/gps-position-guide.svg?v=21190',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
