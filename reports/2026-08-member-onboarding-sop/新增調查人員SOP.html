@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>ForestMRV 新增調查人員 SOP</title>
+<style>
+  @page { size: A4 portrait; margin: 10mm 11mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft JhengHei", "Noto Sans TC", "PingFang TC", sans-serif;
+    color: #1c1917; font-size: 9.6pt; line-height: 1.45;
+  }
+  .head { display: flex; align-items: flex-end; gap: 10px; border-bottom: 2.5px solid #2f5d3a; padding-bottom: 5px; }
+  .head h1 { font-size: 17pt; color: #2f5d3a; letter-spacing: 0.5px; }
+  .head .sub { font-size: 9pt; color: #57534e; padding-bottom: 2px; }
+  .head .url { margin-left: auto; font-size: 8.6pt; text-align: right; color: #44403c; }
+  .head .url b { color: #2f5d3a; }
+
+  .rule { margin-top: 7px; background: #fef3c7; border: 1.5px solid #d97706; border-radius: 6px; padding: 6px 10px; }
+  .rule .t { font-size: 11pt; font-weight: 700; color: #92400e; }
+  .rule .d { font-size: 9pt; color: #78350f; margin-top: 1px; }
+
+  .flow { margin-top: 8px; display: flex; align-items: stretch; gap: 4px; }
+  .step { flex: 1; border: 1.4px solid #d6d3d1; border-radius: 6px; padding: 5px 6px; text-align: center; background: #fafaf9; }
+  .step.a { border-color: #2563eb; background: #eff6ff; }
+  .step.b { border-color: #2f5d3a; background: #f0fdf4; }
+  .step .n { font-size: 7.8pt; font-weight: 700; letter-spacing: 0.5px; }
+  .step.a .n { color: #1d4ed8; }
+  .step.b .n { color: #2f5d3a; }
+  .step .x { font-size: 9.4pt; font-weight: 700; margin-top: 1px; }
+  .step .y { font-size: 8pt; color: #57534e; }
+  .arrow { align-self: center; color: #a8a29e; font-size: 13pt; font-weight: 700; }
+
+  .cols { margin-top: 9px; display: flex; gap: 9px; }
+  .card { flex: 1; border: 1.6px solid #d6d3d1; border-radius: 7px; overflow: hidden; }
+  .card.a { border-color: #2563eb; }
+  .card.b { border-color: #2f5d3a; }
+  .card h2 { font-size: 10.5pt; padding: 4px 9px; color: #fff; }
+  .card.a h2 { background: #2563eb; }
+  .card.b h2 { background: #2f5d3a; }
+  .card .body { padding: 7px 9px 8px; }
+  ol { list-style: none; counter-reset: s; }
+  ol > li { counter-increment: s; position: relative; padding-left: 20px; margin-bottom: 5px; }
+  ol > li::before {
+    content: counter(s) "."; position: absolute; left: 0; top: 0;
+    font-weight: 700; color: #2f5d3a; font-size: 9.6pt;
+  }
+  .card.a ol > li::before { color: #2563eb; }
+  li b { font-weight: 700; }
+  li .note { display: block; color: #57534e; font-size: 8.4pt; }
+  .hl { background: #fef08a; padding: 0 2px; font-weight: 700; }
+  .ok { color: #15803d; font-weight: 700; }
+  .bad { color: #b91c1c; font-weight: 700; }
+
+  .mock { margin-top: 4px; border: 1.2px solid #d6d3d1; border-radius: 5px; background: #fff; padding: 6px 7px; }
+  .mock .cap { font-size: 7.6pt; color: #78716c; margin-bottom: 3px; }
+  .mock .title { font-size: 8.8pt; font-weight: 700; margin-bottom: 3px; }
+  .mock .row { display: flex; gap: 4px; align-items: center; }
+  .mock .inp { flex: 1; border: 1px solid #a8a29e; border-radius: 3px; padding: 2px 5px; font-size: 8.2pt; color: #57534e; background: #fff; }
+  .mock .sel { border: 1px solid #a8a29e; border-radius: 3px; padding: 2px 14px 2px 5px; font-size: 8.2pt; background: #fff; position: relative; }
+  .mock .btn { background: #2f5d3a; color: #fff; border-radius: 3px; padding: 2px 8px; font-size: 8.2pt; font-weight: 700; }
+  .mock .list { font-size: 8pt; color: #44403c; border-bottom: 1px dashed #d6d3d1; padding-bottom: 3px; margin-bottom: 4px; }
+
+  h3.sec { font-size: 10pt; color: #2f5d3a; margin: 9px 0 3px; border-left: 4px solid #2f5d3a; padding-left: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 8.6pt; }
+  th, td { border: 1px solid #d6d3d1; padding: 3px 6px; vertical-align: top; }
+  th { background: #f5f5f4; font-weight: 700; text-align: left; }
+  td.q { width: 32%; }
+  td.a2 { width: 22%; }
+
+  .perm { display: flex; gap: 9px; margin-top: 3px; }
+  .perm div { flex: 1; border: 1.2px solid #d6d3d1; border-radius: 6px; padding: 5px 8px; font-size: 8.6pt; }
+  .perm .can { border-color: #86efac; background: #f0fdf4; }
+  .perm .cant { border-color: #fca5a5; background: #fef2f2; }
+  .perm p { margin: 1px 0; }
+
+  .foot { margin-top: 8px; border-top: 1px solid #d6d3d1; padding-top: 4px; display: flex; font-size: 7.8pt; color: #78716c; }
+  .foot .r { margin-left: auto; }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>新增調查人員 SOP</h1>
+  <div class="sub">ForestMRV 森林監測系統｜一頁版</div>
+  <div class="url">系統網址：<b>forestry-rs-monitor.web.app</b><br>適用版本：v2.11.92</div>
+</div>
+
+<div class="rule">
+  <div class="t">核心原則：先登入、後加入 — 順序不可顛倒</div>
+  <div class="d">調查人員要<b>自己先登入系統一次</b>，計畫主持人才加得進去。系統沒有「先發邀請、對方註冊後自動入列」的功能；人還沒登入過，主持人端會直接跳「找不到此 email」。</div>
+</div>
+
+<div class="flow">
+  <div class="step a"><div class="n">調查人員</div><div class="x">① 自己登入一次</div><div class="y">看到空白專案是正常的</div></div>
+  <div class="arrow">→</div>
+  <div class="step a"><div class="n">調查人員</div><div class="x">② 回報 email</div><div class="y">登入用的那一個</div></div>
+  <div class="arrow">→</div>
+  <div class="step b"><div class="n">計畫主持人</div><div class="x">③ 設定加成員</div><div class="y">角色選「調查員」</div></div>
+  <div class="arrow">→</div>
+  <div class="step b"><div class="n">計畫主持人</div><div class="x">④ 指派樣區</div><div class="y">樣區卡片勾選姓名</div></div>
+  <div class="arrow">→</div>
+  <div class="step a"><div class="n">調查人員</div><div class="x">⑤ 重新整理</div><div class="y">專案出現、開始調查</div></div>
+</div>
+
+<div class="cols">
+  <div class="card a">
+    <h2>甲、調查人員要做的（3 步）</h2>
+    <div class="body">
+      <ol>
+        <li><b>打開系統網址並登入一次</b>
+          <span class="note">用 Google 帳號登入，或用 email＋密碼註冊。手機請用瀏覽器開啟後「加到主畫面」。</span></li>
+        <li><b>看到空白的「我的專案」不要慌</b>
+          <span class="note">這是<span class="ok">正常</span>的。還沒被加入專案之前本來就看不到任何資料，不是當機、不必重裝。</span></li>
+        <li><b>把 email 回報給計畫主持人</b>
+          <span class="note">務必回報<span class="hl">剛才登入用的那一個 email</span>。用學校帳號登入就報學校帳號，不要報別的私人信箱。</span></li>
+      </ol>
+      <div class="mock">
+        <div class="cap">畫面示意｜登入後尚未被加入專案</div>
+        <div class="title">我的專案</div>
+        <div style="border:1px dashed #a8a29e;border-radius:4px;padding:8px;text-align:center;color:#78716c;font-size:8.2pt;">（目前沒有專案）</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card b">
+    <h2>乙、計畫主持人要做的（3 步）</h2>
+    <div class="body">
+      <ol>
+        <li><b>進入專案 → 點「設定」分頁</b>
+          <span class="note">「設定」分頁只有主持人與系統管理員看得到；調查員看不到是正常的。</span></li>
+        <li><b>在「成員與角色」加入 email、角色選「調查員」</b>
+          <span class="note">貼上對方回報的 email，按「加入」即完成，<span class="ok">不需要再送審</span>，伺服器端立即生效。</span></li>
+        <li><b>回樣區清單，勾選要指派的調查員</b>
+          <span class="note">樣區卡片可<b>複選多人</b>共同調查。指派影響對方「我的樣區」看得到哪些、以及能否互相修改同樣區的立木資料。</span></li>
+      </ol>
+      <div class="mock">
+        <div class="cap">畫面示意｜設定 → 成員與角色</div>
+        <div class="list">陳○○ (pi@example.com)　　主持人　　　</div>
+        <div class="row">
+          <span class="inp">新成員 email</span>
+          <span class="sel">調查員 ▾</span>
+          <span class="btn">加入</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 class="sec">丙、常見狀況排除</h3>
+<table>
+  <tr><th class="q">畫面出現／遇到的狀況</th><th class="a2">原因</th><th>怎麼處理</th></tr>
+  <tr>
+    <td class="q"><span class="bad">找不到此 email — 請對方先登入過一次</span></td>
+    <td class="a2">對方還沒登入過，或 email 打錯</td>
+    <td>請對方先完成「甲、第 1 步」登入，再回報一次 email；並確認沒有多打空格、沒有用錯網域。</td>
+  </tr>
+  <tr>
+    <td class="q">已經加入了，對方還是看不到專案</td>
+    <td class="a2">畫面沒重新載入</td>
+    <td>請對方下拉重新整理，或登出再登入一次即可出現。</td>
+  </tr>
+  <tr>
+    <td class="q">加進去了，但對方說「我的樣區」是空的</td>
+    <td class="a2">尚未指派樣區</td>
+    <td>主持人回樣區清單勾選該調查員（乙、第 3 步）。</td>
+  </tr>
+  <tr>
+    <td class="q">角色加錯了（例如誤加成審查委員）</td>
+    <td class="a2">角色可覆寫</td>
+    <td>用<b>同一個 email</b> 重新加入一次、選正確角色即覆寫；或按成員右側「✕ 移除」後重加。</td>
+  </tr>
+  <tr>
+    <td class="q">要新增的是一個<b>全新專案</b>，不是成員</td>
+    <td class="a2">權限層級不同</td>
+    <td>建立新專案僅限系統管理員，請聯繫系統管理者，主持人端無此按鈕。</td>
+  </tr>
+</table>
+
+<h3 class="sec">丁、權限範圍速查（計畫主持人）</h3>
+<div class="perm">
+  <div class="can">
+    <p><b class="ok">可以做</b></p>
+    <p>1. 在自己主持的專案新增成員（調查員、審查委員、林業合作社等）</p>
+    <p>2. 變更成員角色、移除成員（不含自己與其他主持人）</p>
+    <p>3. 指派樣區給一位或多位調查員</p>
+  </div>
+  <div class="cant">
+    <p><b class="bad">不可以做</b></p>
+    <p>1. 建立新專案（僅系統管理員）</p>
+    <p>2. 授予他人系統管理員身分</p>
+    <p>3. 對自己並非主持人的專案加人</p>
+  </div>
+</div>
+
+<div class="foot">
+  <div>製作：2026-08-19｜依 ForestMRV v2.11.92 實際權限規則整理。畫面為示意圖，實際版面以系統為準。</div>
+  <div class="r">問題回報：計畫主持人 → 系統管理員</div>
+</div>
+
+</body>
+</html>
