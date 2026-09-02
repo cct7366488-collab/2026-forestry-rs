@@ -75,6 +75,9 @@ reports/2026-05-mid-demo/520教育訓練後之意見.docx
 reports/2026-06-forestmrv-manual/*.docx
 reports/2026-06-forestmrv-manual/*.pdf
 reports/2026-06-forestmrv-manual/images/
+reports/2026-09-forestmrv-manual/*.docx
+reports/2026-09-forestmrv-manual/*.pdf
+reports/2026-09-forestmrv-manual/images/
 
 # 新增調查人員 SOP：PDF 為產出資料（依 Cloud.md 留 GDrive）；版面原始檔 .html 仍追蹤
 reports/2026-08-member-onboarding-sop/*.pdf
