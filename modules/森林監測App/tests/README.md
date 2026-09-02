@@ -6,7 +6,24 @@
 |---|---|---|
 | `test-shapefile-loader.mjs` | **Shapefile 邊界上傳**（`pwa/js/shapefile-loader.js`，v2.11.91 / v2.11.92） | 是 |
 | `test-boundary-containment.mjs` | **樣區界內／界外判定**（`plot-polygon.js` 的 `isPointInBoundaryGeoJson`，v2.11.93） | 否 |
-| `browser-image-compress.html` | **上傳前影像壓縮**（`image-compress.js`，v2.11.94）— 只能在真瀏覽器跑 | 否 |
+| `browser-image-compress.html` | **上傳前影像壓縮**（`image-compress.js`，v2.11.95）— 只能在真瀏覽器跑 | 否 |
+| `test-rules-users.mjs` | **`/users` 安全規則**（自我提權漏洞，v2.11.96）— 需 `firebase login` | 否 |
+
+```bash
+node test-rules-users.mjs
+```
+
+本機沒有 Java、跑不了 Firestore emulator，而 `scripts/` 下的 owner-token 腳本走 REST 會**繞過**
+Security Rules、證明不了規則擋不擋得住。這支改走 Firebase 的 `firebaserules projects.test` API
+（Rules Playground 背後那支）：把規則原始碼連同模擬請求送上去、由 Google 端評估回傳 ALLOW／DENY，
+不需 emulator、不寫入任何資料。`get()` 一律以 `functionMocks` 回應，不依賴線上實際資料。
+
+用 `--rules <路徑>` 可指向別的規則檔。修補當下即以此拿修補前的舊規則回跑，確認三個自我提權
+案例在舊規則下確實被 ALLOW（漏洞為真、測試不是空轉）：
+
+```bash
+node test-rules-users.mjs --rules /path/to/old/firestore.rules
+```
 
 ```bash
 node test-boundary-containment.mjs

@@ -79,10 +79,43 @@ service cloud.firestore {
     //     在誤導為「目前的角色無法變更成員」；同時 PI 看成員清單名字也 silently fail
     //   修後：所有登入者可 read /users（email / displayName / systemRole）
     //     ForestMRV 為內部教學工具、user 都是同單位老師學生、email 互寄本就公開 → 隱私風險低
-    //   write 維持只能改自己
+    //
+    // v2.11.96：關閉自我提權漏洞（2026-08-19 查出、2026-09-02 修）。
+    //   修前：allow write: if isSignedIn() && request.auth.uid == uid;
+    //     ——「只能改自己」擋得住改別人，但完全沒有欄位限制。而 isSystemAdmin() 正是讀這份
+    //     文件，所以任何登入者都能把自己的 systemRole 改成 'admin'，當場取得跨專案 god view
+    //     與開案／邊界／成員指派權限。這是全站權限體系的地基，其餘所有規則都建立在它之上。
+    //   修後：本人仍可建立與維護自己的資料（displayName 等），但角色欄位受管制：
+    //     建檔時不得自帶 admin；更新時角色欄位必須與現況一致（動到就整筆拒絕）。
+    //     角色的變更一律走系統管理員，或以 owner token 腳本／Firebase 主控台操作。
+    //   稽核：scripts/audit-system-roles.mjs 可列出目前所有系統層級角色，供定期核對。
     match /users/{uid} {
-      allow read:  if isSignedIn();
-      allow write: if isSignedIn() && request.auth.uid == uid;
+      // 角色欄位不得為 admin（缺欄位視為通過 —— client 首次登入建檔只寫 systemRole:'member'）
+      function roleNotAdmin(d) {
+        return d.get('systemRole', 'member') != 'admin'
+            && d.get('globalRole', '') != 'admin';
+      }
+      // 角色欄位與現況一致（本人改自己的 displayName 時，不得順手動到角色）
+      function roleUnchanged() {
+        return request.resource.data.get('systemRole', 'member') == resource.data.get('systemRole', 'member')
+            && request.resource.data.get('globalRole', '') == resource.data.get('globalRole', '');
+      }
+
+      // ⚠ 兩個 OR 都必須把「本人」那一支放在左邊，靠短路避開 isSystemAdmin()。
+      //   isSystemAdmin() 會 get(/users/{自己})，而首次登入建檔的當下這份文件還不存在，
+      //   get() 回 null、取 .data 即為評估錯誤 → 整條規則拒絕 → 新帳號永遠註冊不了。
+      //   本人自建（未夾帶 admin）時左支即為真，根本不會走到 get()。
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+                      (request.auth.uid == uid && roleNotAdmin(request.resource.data)) ||
+                      isSystemAdmin()
+                    );
+      allow update: if isSignedIn() && (
+                      (request.auth.uid == uid && roleUnchanged()) ||
+                      isSystemAdmin()
+                    );
+      // 刪除帳號文件會讓該人失去所有角色與成員身分，且無法自 client 復原 → 僅系統管理員
+      allow delete: if isSignedIn() && isSystemAdmin();
     }
 
     // ===== Projects =====
