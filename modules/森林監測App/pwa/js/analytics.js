@@ -1,18 +1,18 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21194';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21195';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21194';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21195';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21194';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21195';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21194';
+import { getEquationBadge } from './species-equations.js?v=21195';
 // v2.11.19：irregular plot vertices 轉換用
-import { vertsToArrays, isPointInBoundaryGeoJson } from './plot-polygon.js?v=21194';
+import { vertsToArrays, isPointInBoundaryGeoJson } from './plot-polygon.js?v=21195';
 // v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
 // v2.11.70（I-6）：複查報表用 derivePlotPeriods 取期別標籤
-import { openProjectForm, derivePlotPeriods } from './forms.js?v=21194';
+import { openProjectForm, derivePlotPeriods } from './forms.js?v=21195';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -1393,7 +1393,7 @@ export async function exportXlsx(project) {
       };
       const species = u.species || [];
       if (species.length === 0) {
-        understoryRows.push({ ...baseFields, 物種中名: '', 物種學名: '', 生活型: '', 物種覆蓋_pct: '', 高_cm: '', 入侵種: '' });
+        understoryRows.push({ ...baseFields, 物種中名: '', 物種學名: '', 生活型: '', 物種覆蓋_pct: '', 高_cm: '', 入侵種: '', 鑑定照張數: '', 鑑定照網址: '' });
       } else {
         species.forEach(sp => {
           understoryRows.push({
@@ -1403,7 +1403,11 @@ export async function exportXlsx(project) {
             生活型: sp.lifeForm || '',
             物種覆蓋_pct: sp.coverage ?? '',
             高_cm: sp.height_cm ?? '',
-            入侵種: sp.isInvasive ? '是' : ''
+            入侵種: sp.isInvasive ? '是' : '',
+            // v2.11.97：逐物種鑑定照 —— 查證時要能從報表直接回溯到該物種的佐證影像，
+            //   故連網址一起輸出（多張以換行分隔）
+            鑑定照張數: (sp.photos || []).length,
+            鑑定照網址: (sp.photos || []).map(p => p.url).join('\n')
           });
         });
       }

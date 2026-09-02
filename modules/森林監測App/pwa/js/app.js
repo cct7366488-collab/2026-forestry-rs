@@ -15,23 +15,23 @@ import {
   getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js";
 
-import { firebaseConfig } from "../firebase-config.js?v=21194";
-import * as forms from "./forms.js?v=21194";
-import * as analytics from "./analytics.js?v=21194";
-import * as importWizard from "./import-wizard.js?v=21194";
+import { firebaseConfig } from "../firebase-config.js?v=21195";
+import * as forms from "./forms.js?v=21195";
+import * as analytics from "./analytics.js?v=21195";
+import * as importWizard from "./import-wizard.js?v=21195";
 // v2.11.33：土肉桂葉片採收許可電子化（林農申請 → 林保署核准）
-import * as harvestPermits from "./harvest-permits.js?v=21194";
-import { renderTreeDistribution } from "./distribution.js?v=21194";   // v2.6.2：立木分布散布圖
-import { initTreeMap } from "./tree-map.js?v=21194";                    // v2.11.29：plot detail Leaflet 地圖
-import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21194";   // v2.7.10：admin 樹種字典管理
+import * as harvestPermits from "./harvest-permits.js?v=21195";
+import { renderTreeDistribution } from "./distribution.js?v=21195";   // v2.6.2：立木分布散布圖
+import { initTreeMap } from "./tree-map.js?v=21195";                    // v2.11.29：plot detail Leaflet 地圖
+import { renderSpeciesDict, disposeSpeciesDict } from "./species-admin.js?v=21195";   // v2.7.10：admin 樹種字典管理
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置 / gate）
-import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21194";
-import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21194";
+import { DEFAULT_QAQC_CONFIG, computeTargetSampleSize, computeTreeSampleSize, pickRandomSample, getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, checkApprovalGate, checkTreeApprovalGate, computeErrorStats, computeTreeErrorStats, defaultQaqc, defaultTreeQaqc } from "./plot-qaqc.js?v=21195";
+import { calcTreeMetrics as calcTreeMetricsImpl, speciesParamsLabel as speciesParamsLabelImpl, getEquationBadge } from "./species-equations.js?v=21195";
 // 每專案模組開關（軸 A）+ 軸 B：依計畫類型/調查需求 gating 分頁與子調查
-import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21194";
+import { MODULES, moduleEnabled, tabEnabled, subtabEnabled } from "./module-registry.js?v=21195";
 // v2.3：階段 2 — 狀態機 + 自動偵測送審；v2.7：階段 3 — Reviewer 完成審查
-import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21194";
+import { STATUS, STATUS_META, AUTO_LOCK_REASON_LABEL, statusBadgeHTML, ensureStatusMigrated, applyStatusAfterManualLock, applyStatusAfterReviewerApprove, applyStatusRevertVerified, applyStatusForceUnlockReview, computeProgress } from "./project-status.js?v=21195";
 
 // ===== Firebase init =====
 const app = initializeApp(firebaseConfig);
@@ -379,7 +379,7 @@ async function triggerRectConversion(projectId) {
     return;
   }
   try {
-    const m = await import('./migration-v2715.js?v=21194');
+    const m = await import('./migration-v2715.js?v=21195');
     toast('掃描中...');
     const dry = await m.dryRunSquareToRectangle(projectId);
     if (!dry.targets.length) { toast('沒有符合條件的樣區（shape=square AND area=500）'); return; }
@@ -401,7 +401,7 @@ async function triggerRectConversion(projectId) {
 
 async function triggerGeoMigration(projectId) {
   try {
-    const m = await import('./migration-v2715.js?v=21194');
+    const m = await import('./migration-v2715.js?v=21195');
     toast('掃描中...');
     const candidates = await m.dryRun(projectId);
     if (!candidates.length) { toast('沒有需要補登的樣區（schema 已是 v2.6）'); return; }
@@ -3491,8 +3491,12 @@ function renderUnderstoryList(snap, projectId, plotId) {
     const speciesCount = (u.species || []).length;
     const invasiveCount = u.invasiveCount || 0;
     const photoTag = (u.photos || []).length > 0 ? ` <span style="font-size:11px;color:#57534e">📷${(u.photos || []).length}</span>` : '';
+    // v2.11.97：逐物種鑑定照的張數另計 —— 與樣方俯拍照分開顯示，才看得出「物種有沒有附鑑定照」
+    const spPhotoCount = (u.species || []).reduce((s, sp) => s + ((sp.photos || []).length), 0);
+    const spPhotoTag = spPhotoCount > 0
+      ? ` <span style="font-size:11px;color:#15803d" title="物種鑑定照">🌿📷${spPhotoCount}</span>` : '';
     const stationLabel = { N: '北', E: '東', S: '南', W: '西', C: '中' }[u.quadratCode] || u.quadratCode;
-    const speciesCell = el('td', { html: `${stationLabel} (${u.quadratSize})${photoTag} ${qaBadge(u.qaStatus)}` });
+    const speciesCell = el('td', { html: `${stationLabel} (${u.quadratSize})${photoTag}${spPhotoTag} ${qaBadge(u.qaStatus)}` });
     if (canQA() && !isLocked()) {
       appendQaButtons(speciesCell, plotId, { coll: 'understory', id: d.id });
     }

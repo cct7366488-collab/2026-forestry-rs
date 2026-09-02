@@ -1,31 +1,31 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21194';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21195';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21194';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21195';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21194';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21195';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21194';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21194';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21195';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21195';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21194';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21195';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21194';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21195';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21194';
+import { createSpeciesPicker } from './species-picker.js?v=21195';
 // v2.11.95：上傳前本地壓縮（零相依模組，可獨立在瀏覽器測試）
-import { compressImageFile, PHOTO_MAX_BYTES } from './image-compress.js?v=21194';
+import { compressImageFile, PHOTO_MAX_BYTES } from './image-compress.js?v=21195';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21194';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21195';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21194';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21195';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21194';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21195';
 // v2.11.91：專案邊界支援 ESRI Shapefile（.zip 或 .shp/.shx/.dbf/.prj/.cpg 多檔）
-import { SHAPEFILE_ACCEPT, looksLikeShapefile, shapefileFilesToGeoJson } from './shapefile-loader.js?v=21194';
+import { SHAPEFILE_ACCEPT, looksLikeShapefile, shapefileFilesToGeoJson } from './shapefile-loader.js?v=21195';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -3314,14 +3314,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21194',
+        href: './img/gps-position-guide.svg?v=21195',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21194',
+          src: './img/gps-position-guide.svg?v=21195',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -4764,6 +4764,20 @@ export function openUnderstoryForm(project, plot, existing = null) {
   // 物種子表：state 持有 species 陣列，動態加列/刪列
   let speciesRows = existing?.species ? [...existing.species] : [];
 
+  // v2.11.97：逐物種鑑定照 — 每一列各自一個上傳元件。
+  //   以「列物件本身」當 key（不是索引）：刪列是 splice，索引會整批位移，
+  //   用索引當 key 會讓剩下的列接到別人的照片。列物件在重繪之間是同一個參考，可安全對應。
+  //   重繪時沿用同一個 uploader 實例並重新 append 其 element，待上傳的預覽才不會被清掉。
+  const rowUploaders = new Map();
+  function uploaderFor(sr) {
+    let up = rowUploaders.get(sr);
+    if (!up) {
+      up = photoUploader({ existing: sr.photos || [] });
+      rowUploaders.set(sr, up);
+    }
+    return up;
+  }
+
   // datalist 草本字典（依 lifeForm 分組註記）
   const herbList = el('datalist', { id: 'dl-herbs' },
     ...HERBS.map(h => el('option', { value: h.zh },
@@ -4787,6 +4801,7 @@ export function openUnderstoryForm(project, plot, existing = null) {
       });
       speciesIn.addEventListener('input', () => {
         sr.speciesZh = speciesIn.value;
+        const wasInvasive = !!sr.isInvasive;
         const h = findHerb(speciesIn.value);
         if (h) {
           sr.speciesSci = h.sci;
@@ -4796,7 +4811,11 @@ export function openUnderstoryForm(project, plot, existing = null) {
         } else {
           sr.isInvasive = isInvasive(speciesIn.value);
         }
-        redrawSpecies();
+        // v2.11.97：只有「入侵種標示」真的改變才整列重繪。
+        //   原本每一次按鍵都 redrawSpecies()，容器 innerHTML 被清空重建 → 正在打字的
+        //   輸入框當場被移除、每打一個字就失去焦點。加上逐列照片元件後重建成本更高，
+        //   而重繪的唯一用途就是換底色與加上入侵種警示，沒變就不必重來。
+        if (wasInvasive !== !!sr.isInvasive) redrawSpecies();
       });
       const lifeFormSel = el('select', { class: 'border rounded px-2 py-1 text-sm' },
         ...['草本', '蕨類', '苔蘚', '藤本', '灌木幼株'].map(lf => {
@@ -4818,7 +4837,12 @@ export function openUnderstoryForm(project, plot, existing = null) {
       heightInput.addEventListener('input', () => { sr.height_cm = parseInt(heightInput.value, 10) || null; });
       const delBtn = el('button', {
         type: 'button', class: 'text-red-600 text-sm px-2',
-        onclick: () => { speciesRows.splice(idx, 1); redrawSpecies(); }
+        onclick: () => {
+          // 一併丟掉該列的上傳元件（含尚未上傳的預覽），避免刪掉的列還留著待上傳檔案
+          rowUploaders.delete(sr);
+          speciesRows.splice(idx, 1);
+          redrawSpecies();
+        }
       }, '✕');
       const invasiveTag = sr.isInvasive
         ? el('div', { class: 'text-xs text-orange-700 font-medium' }, '⚠ 公告外來入侵種')
@@ -4831,6 +4855,13 @@ export function openUnderstoryForm(project, plot, existing = null) {
         delBtn
       ));
       if (invasiveTag) card.appendChild(invasiveTag);
+      // v2.11.97：本列的鑑定照。掛在物種列上，查證時「哪張照片對哪一個物種」才回溯得到；
+      //   若全部塞進上方「樣方俯拍照片」，對應關係只能靠備註口述，不符可查證性要求。
+      const rowUp = uploaderFor(sr);
+      card.appendChild(el('div', { class: 'pt-1 mt-1 border-t border-stone-200' },
+        el('div', { class: 'text-xs text-stone-500 mb-1' }, '📷 本物種鑑定照（選填，可多張）'),
+        rowUp.element
+      ));
       speciesContainer.appendChild(card);
     });
   }
@@ -4846,8 +4877,10 @@ export function openUnderstoryForm(project, plot, existing = null) {
 
   // 樣方照片
   const photoUp = photoUploader({ existing: existing?.photos || [] });
+  // v2.11.97：把兩種照片的用途講清楚 —— 俯拍照是整個樣方的覆蓋度佐證，
+  //   個別物種的鑑定照請掛在上方各物種列，否則查證時對不回哪張是哪一種。
   const photoLabel = el('label', {}, '樣方俯拍照片', photoReq ? el('span', { class: 'req' }, ' *') : null,
-    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（從正上方拍 1m×1m 範圍）'));
+    el('span', { class: 'text-xs text-stone-500 ml-1' }, '（整個樣方從正上方拍，佐證覆蓋度；個別物種的鑑定照請掛在上方各物種列）'));
 
   const f = el('form', { class: 'space-y-2' },
     herbList,
@@ -4925,12 +4958,34 @@ export function openUnderstoryForm(project, plot, existing = null) {
         const ref = await fb.addDoc(colRef, data);
         docId = ref.id;
       }
+      // 樣方俯拍照
+      const patch = {};
       if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
-        const photos = await photoUp.commit({
+        patch.photos = await photoUp.commit({
           projectId: project.id, plotId: plot.id, prefix: `understory-${docId}`, onProgress: photoProgress(submitBtn)
         });
-        await fb.updateDoc(fb.doc(colRef, docId), { photos });
+      }
+      // v2.11.97：逐物種鑑定照 — 每列各自 commit，結果寫回該列的 photos。
+      //   必須等 docId 產生後才能上傳（Storage 路徑含 docId），故走「先建文件、再補寫 species」。
+      const rowsNeedingUpload = cleanSpecies.filter(sr => {
+        const up = rowUploaders.get(sr);
+        return up && (up.count > 0 || (sr.photos?.length ?? 0) > 0);
+      });
+      if (rowsNeedingUpload.length > 0) {
+        let n = 0;
+        for (const sr of rowsNeedingUpload) {
+          n++;
+          submitBtn.textContent = `上傳物種照片中… ${n}/${rowsNeedingUpload.length}`;
+          sr.photos = await rowUploaders.get(sr).commit({
+            projectId: project.id, plotId: plot.id,
+            prefix: `understory-${docId}-sp${cleanSpecies.indexOf(sr) + 1}`,
+          });
+        }
+        patch.species = cleanSpecies;   // 帶著各列剛寫回的 photos 覆寫整個 species 陣列
+      }
+      if (Object.keys(patch).length > 0) {
+        await fb.updateDoc(fb.doc(colRef, docId), patch);
       }
       toast(existing
         ? (data.qaStatus === 'pending' ? '已更新（重新送審）' : '已更新')
