@@ -1,29 +1,31 @@
 // ===== forms.js — v1.5 表單：專案 / 樣區 / 立木 / 更新 / 方法學 / QA / Seed =====
 // v2.0：加 understory（地被植物）+ soilCons（水土保持）兩模組
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21193';
+import { fb, $, $$, el, toast, openModal, closeModal, state, calcTreeMetrics, speciesParamsLabel, wgs84ToTwd97, twd97ToWgs84, DEFAULT_METHODOLOGY, isPi, isDataManager, isSurveyor, isReviewer, isSystemAdmin, canQA, isLocked, rerouteCurrentView, captureCurrentSubtab, qaBadge, fmtDate } from './app.js?v=21194';
 // v2.7.16：樣區幾何 + 坡度修正 utility
-import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21193';
+import { computeAreaHorizontal, computeAreaHorizontal2D, computeAreaSlope, computeAreaSlope2D, nominalToSlopeDistance, dimensionsToArea } from './plot-geometry.js?v=21194';
 // v2.7.17：reviewer QAQC 工作流
 // v2.8.1：tree-level QAQC（抽樣 / 重測 / 誤差 / 處置）
-import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21193';
+import { DEFAULT_QAQC_CONFIG, defaultQaqc, defaultTreeQaqc, computeQaqcErrors, computeTreeQaqcErrors, computeTreeSampleSize, pickRandomTreeSample, getTreeQaqcStatus, RESOLUTION_LABEL } from './plot-qaqc.js?v=21194';
 // v2.8.0：irregular plot 不規則多邊形（Shoelace / 自交檢查 / GeoJSON 解析）
-import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21193';
-import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21193';
+import { validatePolygon, parseGeoJsonPolygon, parseProjectBoundaryGeoJson, shoelaceArea, computeBbox, vertsToArrays, arraysToVerts, VERTEX_MIN, VERTEX_MAX } from './plot-polygon.js?v=21194';
+import { TYPE_CODES, AGENCY_CODES, agenciesByGroup, nextSequence, buildProjectCode } from './code-tables.js?v=21194';
 // 每專案模組組合（軸 A/B）：新專案依計畫類型帶套餐預設、可勾選微調
-import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21193';
+import { MODULES, FAMILIES, defaultModulesForType, getModule } from './module-registry.js?v=21194';
 // v2.0：物種字典從 species-dict.js 載入（樹種 / 動物 / 草本 / 入侵種）
-import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21193';
+import { TREES, ANIMALS, HERBS, INVASIVE_PLANTS, isInvasive, findHerb, findAnimal } from './species-dict.js?v=21194';
 // v2.10.5：樹種搜尋下拉組件（取代 <datalist>，支援 Firestore 224 種 + fuzzy match）
-import { createSpeciesPicker } from './species-picker.js?v=21193';
+import { createSpeciesPicker } from './species-picker.js?v=21194';
+// v2.11.95：上傳前本地壓縮（零相依模組，可獨立在瀏覽器測試）
+import { compressImageFile, PHOTO_MAX_BYTES } from './image-compress.js?v=21194';
 // v2.10.9：DEM 海拔自動偵測（plot GPS → 海拔 → picker band）
-import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21193';
+import { getElevation, elevationToBand, bandLabel } from './dem-elevation.js?v=21194';
 // v2.11.0：AI 樹種辨識 modal（Pl@ntNet 線上 API）
-import { openAiIdentifyModal } from './ai-identify-modal.js?v=21193';
+import { openAiIdentifyModal } from './ai-identify-modal.js?v=21194';
 // v2.3：階段 2 狀態機（自動偵測送審）
-import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21193';
+import { STATUS, applyStatusAfterQA, applyStatusAfterSurveyorReset, applyStatusAfterMethodologySaved } from './project-status.js?v=21194';
 // v2.11.91：專案邊界支援 ESRI Shapefile（.zip 或 .shp/.shx/.dbf/.prj/.cpg 多檔）
-import { SHAPEFILE_ACCEPT, looksLikeShapefile, shapefileFilesToGeoJson } from './shapefile-loader.js?v=21193';
+import { SHAPEFILE_ACCEPT, looksLikeShapefile, shapefileFilesToGeoJson } from './shapefile-loader.js?v=21194';
 
 // 兼容舊 SPECIES 命名（forms.js 內部仍引用）
 const SPECIES = TREES;
@@ -294,41 +296,90 @@ function field({ label, name, type = 'text', required = false, value = '', place
   return el('div', { class: 'field' }, lab, input);
 }
 
+// v2.11.94：把上傳進度回寫到送出按鈕 —— 一次傳 20 張時「上傳照片中...」不動會被當成當掉。
+//   只有多張才顯示分數，單張維持原文案。
+const photoProgress = (btn) => (done, total) => {
+  if (btn && total > 1) btn.textContent = `上傳照片中… ${done}/${total}`;
+};
+
 // ===== 照片上傳元件（v1.6） =====
 // 用法：const up = photoUploader({ existing: doc.photos || [], required, onChange });
 //      表單中放 up.element；submit 時呼叫 await up.commit({ projectId, plotId, prefix }) 拿到新 photos 陣列
 // 行為：
 //   - 顯示既有照片 thumbnail（不可被 surveyor 編輯時）+ 刪除 X 按鈕
-//   - 新增按鈕：accept=image/*，capture=environment（手機開後鏡頭）
-//   - 新加的檔案先做本地 preview（FileReader）；submit 才真正上傳到 Storage
+//   - 新增：＋ 方塊＝拍照（capture=environment 手機開後鏡頭）；另有「🖼️ 從相簿選」可一次多選
+//   - 新加的檔案先本地壓縮 + preview；submit 才真正上傳到 Storage
 //   - commit() 回傳合併後的 photos 陣列：[...remainingExisting, ...newlyUploaded]
+// v2.11.94：兩個入口分開 — 手機瀏覽器只要 input 帶 capture 就會直接開相機並「忽略 multiple」，
+//   相簿多選整個沒得用；20 種地被要放 20 張時只能按 20 次逐張拍。故拍照與相簿各給一個 input。
 function photoUploader({ existing = [], onChange = null } = {}) {
   let kept = [...existing];          // 保留的既有照片（user 沒按刪除的）
   let pending = [];                  // 待上傳的新檔案 [{ file, previewUrl, tempId }]
 
   const wrap = el('div', { class: 'photo-uploader space-y-2' });
   const grid = el('div', { class: 'flex flex-wrap gap-2' });
-  const fileInput = el('input', {
-    type: 'file', accept: 'image/*', capture: 'environment',
-    multiple: 'true', class: 'hidden'
+  // 拍照：capture 讓手機直開後鏡頭（單張，瀏覽器會忽略 multiple）
+  const cameraInput = el('input', {
+    type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden'
+  });
+  // 相簿：不帶 capture，才能一次多選（20 種地被一次挑 20 張）
+  const galleryInput = el('input', {
+    type: 'file', accept: 'image/*', multiple: 'true', class: 'hidden'
   });
   const addBtn = el('button', {
     type: 'button',
     class: 'border-2 border-dashed border-stone-300 rounded w-20 h-20 flex items-center justify-center text-stone-400 hover:bg-stone-50',
-    onclick: () => fileInput.click()
+    title: '拍照',
+    onclick: () => cameraInput.click()
   }, '＋');
+  const galleryBtn = el('button', {
+    type: 'button',
+    class: 'border border-stone-300 rounded px-2 py-1 text-xs text-stone-600 hover:bg-stone-50',
+    onclick: () => galleryInput.click()
+  }, '🖼️ 從相簿選（可多選）');
+  const statusLine = el('div', { class: 'text-xs text-stone-500' });
 
-  fileInput.addEventListener('change', () => {
-    for (const file of fileInput.files) {
-      if (!file.type.startsWith('image/')) { toast(`忽略非圖片：${file.name}`); continue; }
-      if (file.size > 5 * 1024 * 1024) { toast(`檔案過大（>5MB）：${file.name}`); continue; }
+  // busyText 用「黏著」的方式記住 —— redraw() 也會呼叫 refreshStatus()，
+  // 若不記住，處理／上傳途中每重畫一次就會把進度字樣蓋回「已選 N 張」
+  let statusBusy = '';
+  function refreshStatus(busyText = null) {
+    if (busyText !== null) statusBusy = busyText;
+    const n = kept.length + pending.length;
+    statusLine.textContent = statusBusy || (n > 0 ? `已選 ${n} 張` : '');
+  }
+
+  async function intake(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    refreshStatus(`處理照片中… 0/${files.length}`);
+    let done = 0;
+    for (const raw of files) {
+      if (!raw.type.startsWith('image/')) { toast(`忽略非圖片：${raw.name}`); done++; continue; }
+      // 先壓再檢查上限 — 手機原檔常本來就 >5MB，壓完多半就過了
+      const file = await compressImageFile(raw);
+      if (file.size > PHOTO_MAX_BYTES) {
+        toast(`檔案過大（壓縮後仍 >5MB）：${raw.name}`);
+        done++; continue;
+      }
       const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const previewUrl = URL.createObjectURL(file);
-      pending.push({ file, previewUrl, tempId });
+      pending.push({ file, previewUrl: URL.createObjectURL(file), tempId });
+      done++;
+      refreshStatus(`處理照片中… ${done}/${files.length}`);
+      redraw();
     }
-    fileInput.value = '';
-    redraw();
+    refreshStatus('');
     onChange?.();
+  }
+
+  // 注意：一定要先 Array.from 取出檔案再清 input.value —— value='' 會把 FileList 一併清空，
+  // 先清再讀會拿到 0 個檔案（同一支 input 要能連續選同一張圖，value 又非清不可）
+  cameraInput.addEventListener('change', async () => {
+    const files = Array.from(cameraInput.files); cameraInput.value = '';
+    await intake(files);
+  });
+  galleryInput.addEventListener('change', async () => {
+    const files = Array.from(galleryInput.files); galleryInput.value = '';
+    await intake(files);
   });
 
   function redraw() {
@@ -363,19 +414,24 @@ function photoUploader({ existing = [], onChange = null } = {}) {
       grid.appendChild(item);
     });
     grid.appendChild(addBtn);
+    refreshStatus();
   }
   redraw();
 
   wrap.appendChild(grid);
-  wrap.appendChild(fileInput);
+  wrap.appendChild(el('div', { class: 'flex items-center gap-2 flex-wrap' }, galleryBtn, statusLine));
+  wrap.appendChild(cameraInput);
+  wrap.appendChild(galleryInput);
 
   return {
     element: wrap,
     get count() { return kept.length + pending.length; },
     // v2.11.3：外部加 file 進來（給 AI 辨識 modal 用 — 拍照辨識完照片自動入 tree.photos）
-    addFile(file) {
-      if (!file || !file.type?.startsWith('image/')) return false;
-      if (file.size > 5 * 1024 * 1024) { toast(`檔案過大（>5MB）：${file.name}`); return false; }
+    //   v2.11.94：改 async（同樣走壓縮）。既有呼叫端未取用回傳值，不受影響。
+    async addFile(rawFile) {
+      if (!rawFile || !rawFile.type?.startsWith('image/')) return false;
+      const file = await compressImageFile(rawFile);
+      if (file.size > PHOTO_MAX_BYTES) { toast(`檔案過大（壓縮後仍 >5MB）：${rawFile.name || '照片'}`); return false; }
       const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const previewUrl = URL.createObjectURL(file);
       pending.push({ file, previewUrl, tempId });
@@ -384,25 +440,49 @@ function photoUploader({ existing = [], onChange = null } = {}) {
       return true;
     },
     // 上傳 + 回傳合併陣列。upload 失敗的檔案會 throw，由 caller 處理
-    async commit({ projectId, plotId, prefix = 'plot' }) {
-      const uploaded = [];
-      for (const p of pending) {
-        const ext = (p.file.name.match(/\.[a-zA-Z0-9]+$/) || ['.jpg'])[0].toLowerCase();
-        const ts = Date.now();
-        const rand = Math.random().toString(36).slice(2, 8);
-        const path = `projects/${projectId}/plots/${plotId}/${prefix}-${ts}-${rand}${ext}`;
-        const r = fb.storageRef(fb.storage, path);
-        await fb.uploadBytes(r, p.file, { contentType: p.file.type });
-        const url = await fb.getDownloadURL(r);
-        uploaded.push({
-          url, path,
-          name: p.file.name,
-          size: p.file.size,
-          contentType: p.file.type,
-          uploadedAt: new Date(),
-          uploadedBy: state.user.uid
-        });
-        URL.revokeObjectURL(p.previewUrl);
+    //   v2.11.94：序列改為限流並行（一次 3 條）+ 進度回報。
+    //   為什麼限 3 而不是全部一起丟：野外行動網路上行頻寬有限，20 條連線同時搶只會互相拖慢
+    //   且更容易整批 timeout；3 條足以吃滿上行又保留重試餘裕。
+    async commit({ projectId, plotId, prefix = 'plot', onProgress = null } = {}) {
+      const queue = [...pending];
+      const uploaded = new Array(queue.length);
+      const total = queue.length;
+      let done = 0;
+      const report = () => {
+        if (total === 0) return;
+        refreshStatus(`上傳中… ${done}/${total} 張`);
+        onProgress?.(done, total);
+      };
+      report();
+
+      let next = 0;
+      const worker = async () => {
+        while (true) {
+          const i = next++;
+          if (i >= queue.length) return;
+          const p = queue[i];
+          const ext = (p.file.name?.match(/\.[a-zA-Z0-9]+$/) || ['.jpg'])[0].toLowerCase();
+          const path = `projects/${projectId}/plots/${plotId}/${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+          const r = fb.storageRef(fb.storage, path);
+          await fb.uploadBytes(r, p.file, { contentType: p.file.type });
+          const url = await fb.getDownloadURL(r);
+          // 寫回原索引，保持與畫面上的排列順序一致（並行完成順序不固定）
+          uploaded[i] = {
+            url, path,
+            name: p.file.name,
+            size: p.file.size,
+            contentType: p.file.type,
+            uploadedAt: new Date(),
+            uploadedBy: state.user.uid
+          };
+          URL.revokeObjectURL(p.previewUrl);
+          done++; report();
+        }
+      };
+      try {
+        await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+      } finally {
+        refreshStatus('');
       }
       // 計算被移除的既有照片（既有 - 保留）→ 從 Storage 刪
       const removedExisting = existing.filter(e => !kept.some(k => k.path === e.path));
@@ -438,11 +518,14 @@ export async function quickAddPhoto(project, plot) {
     cleanup();
     if (!files.length) return;
 
-    const valid = files.filter(f => {
-      if (!f.type.startsWith('image/')) { toast(`忽略非圖片：${f.name}`); return false; }
-      if (f.size > 5 * 1024 * 1024) { toast(`過大（>5MB）：${f.name}`); return false; }
-      return true;
-    });
+    // v2.11.94：同樣先壓再檢查上限（手機原檔常本來就 >5MB，原本會被直接丟掉只留一句 toast）
+    const valid = [];
+    for (const raw of files) {
+      if (!raw.type.startsWith('image/')) { toast(`忽略非圖片：${raw.name}`); continue; }
+      const f = await compressImageFile(raw);
+      if (f.size > PHOTO_MAX_BYTES) { toast(`過大（壓縮後仍 >5MB）：${raw.name}`); continue; }
+      valid.push(f);
+    }
     if (!valid.length) return;
 
     toast(`上傳中（${valid.length} 張）...`, 8000);
@@ -3231,14 +3314,14 @@ export async function openPlotForm(project, existing = null) {
     }, '💡 GPS 應該量在多邊形的什麼位置？（點開看圖）'),
     el('div', { class: 'mt-2' },
       el('a', {
-        href: './img/gps-position-guide.svg?v=21193',
+        href: './img/gps-position-guide.svg?v=21194',
         target: '_blank',
         rel: 'noopener',
         class: 'block',
         title: '點圖可開新分頁放大檢視 / 列印 A4'
       },
         el('img', {
-          src: './img/gps-position-guide.svg?v=21193',
+          src: './img/gps-position-guide.svg?v=21194',
           alt: '多邊形樣區 GPS 量測位置野外操作指南：30 秒概念、內部幾何 vs 絕對位置、4 種來源情境（RTK/手機/PSP/臨時）、量錯救援流程',
           class: 'w-full h-auto rounded border border-stone-200',
           loading: 'lazy'
@@ -3668,7 +3751,7 @@ export async function openPlotForm(project, existing = null) {
       }
       if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
-        const photos = await photoUp.commit({ projectId: project.id, plotId, prefix: 'plot' });
+        const photos = await photoUp.commit({ projectId: project.id, plotId, prefix: 'plot', onProgress: photoProgress(submitBtn) });
         await fb.updateDoc(fb.doc(fb.db, 'projects', project.id, 'plots', plotId), { photos });
       }
       // v2.11.28：編輯既有 plot 後同步 state.plot 記憶體（避免下次 openTreeForm 讀到 stale 欄位）
@@ -4574,7 +4657,7 @@ export async function openTreeForm(project, plot, existing = null) {
       if (treePhotoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (treePhotoUp.count > 0) submitBtn.textContent = '上傳照片中...';
         const photos = await treePhotoUp.commit({
-          projectId: project.id, plotId: plot.id, prefix: `tree-${treeId}`
+          projectId: project.id, plotId: plot.id, prefix: `tree-${treeId}`, onProgress: photoProgress(submitBtn)
         });
         await fb.updateDoc(fb.doc(colRef, treeId), { photos });
       }
@@ -4845,7 +4928,7 @@ export function openUnderstoryForm(project, plot, existing = null) {
       if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
         const photos = await photoUp.commit({
-          projectId: project.id, plotId: plot.id, prefix: `understory-${docId}`
+          projectId: project.id, plotId: plot.id, prefix: `understory-${docId}`, onProgress: photoProgress(submitBtn)
         });
         await fb.updateDoc(fb.doc(colRef, docId), { photos });
       }
@@ -5053,7 +5136,7 @@ export async function openSoilConsForm(project, plot, existing = null) {
       if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
         const photos = await photoUp.commit({
-          projectId: project.id, plotId: plot.id, prefix: `soilcons-${docId}`
+          projectId: project.id, plotId: plot.id, prefix: `soilcons-${docId}`, onProgress: photoProgress(submitBtn)
         });
         await fb.updateDoc(fb.doc(colRef, docId), { photos });
       }
@@ -5290,7 +5373,7 @@ export function openWildlifeForm(project, plot, existing = null) {
       if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
         const photos = await photoUp.commit({
-          projectId: project.id, plotId: plot.id, prefix: `wildlife-${docId}`
+          projectId: project.id, plotId: plot.id, prefix: `wildlife-${docId}`, onProgress: photoProgress(submitBtn)
         });
         await fb.updateDoc(fb.doc(colRef, docId), { photos });
       }
@@ -5533,7 +5616,7 @@ export async function openHarvestForm(project, plot, existing = null) {
       if (photoUp.count > 0 || (existing?.photos?.length ?? 0) > 0) {
         if (photoUp.count > 0) submitBtn.textContent = '上傳照片中...';
         const photos = await photoUp.commit({
-          projectId: project.id, plotId: plot.id, prefix: `harvest-${docId}`
+          projectId: project.id, plotId: plot.id, prefix: `harvest-${docId}`, onProgress: photoProgress(submitBtn)
         });
         await fb.updateDoc(fb.doc(colRef, docId), { photos });
       }

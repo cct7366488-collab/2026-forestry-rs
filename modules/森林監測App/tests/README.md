@@ -6,6 +6,7 @@
 |---|---|---|
 | `test-shapefile-loader.mjs` | **Shapefile 邊界上傳**（`pwa/js/shapefile-loader.js`，v2.11.91 / v2.11.92） | 是 |
 | `test-boundary-containment.mjs` | **樣區界內／界外判定**（`plot-polygon.js` 的 `isPointInBoundaryGeoJson`，v2.11.93） | 否 |
+| `browser-image-compress.html` | **上傳前影像壓縮**（`image-compress.js`，v2.11.94）— 只能在真瀏覽器跑 | 否 |
 
 ```bash
 node test-boundary-containment.mjs
@@ -68,7 +69,13 @@ node test-shapefile-loader.mjs
 python -m http.server 8765
 ```
 
-再開 <http://localhost:8765/tests/browser-shapefile-loader.html>。
+再開 <http://localhost:8765/tests/browser-shapefile-loader.html>
+與 <http://localhost:8765/tests/browser-image-compress.html>（後者不需 fixtures，素材在頁內即時產生；
+另附手動拖檔區，可拿真手機原檔看實際壓縮率）。
+
+> 影像壓縮那支之所以只能在瀏覽器跑：canvas、`toBlob()`、影像解碼全是瀏覽器 API。
+> 開發時踩到的雷已寫進測試註解——`img.decode()` 在某些環境圖片明明載入完成 promise 卻永不 resolve
+> （改用 `onload`），以及「壓完反而變大」這條分支需要極小的純色 PNG 才測得到。
 
 > 本目錄不在 firebase hosting 的 public（`pwa/`）底下，**不會被部署**。
 

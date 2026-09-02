@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>image-compress 瀏覽器測試（v2.11.95）</title>
+<style>
+  body { font: 14px/1.7 -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif; margin: 20px; max-width: 900px; }
+  h1 { font-size: 18px; }
+  .ok { color: #15803d; } .ng { color: #dc2626; font-weight: 700; }
+  #sum { margin-top: 12px; padding: 8px; border-radius: 4px; font-weight: 700; }
+  pre { background: #f5f5f4; padding: 8px; border-radius: 4px; font-size: 12px; }
+  .note { color: #57534e; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>image-compress 瀏覽器測試（v2.11.95）</h1>
+<p class="note">
+  壓縮走的是 canvas / <code>img.decode()</code> / <code>toBlob()</code>，全是瀏覽器 API，Node 測不到，
+  所以這支必須在真瀏覽器跑。從 <code>modules/森林監測App/</code> 起服務後開本頁。
+</p>
+<div id="out"></div>
+<div id="sum"></div>
+<p class="note">另可手動拖一張手機原檔進來看實際壓縮率（不影響上面的自動判定）：</p>
+<input type="file" id="manual" accept="image/*">
+<pre id="manualOut"></pre>
+
+<script type="module">
+import { compressImageFile, PHOTO_MAX_EDGE, PHOTO_COMPRESS_ABOVE }
+  from '../pwa/js/image-compress.js?v=21194';
+
+const out = document.getElementById('out');
+let pass = 0, fail = 0;
+function check(label, cond, detail = '') {
+  const d = document.createElement('div');
+  d.className = cond ? 'ok' : 'ng';
+  d.textContent = `${cond ? '✅' : '❌'} ${label}${detail ? ' — ' + detail : ''}`;
+  out.appendChild(d);
+  cond ? pass++ : fail++;
+}
+function section(t) {
+  const h = document.createElement('h3');
+  h.textContent = t; h.style.margin = '14px 0 4px';
+  out.appendChild(h);
+}
+const kb = n => (n / 1024).toFixed(0) + ' KB';
+
+// 造一張夠大又壓不掉的圖：純噪點，JPEG 壓不動，才能穩定超過門檻。
+//   亂數用 crypto.getRandomValues 分段填（原生、快）——逐 pixel 跑 Math.random()
+//   在 4000×3000 是 4800 萬次迴圈，會把主執行緒卡死好幾十秒。
+async function makeNoisyImage(w, h, name = 'test.jpg', type = 'image/jpeg', quality = 0.95) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const data = img.data;
+  const CHUNK = 65536;                       // getRandomValues 單次上限
+  for (let off = 0; off < data.length; off += CHUNK) {
+    crypto.getRandomValues(data.subarray(off, Math.min(off + CHUNK, data.length)));
+  }
+  for (let i = 3; i < data.length; i += 4) data[i] = 255;   // alpha 補滿（只走 1/4 長度）
+  ctx.putImageData(img, 0, 0);
+  const blob = await new Promise(r => c.toBlob(r, type, quality));
+  return new File([blob], name, { type: blob.type });
+}
+// 用 onload 而非 decode()：實測部分瀏覽器環境 decode() 的 promise 永遠不 resolve
+// 純色圖：PNG 壓得極小，用來測「轉 JPEG 反而變大 → 退回原檔」那條分支
+async function makeFlatImage(w, h, name = 'flat.png') {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#3a7d44'; ctx.fillRect(0, 0, w, h);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  return new File([blob], name, { type: blob.type });
+}
+async function dimsOf(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res([i.naturalWidth, i.naturalHeight]);
+      i.onerror = () => rej(new Error('載入失敗'));
+      i.src = url;
+    });
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// ---------- 一、大圖：縮到長邊上限且變小 ----------
+section('大圖（3200×2400 噪點 JPEG，模擬手機原檔）');
+const big = await makeNoisyImage(3200, 2400, 'IMG_1234.JPG');
+check('測試素材確實超過壓縮門檻', big.size > PHOTO_COMPRESS_ABOVE, kb(big.size));
+const bigOut = await compressImageFile(big);
+const [bw, bh] = await dimsOf(bigOut);
+check('長邊縮到 ' + PHOTO_MAX_EDGE + 'px', Math.max(bw, bh) === PHOTO_MAX_EDGE, `${bw}×${bh}`);
+check('長寬比維持 4:3', Math.abs((bw / bh) - (4 / 3)) < 0.01, (bw / bh).toFixed(3));
+check('檔案確實變小', bigOut.size < big.size, `${kb(big.size)} → ${kb(bigOut.size)}`);
+check('輸出為 JPEG', bigOut.type === 'image/jpeg', bigOut.type);
+check('副檔名改為 .jpg', bigOut.name.endsWith('.jpg'), bigOut.name);
+check('壓縮後小於 5MB（過得了 storage.rules）', bigOut.size < 5 * 1024 * 1024, kb(bigOut.size));
+
+// ---------- 二、小圖：原封不動 ----------
+section('小圖（門檻以下不得動它，避免二次失真）');
+const small = await makeNoisyImage(200, 150, 'small.jpg');
+check('測試素材小於門檻', small.size <= PHOTO_COMPRESS_ABOVE, kb(small.size));
+const smallOut = await compressImageFile(small);
+check('回傳的就是原物件', smallOut === small);
+
+// ---------- 三、壓完變大就用原檔 ----------
+// 用「極小的純色 PNG」：PNG 只要幾十 bytes，JPEG 光是標頭與量化表就好幾百 bytes，
+// 必定變大，才測得到這條分支。
+// 兩個踩過的坑：①噪點小圖 —— 噪點 PNG 幾乎不可壓，轉 JPEG 反而更小；
+// ②大張純色圖 —— JPEG 對整片同色也很有效率，仍可能比 PNG 小。都不是穩定的素材。
+section('壓完反而變大 → 退回原檔');
+const flat = await makeFlatImage(16, 16, 'flat.png');
+const flatOut = await compressImageFile(flat, { compressAbove: 0, quality: 1, maxEdge: 4096 });
+check('回傳原檔而非更大的 JPEG', flatOut === flat, `原 ${flat.size} bytes`);
+
+// ---------- 四、非影像 / 壞資料：不得 throw ----------
+section('非影像與壞資料（絕不能擋住調查員上傳）');
+const txt = new File([new Uint8Array(2 * 1024 * 1024)], 'a.txt', { type: 'text/plain' });
+check('非影像原樣回傳', (await compressImageFile(txt)) === txt);
+check('null 不 throw', (await compressImageFile(null)) === null);
+check('undefined 不 throw', (await compressImageFile(undefined)) === undefined);
+const broken = new File([new Uint8Array(2 * 1024 * 1024)], 'broken.jpg', { type: 'image/jpeg' });
+let brokenOut, threw = false;
+try { brokenOut = await compressImageFile(broken); } catch (e) { threw = true; }
+check('壞掉的 JPEG 不 throw', !threw);
+check('壞掉的 JPEG 退回原檔', brokenOut === broken);
+
+// ---------- 五、一定會 settle ----------
+// 這一條測的是「一定會有結果」——原本用 img.decode() 時，圖片明明已經載入完成
+// （naturalWidth 有值）promise 卻永遠不 resolve，表單就永遠停在「處理照片中…」。
+// 不去斷言逾時計時器本身（blob URL 載入極快，計時器與 onload 誰先誰後不可靠、測起來會時好時壞），
+// 直接斷言使用者真正在意的性質：這支函式不會不回來。
+section('一定會 settle（不可讓表單永遠卡住）');
+const fresh = await makeNoisyImage(3200, 2400, 'fresh.jpg');
+const settled = await Promise.race([
+  compressImageFile(fresh).then(() => 'settled'),
+  new Promise(r => setTimeout(() => r('HUNG'), 15000)),
+]);
+check('compressImageFile 一定會回來', settled === 'settled', settled);
+
+// ---------- 六、極扁的圖：不得算出 0 px ----------
+section('極端長寬比');
+const wide = await makeNoisyImage(3000, 2, 'wide.png', 'image/png', 1);
+const wideOut = await compressImageFile(wide);
+const [ww, wh] = await dimsOf(wideOut);
+check('短邊至少 1px（不得為 0 導致 canvas 失敗）', wh >= 1, `${ww}×${wh}`);
+
+const sum = document.getElementById('sum');
+sum.textContent = `通過 ${pass} / 失敗 ${fail}`;
+sum.style.background = fail === 0 ? '#dcfce7' : '#fee2e2';
+sum.style.color = fail === 0 ? '#14532d' : '#991b1b';
+window.__result = { pass, fail };
+
+// 手動拖檔（看實際手機原檔的壓縮率）
+document.getElementById('manual').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const t0 = performance.now();
+  const r = await compressImageFile(f);
+  const [w1, h1] = await dimsOf(f), [w2, h2] = await dimsOf(r);
+  document.getElementById('manualOut').textContent =
+    `原檔：${f.name} ${kb(f.size)} ${w1}×${h1}\n` +
+    `壓後：${r.name} ${kb(r.size)} ${w2}×${h2}\n` +
+    `壓縮率：${(100 - r.size / f.size * 100).toFixed(1)}%　耗時 ${(performance.now() - t0).toFixed(0)} ms`;
+});
+</script>
+</body>
+</html>
