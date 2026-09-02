@@ -91,7 +91,7 @@
 | location | geopoint | ✅ | WGS84 |
 | locationTWD97 | map | ✅ | `{ x, y }` |
 | locationAccuracy_m | number | ⭕ | GPS 精度 |
-| insideBoundary | bool | ⭕ | |
+| ~~insideBoundary~~ | bool | ❌ | **v2.11.94 廢止（不再寫入、不再讀取）**。舊資料一律為 `true` — 四個寫入端全是硬編常數，對邊界的點面套疊從未實作，不可信（未 backfill，舊值請忽略）。界內／界外改由 `analytics.getPlotBoundaryStatus()` 於地圖／樣區明細／匯出時對 `project.boundaryGeoJsonStr` 即時套疊，三態：界內／界外／無邊界可比對 |
 | shape | enum | ✅ | v2.6：`circle` / `square` / `rectangle`；v2.6.2 加 `irregular`（不規則多邊形） |
 | area_m2 | number | ✅ | 名目面積（單位由 dimensionType 決定，sloped or horizontal） |
 | **plotDimensions** | map | ⭕ | v2.6：rectangle/square `{ width, length }` 或 circle `{ radius }`；v2.6.2 irregular `{ vertices: [{x,y},...], bbox: {minX,maxX,minY,maxY}, sourceInfo? }`；單位 m |

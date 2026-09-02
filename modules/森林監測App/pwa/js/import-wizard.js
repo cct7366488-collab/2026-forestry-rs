@@ -8,11 +8,11 @@
 //   - 樣區彙整表：（可選）含樣區編號、X0Y0 中心點、林分類型、地被
 //   - 材積式表：（可選）樹種—類型—係數對照
 
-import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=21192';
+import { fb, $, $$, el, toast, openModal, closeModal, state, twd97ToWgs84, calcTreeMetrics } from './app.js?v=21193';
 // v2.7.4：用真實 TREES dict 比對未知樹種（取代原 7 種 mock KNOWN_SPECIES）
-import { TREES } from './species-dict.js?v=21192';
+import { TREES } from './species-dict.js?v=21193';
 // I-1（v2.11.70）：批次匯入也 write-through 當期 measurement 歷史快照（共用 forms 純函式 builder）
-import { buildMeasurementSnapshot } from './forms.js?v=21192';
+import { buildMeasurementSnapshot } from './forms.js?v=21193';
 
 // v2.7.4：Firestore writeBatch 上限（一次最多 500 ops），保留些 buffer 給 plot 寫入混在 batch 內
 const WRITE_BATCH_SIZE = 450;
@@ -1061,7 +1061,7 @@ async function handleRealImport() {
           location: plotLocation,
           locationTWD97: plotTWD97,
           locationAccuracy_m: null,
-          insideBoundary: true,
+          // v2.11.94：移除 insideBoundary 硬編 true（見 analytics.getPlotBoundaryStatus 即時套疊）
           establishedAt: fb.serverTimestamp(),
           notes: `從 Excel 匯入 — sourceSheet: ${item.plot.sourceSheet}`,
           photos: [],

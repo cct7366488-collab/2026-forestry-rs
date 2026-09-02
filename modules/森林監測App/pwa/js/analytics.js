@@ -1,18 +1,18 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21192';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21193';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21192';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21193';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21192';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21193';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21192';
+import { getEquationBadge } from './species-equations.js?v=21193';
 // v2.11.19：irregular plot vertices 轉換用
-import { vertsToArrays, isPointInBoundaryGeoJson } from './plot-polygon.js?v=21192';
+import { vertsToArrays, isPointInBoundaryGeoJson } from './plot-polygon.js?v=21193';
 // v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
 // v2.11.70（I-6）：複查報表用 derivePlotPeriods 取期別標籤
-import { openProjectForm, derivePlotPeriods } from './forms.js?v=21192';
+import { openProjectForm, derivePlotPeriods } from './forms.js?v=21193';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -735,7 +735,8 @@ function getOverlayState() {
 
 // v2.11.93：專案邊界 GeoJSON 取用 helper（renderProjectBoundary 與界外判定共用）
 //   新格式 boundaryGeoJsonStr（JSON.stringify，繞 Firestore array-of-array 限制）優先 / 舊物件格式 fallback
-function getProjectBoundaryGeoJson(project) {
+//   v2.11.94：export 出去給 app.js（樣區明細）與匯出共用同一份解析
+export function getProjectBoundaryGeoJson(project) {
   if (project?.boundaryGeoJsonStr) {
     try { return JSON.parse(project.boundaryGeoJsonStr); }
     catch (e) { console.warn('[map] boundaryGeoJsonStr parse failed', e); return null; }
@@ -759,6 +760,29 @@ function annotatePlotsOutsideBoundary(plotData, project) {
   if (outsideCount > 0) console.warn(`[map] ${outsideCount} 個樣區座標落在專案邊界外`);
   return plotData;
 }
+
+// v2.11.94：單一樣區「是否落在專案邊界內」三態即時判定（匯出報表 + 樣區明細共用）
+//   入：plot 文件（用 plot.location 記錄座標）、project（取邊界）、可選 boundary（批次呼叫時預先解析好，免每列重 parse JSON）
+//   出：'inside' 界內 / 'outside' 界外 / 'no-boundary' 專案未上傳邊界（無從比對）/ 'no-coords' 樣區無有效座標
+//   三態的重點：「沒上傳邊界」≠「在邊界外」— 前者是缺資料、後者是資料有問題，報表不可混為一談。
+export function getPlotBoundaryStatus(plot, project, boundary = undefined) {
+  const b = boundary === undefined ? getProjectBoundaryGeoJson(project) : boundary;
+  if (!b) return 'no-boundary';
+  const lat = Number(plot?.location?.latitude ?? plot?.location?._lat);
+  const lng = Number(plot?.location?.longitude ?? plot?.location?._long);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return 'no-coords';
+  const hit = isPointInBoundaryGeoJson(lng, lat, b);
+  if (hit === null) return 'no-boundary';   // 邊界物件在但無可用面（如只有點圖層）→ 仍是無從比對
+  return hit ? 'inside' : 'outside';
+}
+
+// 匯出報表用文字（審查者直接讀，不用縮寫）
+export const PLOT_BOUNDARY_STATUS_LABEL = {
+  inside: '是',
+  outside: '否（座標在專案邊界外）',
+  'no-boundary': '無邊界可比對',
+  'no-coords': '樣區無座標',
+};
 
 // v2.11.19/24：把 project boundary 畫到 _projectBoundaryLayer（已是 WGS84 標準化過）
 //   v2.11.24：新格式 boundaryGeoJsonStr（JSON.stringify）優先 / 舊格式 boundaryGeoJson 物件 fallback
@@ -1149,6 +1173,8 @@ export async function exportXlsx(project) {
   const wb = XLSX.utils.book_new();
 
   const anonOrReal = (uid) => isReviewer() ? anonName(uid) : uid;
+  // v2.11.94：界內／界外改「匯出當下即時套疊專案邊界」— 邊界只 parse 一次，逐列共用
+  const exportBoundary = getProjectBoundaryGeoJson(project);
   const plotsRows = plots.map(p => ({
     樣區編號: p.code,
     林班小班: p.forestUnit || '',
@@ -1173,7 +1199,9 @@ export async function exportXlsx(project) {
     TWD97_X: p.locationTWD97?.x,
     TWD97_Y: p.locationTWD97?.y,
     GPS精度_m: p.locationAccuracy_m,
-    在範圍內: p.insideBoundary,
+    // v2.11.94：原本輸出 p.insideBoundary，但該欄位四個寫入端一律硬編 true（點面套疊從未實作）→
+    //   報表永遠是 TRUE、零資訊量且誤導審查者。改為匯出當下對專案邊界即時套疊，三態輸出。
+    在專案範圍內: PLOT_BOUNDARY_STATUS_LABEL[getPlotBoundaryStatus(p, project, exportBoundary)],
     設置日期: fmtDate(p.establishedAt),
     建立者: anonOrReal(p.createdBy),
     QA狀態: p.qaStatus || 'pending',
