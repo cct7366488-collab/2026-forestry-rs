@@ -115,6 +115,37 @@ export function isPointInPolygon(x, y, verts) {
   return inside;
 }
 
+// ===== v2.11.93：點對「專案邊界 GeoJSON」套疊（給地圖判斷樣區是否落在專案範圍外）=====
+//   入：lng, lat（WGS84）＋ 專案邊界 GeoJSON（FeatureCollection / Feature / Polygon / MultiPolygon）
+//       — 上傳時已由 parseProjectBoundaryGeoJson 標準化為 WGS84，故此處不再轉座標。
+//   出：true = 在任一 polygon 內；false = 都不在；null = 無可用邊界（無從判斷，呼叫端應視為「不標示」）
+//   規則：每個 polygon 的 coordinates[0] 為外環、[1..] 為孔洞環 → 在外環內且不在任何孔洞內才算 inside。
+//   註：以經緯度直接做 ray casting。台灣尺度下不做等面積投影不影響「內／外」判定
+//       （邊界與待測點同一座標系，僅整體被緯度方向拉伸，拓樸關係不變）。
+export function isPointInBoundaryGeoJson(lng, lat, geojson) {
+  if (!geojson || !Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  const polygons = [];
+  const pushGeometry = (g) => {
+    if (!g) return;
+    if (g.type === 'Polygon') polygons.push(g.coordinates);
+    else if (g.type === 'MultiPolygon') for (const poly of (g.coordinates || [])) polygons.push(poly);
+  };
+  if (geojson.type === 'FeatureCollection') for (const f of (geojson.features || [])) pushGeometry(f?.geometry);
+  else if (geojson.type === 'Feature') pushGeometry(geojson.geometry);
+  else pushGeometry(geojson);
+  if (polygons.length === 0) return null;
+
+  for (const poly of polygons) {
+    if (!Array.isArray(poly) || poly.length === 0) continue;
+    const [outer, ...holes] = poly;
+    if (!Array.isArray(outer) || outer.length < 3) continue;
+    if (!isPointInPolygon(lng, lat, outer)) continue;
+    const inHole = holes.some(h => Array.isArray(h) && h.length >= 3 && isPointInPolygon(lng, lat, h));
+    if (!inHole) return true;
+  }
+  return false;
+}
+
 // ===== 邊界框（給散布圖座標範圍用）=====
 export function computeBbox(verts) {
   const a = vertsToArrays(verts);

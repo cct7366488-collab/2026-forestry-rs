@@ -1,6 +1,19 @@
 # ForestMRV 測試
 
-目前涵蓋 **Shapefile 邊界上傳**（`pwa/js/shapefile-loader.js`，v2.11.91 / v2.11.92）。
+目前涵蓋：
+
+| 測試 | 對象 | 需要 fixtures |
+|---|---|---|
+| `test-shapefile-loader.mjs` | **Shapefile 邊界上傳**（`pwa/js/shapefile-loader.js`，v2.11.91 / v2.11.92） | 是 |
+| `test-boundary-containment.mjs` | **樣區界內／界外判定**（`plot-polygon.js` 的 `isPointInBoundaryGeoJson`，v2.11.93） | 否 |
+
+```bash
+node test-boundary-containment.mjs
+```
+
+界外判定直接決定地圖上樣區點位標不標紅，誤判會讓調查員白跑現場、漏判則等於警訊失效；
+測試釘死 ray casting 的三個典型破口（凹多邊形凹口、孔洞環、MultiPolygon 只中其中一塊），
+並確認「判不出來時回 `null` 而非 `false`」——否則沒上傳邊界的專案會整批被誤標成紅點。
 
 ## 為什麼需要這組測試
 

@@ -1,18 +1,18 @@
 // ===== analytics.js — v1.5 儀表板 + 地圖 + 匯出（含 QA 統計、reviewer 匿名化）=====
 
-import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21191';
+import { fb, $, $$, el, toast, state, isReviewer, anonName, userLabel, twd97ToWgs84, wgs84ToTwd97 } from './app.js?v=21192';
 // v2.3：階段 2 — 進度 KPI 用全 6 子集合 verified 比例
-import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21191';
+import { computeProgress, STATUS, STATUS_META } from './project-status.js?v=21192';
 // v2.7.17：QAQC 工作流（給匯出 QAQC sheet 使用）
 // v2.8.1：tree-level QAQC（給匯出立木 QAQC sheet 使用）
-import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21191';
+import { getPlotQaqcStatus, getTreeQaqcStatus, QAQC_STATUS_META, RESOLUTION_LABEL, computeErrorStats, computeTreeErrorStats, DEFAULT_QAQC_CONFIG } from './plot-qaqc.js?v=21192';
 // v2.10.8（backlog #13）：公式來源徽章 — per-plot dashboard reviewer 透明度
-import { getEquationBadge } from './species-equations.js?v=21191';
+import { getEquationBadge } from './species-equations.js?v=21192';
 // v2.11.19：irregular plot vertices 轉換用
-import { vertsToArrays } from './plot-polygon.js?v=21191';
+import { vertsToArrays, isPointInBoundaryGeoJson } from './plot-polygon.js?v=21192';
 // v2.11.22：地圖分頁「✏️ 編輯專案 / 上傳邊界」按鈕入口（補 v2.11.19 漏掉的 edit project 入口）
 // v2.11.70（I-6）：複查報表用 derivePlotPeriods 取期別標籤
-import { openProjectForm, derivePlotPeriods } from './forms.js?v=21191';
+import { openProjectForm, derivePlotPeriods } from './forms.js?v=21192';
 
 // 共用：抓取本專案所有樣區與立木 + v2.0 地被/水保 + v2.1 野生動物 + v2.2 經濟收穫
 async function fetchAllData(project) {
@@ -529,7 +529,7 @@ export async function renderMap(project) {
   console.log(`[map] phase 1 (plots fetch): ${(performance.now() - t0).toFixed(0)}ms (${plots.length} plots)`);
 
   // 暫時用空 trees 算 plotData — stems/ha = 0 / BA/ha = 0 等密度先顯示為「無資料」灰
-  let plotData = computePlotDataFromTrees(plots, []);
+  let plotData = annotatePlotsOutsideBoundary(computePlotDataFromTrees(plots, []), project);
   _mapData = { project, plotData };
 
   // v2.11.19：先畫 overlay layers（boundary）— 不受 著色 mode 影響，獨立 toggle
@@ -544,10 +544,12 @@ export async function renderMap(project) {
     r.onchange = (e) => renderMapLayer(e.target.value);
   });
   // v2.11.19：綁 overlay checkbox change
+  //   v2.11.93：markers 也要重畫 —「🏷️ 樣區代號」label 掛在 marker 的 permanent tooltip 上
   $$('input[name="map-overlay"]').forEach(c => {
     c.onchange = () => {
       renderProjectBoundary();
       renderPlotBoundaries();
+      renderMapLayer($('input[name="map-layer"]:checked')?.value || 'qa');
     };
   });
   // v2.11.22：綁「編輯專案 / 上傳邊界」按鈕 — admin/PI 可見（HTML data-role-show 處理）；點擊開啟既有的 openProjectForm edit 模式
@@ -634,7 +636,7 @@ export async function renderMap(project) {
   fetchSubCollectionsParallel(project, plots).then(({ trees }) => {
     console.log(`[map] phase 2 (sub-collections, parallel): ${(performance.now() - t0).toFixed(0)}ms total (${trees.length} trees)`);
     if (!_map) return;   // user 已切走 tab
-    plotData = computePlotDataFromTrees(plots, trees);
+    plotData = annotatePlotsOutsideBoundary(computePlotDataFromTrees(plots, trees), project);
     _mapData = { project, plotData };
     renderMapLayer(initMode);   // 重畫 markers 帶完整密度
     if (loadingDiv) loadingDiv.remove();
@@ -706,8 +708,14 @@ function buildPlotPopupHTML(d, projectId) {
        ? ` · 坡向 ${Math.round(d.p.slopeAspect)}°`
        : ' · ⚠ 無坡向（邊界 N-S 對齊）')
     : '';
+  // v2.11.93：界外警語 — 紅點的理由要能點開看到，否則調查員只知道「紅的」不知道要做什麼
+  const outsideWarn = d.outsideBoundary === true
+    ? '<div style="margin:3px 0;padding:2px 5px;background:#fef2f2;border-left:3px solid #dc2626;color:#991b1b;font-size:11px">' +
+      '⚠ <b>此樣區座標在專案邊界外</b><br>請回現場確認 GPS 位置，或檢查是否誤填座標</div>'
+    : '';
   return `
     <strong>${d.p.code}</strong> <span style="font-size:11px;background:#f5f5f4;padding:1px 4px;border-radius:3px">${d.p.qaStatus || 'pending'}</span><br>
+    ${outsideWarn}
     ${d.p.forestUnit || ''} · ${shapeLabel} ${d.p.area_m2 ? Math.round(d.p.area_m2) : '?'}m²${irregLabel}${slopeLabel}${aspectLabel}<br>
     立木 <b>${d.tCount}</b> 株 · 密度 <b>${d.stemsHa.toFixed(0)}</b> 株/ha · BA <b>${d.baHa.toFixed(1)}</b> m²/ha<br>
     調查者：${surveyorLabel}<br>
@@ -715,12 +723,41 @@ function buildPlotPopupHTML(d, projectId) {
   `;
 }
 
-// v2.11.19：抓兩個 overlay checkbox 狀態
+// v2.11.19：抓 overlay checkbox 狀態
+//   v2.11.93：加「樣區代號」label toggle（預設 checked，樣區密集時可關掉）
 function getOverlayState() {
   return {
     plotBoundary: $('input[name="map-overlay"][value="plot-boundary"]')?.checked || false,
     projectBoundary: $('input[name="map-overlay"][value="project-boundary"]')?.checked || false,
+    plotCode: $('input[name="map-overlay"][value="plot-code"]')?.checked ?? true,
   };
+}
+
+// v2.11.93：專案邊界 GeoJSON 取用 helper（renderProjectBoundary 與界外判定共用）
+//   新格式 boundaryGeoJsonStr（JSON.stringify，繞 Firestore array-of-array 限制）優先 / 舊物件格式 fallback
+function getProjectBoundaryGeoJson(project) {
+  if (project?.boundaryGeoJsonStr) {
+    try { return JSON.parse(project.boundaryGeoJsonStr); }
+    catch (e) { console.warn('[map] boundaryGeoJsonStr parse failed', e); return null; }
+  }
+  return project?.boundaryGeoJson || null;
+}
+
+// v2.11.93：標註每個樣區是否落在專案邊界外（d.outsideBoundary: true / false / null=無邊界可比對）
+//   判定點取「樣區記錄座標（plot.location 中心）」而非 marker 所在的 SW 錨點 —
+//   錨點是由形狀/坡向推導出來的衍生值，邊緣樣區的角點可能剛好越界造成誤報；
+//   真正要提醒調查員的是「你記的這個座標不在專案範圍內」。
+//   注意：plot 文件上另有一個 insideBoundary 欄位，但寫入端一律硬編 true（對林班界的套疊從未實作），
+//   不可信 → 此處一律即時重算，不讀該欄位。
+function annotatePlotsOutsideBoundary(plotData, project) {
+  const boundary = getProjectBoundaryGeoJson(project);
+  let outsideCount = 0;
+  plotData.forEach(d => {
+    d.outsideBoundary = boundary ? isPointInBoundaryGeoJson(d.lng, d.lat, boundary) === false : null;
+    if (d.outsideBoundary) outsideCount++;
+  });
+  if (outsideCount > 0) console.warn(`[map] ${outsideCount} 個樣區座標落在專案邊界外`);
+  return plotData;
 }
 
 // v2.11.19/24：把 project boundary 畫到 _projectBoundaryLayer（已是 WGS84 標準化過）
@@ -732,13 +769,8 @@ function renderProjectBoundary() {
   const overlay = getOverlayState();
   if (!overlay.projectBoundary) return;
   // v2.11.24：parse stringified GeoJSON（新格式）；fallback 舊物件格式
-  let boundaryGeoJson = null;
-  if (project.boundaryGeoJsonStr) {
-    try { boundaryGeoJson = JSON.parse(project.boundaryGeoJsonStr); }
-    catch (e) { console.warn('[map] boundaryGeoJsonStr parse failed', e); return; }
-  } else if (project.boundaryGeoJson) {
-    boundaryGeoJson = project.boundaryGeoJson;
-  }
+  //   v2.11.93：抽成 getProjectBoundaryGeoJson()，與界外判定共用同一份解析
+  const boundaryGeoJson = getProjectBoundaryGeoJson(project);
   if (!boundaryGeoJson) return;
   try {
     const layer = L.geoJSON(boundaryGeoJson, {
@@ -805,11 +837,13 @@ function renderPlotBoundaries() {
   const { project, plotData } = _mapData;
   plotData.forEach(d => {
     if (!d.ring || d.ring.length < 3) return;
+    // v2.11.93：界外樣區的面也轉紅，與 marker 一致（避免「點紅面綠」的矛盾訊號）
+    const outside = d.outsideBoundary === true;
     const poly = L.polygon(d.ring, {
-      color: '#15803d',          // 森林綠邊
+      color: outside ? '#dc2626' : '#15803d',          // 界外紅 / 森林綠邊
       weight: 1.5,
       opacity: 0.9,
-      fillColor: '#22c55e',
+      fillColor: outside ? '#ef4444' : '#22c55e',
       fillOpacity: 0.15,
     }).bindPopup(buildPlotPopupHTML(d, project.id));
     _plotBoundaryLayer.addLayer(poly);
@@ -941,30 +975,50 @@ function renderMapLayer(mode) {
       `　<span style="color:#a8a29e">⬤</span> 無資料`;
   }
 
+  // v2.11.93：界外樣區以紅點凸顯（原本落在灰色 pending 色階裡，野外看不出來）
+  const overlay = getOverlayState();
+  const anyOutside = plotData.some(d => d.outsideBoundary);
+
   plotData.forEach(d => {
     const dotColor = getColor(d);
     // v2.11.20 ②(c) C1：marker 改放 SW 角錨點（樣區起點），fallback plot 中心
     const markerPos = d.anchorLatLng || [d.lat, d.lng];
     // v2.11.21 ②(a)：marker r=5 → r=3（再縮小，user 反映只要能辨識位置即可）
     // v2.11.21 ②(b)：marker 與 polygon 都 bindPopup 同樣的 rich info（資訊應掛在面，user 點哪都行）
+    // v2.11.93：界外一律紅（蓋過 QA / 密度色階）＋放大到 r=5 加粗邊 — 座標錯誤是比任何統計都優先的警訊
+    const outside = d.outsideBoundary === true;
     const marker = L.circleMarker(markerPos, {
-      radius: 3,
-      color: d.p.insideBoundary === false ? '#dc2626' : dotColor,
-      fillColor: dotColor,
+      radius: outside ? 5 : 3,
+      color: outside ? '#7f1d1d' : dotColor,
+      fillColor: outside ? '#dc2626' : dotColor,
       fillOpacity: 0.95,
-      weight: 1.5
+      weight: outside ? 2 : 1.5
     }).bindPopup(buildPlotPopupHTML(d, project.id));
+    // v2.11.93：樣區代號小字 label（permanent tooltip，可由「🏷️ 樣區代號」checkbox 關閉）
+    if (overlay.plotCode && d.p.code) {
+      marker.bindTooltip(String(d.p.code), {
+        permanent: true,
+        direction: 'right',
+        offset: [4, 0],
+        className: 'plot-code-label' + (outside ? ' plot-code-label-outside' : ''),
+      });
+    }
     _markerLayer.addLayer(marker);
   });
   // v2.11.19：fitBounds 移到 renderMap 統一處理（boundary > plots > 蓮華池 優先序）— 此處不再 fitBounds
   //   避免切著色 mode（QA/density/BA）時意外 reset zoom，user 體驗更穩定
 
   // 更新 legend
+  // v2.11.93：有界外樣區時一律附上紅點說明（含 QA 模式 — 原本 QA 模式不顯示 legend）
+  const outsideLegend = anyOutside
+    ? `<span style="color:#dc2626">⬤</span> <b style="color:#dc2626">位置在專案邊界外</b>（請檢查該樣區座標）`
+    : '';
+  const fullLegend = [legend, outsideLegend].filter(Boolean).join('　｜　');
   const legendBox = $('#map-legend');
   if (legendBox) {
-    if (legend) {
+    if (fullLegend) {
       legendBox.classList.remove('hidden');
-      legendBox.innerHTML = legend;
+      legendBox.innerHTML = fullLegend;
     } else {
       legendBox.classList.add('hidden');
       legendBox.innerHTML = '';

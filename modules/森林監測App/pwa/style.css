@@ -134,6 +134,31 @@ input[type="checkbox"] {
   display: none;  /* 不顯示 tooltip 箭頭，label 風格 */
 }
 
+/* v2.11.93：地圖上樣區代號 label（permanent Leaflet tooltip，掛在樣區點位上）
+   比作業單元 label 再小一級、底色更淡 — 樣區數量多，label 要能讀但不能蓋掉底圖。
+   界外樣區改紅字紅框，與紅點一組訊號。 */
+.leaflet-tooltip.plot-code-label {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #15803d;
+  border-radius: 3px;
+  color: #14532d;
+  font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0 3px;
+  white-space: nowrap;
+  box-shadow: none;
+}
+.leaflet-tooltip.plot-code-label:before {
+  display: none;  /* 不顯示 tooltip 箭頭，label 風格 */
+}
+.leaflet-tooltip.plot-code-label.plot-code-label-outside {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: #dc2626;
+  color: #b91c1c;
+}
+
 /* v2.11.68：純行政專案藏「著色依據」整 row 後，下一 row 的 border-top 殘留處理。
    配合 index.html 在第一個 row 加 data-module gating；applyModuleVisibility 會
    給該 row 加 .hidden；相鄰 sibling 即第二個 row（疊加圖層）這時去掉上分隔線
