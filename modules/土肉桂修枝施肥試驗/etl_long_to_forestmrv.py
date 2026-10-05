@@ -21,7 +21,7 @@ import pandas as pd
 import numpy as np
 import json, math, os
 
-SRC = r"H:\我的雲端硬碟\cct\林業技師事務所\標案\012林業保育署台中分署\114-115年林業及自然保育署臺中分署轄區林業永續多元輔導計畫\土肉桂修枝矮化及施肥對生長影響之研究\土肉桂試驗_長格式.xlsx"
+SRC = r"H:\我的雲端硬碟\cct\林業技師事務所\標案\012林業保育署台中分署\03_第二期_114-115年臺中分署輔導計畫_1141B024\07_土肉桂試驗樣區\土肉桂試驗_長格式.xlsx"
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dry-run")
 
 # 季別 → 期別 seq + 推定季末日（provisional）

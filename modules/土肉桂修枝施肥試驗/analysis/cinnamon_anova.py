@@ -26,10 +26,20 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(BASE, "output")
+OUT = os.environ.get("CINNAMON_OUT") or os.path.join(BASE, "output")
 FIGS = os.path.join(OUT, "figs")
 os.makedirs(FIGS, exist_ok=True)
 inc = pd.read_pickle(os.path.join(OUT, "_inc.pkl"))
+
+# 期別資訊由 cinnamon_analysis.py 寫出；舊版輸出無此檔時退回三期
+import json, datetime
+_mp = os.path.join(OUT, "_meta.json")
+META = json.load(open(_mp, encoding="utf-8")) if os.path.exists(_mp) else {"seqs": [1, 2, 3], "seasons": ["114Q3", "114Q4", "115Q1"]}
+ZH_NUM = "零一二三四五六七八九十"
+P_FIRST = f"第{ZH_NUM[META['seqs'][0]]}期"
+P_LAST = f"第{ZH_NUM[META['seqs'][-1]]}期"
+N_PERIODS = len(META["seqs"])
+_today = datetime.date.today()
 
 RESP = [("dD_annual", "年均直徑生長量 ΔD (cm/yr)"), ("dH_annual", "年均樹高生長量 ΔH (m/yr)"), ("RGR_D", "直徑相對生長率 RGR_D (/yr)")]
 TRT_ORDER = ["C0", "P1", "F150", "P1F150"]
@@ -63,7 +73,8 @@ def tukey_tbl(data, resp):
 
 def mixed(data, resp):
     md = smf.mixedlm(f"{resp} ~ C(pruning)*C(fertilizer)", data, groups=data["site"])
-    mf = md.fit(reml=True, method="lbfgs")
+    # lbfgs 在樣區變異近 0 時會停在邊界、截距標準誤發散（四期資料實測）；powell 可得穩定解
+    mf = md.fit(reml=True, method="powell")
     t = pd.DataFrame({"項": mf.params.index, "係數": mf.params.values,
                       "標準誤": mf.bse.reindex(mf.params.index).values, "z": mf.tvalues.values, "p": mf.pvalues.values})
     t = t[~t["項"].str.contains("Group Var")]
@@ -203,12 +214,12 @@ setfont(ttl.add_run("土肉桂修枝矮化及施肥對生長影響之研究"), 1
 sub = doc.add_paragraph(); sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
 setfont(sub.add_run("處理間生長反應變異數分析報告"), 15, True)
 meta = doc.add_paragraph(); meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-setfont(meta.add_run("資料期別：第一期(114Q3)～第三期(115Q1)　分析日期：中華民國 115 年 6 月".replace("　", "  ")), 11)
+setfont(meta.add_run(f"資料期別：{P_FIRST}({META['seasons'][0]})～{P_LAST}({META['seasons'][-1]})  分析日期：中華民國 {_today.year - 1911} 年 {_today.month} 月"), 11)
 doc.add_paragraph()
 
 H("壹、分析方法")
 sci_body("本研究樹種為土肉桂（", "Cinnamomum osmophloeum", "）。試驗採二因子析因配置加對照，二因子為修剪（0/1）與施肥（0/150 公克），共 4 種處理（C0 對照、P1 修剪、F150 施肥、P1F150 修剪加施肥），配置於 4 處樣區。")
-body("反應變數採每株自第一期至第三期之年均生長量計算：年均直徑生長量 ΔD（公分／年）、年均樹高生長量 ΔH（公尺／年），及直徑相對生長率 RGR_D（以自然對數差除以期距年數）。僅納入兩端期皆存活且具有效徑高之個體。")
+body(f"反應變數採每株自{P_FIRST}至{P_LAST}之年均生長量計算：年均直徑生長量 ΔD（公分／年）、年均樹高生長量 ΔH（公尺／年），及直徑相對生長率 RGR_D（以自然對數差除以期距年數）。僅納入兩端期皆存活且具有效徑高之個體。")
 li("一、成熟林（樣區 115121，量胸徑）與幼齡林（樣區 117218、811、8110，量地徑）因量測部位與尺度不同，分開分析。")
 li("二、幼齡林：主分析採線性混合模型（修剪與施肥為固定效應、樣區為隨機效應），以處理樣區之重複（每處理 3 樣區）為推論基礎；另以樣區均值進行 2×2 析因變異數分析交叉驗證，並以 Tukey HSD 進行事後多重比較。")
 li("三、成熟林：每處理僅 1 樣區，無樣區層重複，以樹為單位之 2×2 析因變異數分析僅供描述與探索（存在偽複製，結論不宜外推）。")
@@ -223,7 +234,10 @@ add_table(nrow, 3)
 
 # 成熟林
 H("參、成熟林分析（樣區 115121，胸徑）")
-body("註：本節每處理僅 1 樣區、以樹為單位分析，存在偽複製，且現有期距僅約半年、量測噪音與多莖二次平均徑之莖組變動使年均增量波動偏大，下列結果僅供探索參考。", indent=True)
+if N_PERIODS >= 4:
+    body("註：本節每處理僅 1 樣區、以樹為單位分析，存在偽複製；修剪樣區之樹高於修剪作業後大幅下降，屬矮化作業本身之結果而非生長量，故首末期樹高差不代表生長反應；多莖株以二次平均徑彙整，各期所測莖組變動使徑值跳動。下列檢定之顯著性不得逕解讀為處理造成之生長差異，僅供探索參考。", indent=True)
+else:
+    body("註：本節每處理僅 1 樣區、以樹為單位分析，存在偽複製，且現有期距僅約半年、量測噪音與多莖二次平均徑之莖組變動使年均增量波動偏大，下列結果僅供探索參考。", indent=True)
 for resp, lab in RESP:
     r = results["mature"][resp]
     H(f"一、{lab}", 13)
@@ -248,10 +262,37 @@ for resp, lab in RESP:
 
 # 結論與限制
 H("伍、結論與限制")
-li("一、解讀提醒：現有資料僅 3 期、期距約半年，年均增量受季節性量測誤差放大；土肉桂多莖以二次平均徑彙整，各期所測莖數／身分變動會使單株徑值跳動，造成部分樣區出現負成長之假象。故本報告之處理效果檢定屬初步，待第四期起時間序列延長後再行確認。")
-li("二、樹高量測於半年期距內出現大幅正負變動，研判為測高之量測噪音；建議第四期加強樹高量測一致性（固定測點、同一儀器與人員），並考慮以基面積增量作為多莖整株生長之輔助指標。")
-li("三、統計推論層級：幼齡林以樣區為處理重複（n＝3）方屬正確推論單位，混合模型同此精神；成熟林僅 1 樣區／處理，無法就處理效果作正式推論，需增設重複或改以時間序列趨勢評估。")
-li("四、後續建議：第四期完成後，將期距延長之增量重跑本管線；必要時加入「期別」為重複量測之時間因子（重複量測混合模型），以提升統計檢定力。")
+
+
+def _sig_effects(tbl, key_col, p_col="p"):
+    """回傳 p<0.05 之效應名稱（中文）與 p 值字串。"""
+    zh = lambda s: ("修剪×施肥" if ":" in s else "修剪" if "pruning" in s else "施肥" if "fertilizer" in s else None)
+    out = []
+    for _, r in tbl.iterrows():
+        n = zh(str(r[key_col]))
+        if n and pd.notna(r[p_col]) and float(r[p_col]) < 0.05:
+            out.append(f"{n}（p{'＜0.0001' if float(r[p_col]) < 0.0001 else f'＝{float(r[p_col]):.4f}'}）")
+    return out
+
+
+if N_PERIODS >= 4:
+    yrs = inc["years"]
+    li(f"一、資料基礎：本次納入{P_FIRST}至{P_LAST}共 {N_PERIODS} 期，首末期距中位數約 {yrs.median():.2f} 年。前三期調查日為推定季末日，{P_LAST}採系統記錄之實測日；期距仍含推定成分，俟真實調查日回填後應重算。")
+    seq = "二三四"
+    for i, (resp, lab) in enumerate(RESP):
+        r = results["juvenile"][resp]
+        pm, mx = _sig_effects(r["aov_pm"], "來源"), _sig_effects(r["mixed"], "項")
+        same = {s.split("（")[0] for s in pm} == {s.split("（")[0] for s in mx}
+        tail = "兩種分析結果一致。" if same else "兩者不一致，以樣區為複製之結果為準，僅樹級模型顯著者尚不足以認定處理效果。"
+        li(f"{seq[i]}、幼齡林{lab}：以樣區為複製之 2×2 變異數分析，達顯著者為{'、'.join(pm) if pm else '無'}；樹級混合模型達顯著者為{'、'.join(mx) if mx else '無'}。{tail}")
+    li("五、成熟林：修剪樣區樹高之下降為矮化修剪作業所致，首末期樹高差及其檢定不代表生長反應；建議改以修剪完成後之期別為基期，另行計算修剪後之萌蘗高生長與直徑生長。本區每處理僅 1 樣區，處理效果無法作正式推論。")
+    li(f"六、量測限制：土肉桂多莖株以二次平均徑彙整，各期所測莖數與莖別若不一致，單株徑值即產生跳動；{P_LAST}為現場逐株輸入單一徑值，與前三期由各莖換算者之量法是否一致，須向調查人員確認。期中枯死之個體以其最後存活期計算，期距較短，年化後變異放大。")
+    li(f"七、後續建議：先依「{P_LAST}資料檢核表」之旗標（徑高與前期完全相同、徑倒退、樹高大幅變動）完成人工覆核與更正，再重跑本分析；模型宜改採重複量測混合模型，以期別為時間因子、樣區與「樣區×處理」小區為隨機效應，以正確反映試驗之複製層級。")
+else:
+    li("一、解讀提醒：現有資料僅 3 期、期距約半年，年均增量受季節性量測誤差放大；土肉桂多莖以二次平均徑彙整，各期所測莖數／身分變動會使單株徑值跳動，造成部分樣區出現負成長之假象。故本報告之處理效果檢定屬初步，待第四期起時間序列延長後再行確認。")
+    li("二、樹高量測於半年期距內出現大幅正負變動，研判為測高之量測噪音；建議第四期加強樹高量測一致性（固定測點、同一儀器與人員），並考慮以基面積增量作為多莖整株生長之輔助指標。")
+    li("三、統計推論層級：幼齡林以樣區為處理重複（n＝3）方屬正確推論單位，混合模型同此精神；成熟林僅 1 樣區／處理，無法就處理效果作正式推論，需增設重複或改以時間序列趨勢評估。")
+    li("四、後續建議：第四期完成後，將期距延長之增量重跑本管線；必要時加入「期別」為重複量測之時間因子（重複量測混合模型），以提升統計檢定力。")
 
 docpath = os.path.join(OUT, "03_ANOVA統計分析報告.docx")
 doc.save(docpath)

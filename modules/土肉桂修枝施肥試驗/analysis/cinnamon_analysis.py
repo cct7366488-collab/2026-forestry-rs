@@ -30,14 +30,20 @@ import matplotlib.pyplot as plt
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 PAYLOAD = os.path.join(BASE, "..", "dry-run", "payload.json")
-OUT = os.path.join(BASE, "output")
+# 輸出目錄可用環境變數 CINNAMON_OUT 覆寫（worktree 為暫時目錄，產出請指到主 checkout 或 GDrive）
+OUT = os.environ.get("CINNAMON_OUT") or os.path.join(BASE, "output")
 FIGS = os.path.join(OUT, "figs")
 os.makedirs(FIGS, exist_ok=True)
 
 TRT_ORDER = ["C0", "P1", "F150", "P1F150"]
 TRT_ZH = {"C0": "對照", "P1": "修剪", "F150": "施肥", "P1F150": "修剪+施肥"}
+TRT_FACTORS = {"C0": (0, 0), "P1": (1, 0), "F150": (0, 150), "P1F150": (1, 150)}
 ALIVE_FATES = {"alive"}
 DEAD_FATES = {"dead", "missing", "tag-lost"}
+MATURE_SITE = 115121
+# 期別 → 季別標籤與推定季末日（第 1–3 期為 xlsx 匯入、無實測日，沿用 ETL 之推定值）
+SEASON = {1: ("114Q3", "2025-09-30"), 2: ("114Q4", "2025-12-31"), 3: ("115Q1", "2026-03-31"), 4: ("115Q2", "2026-06-30")}
+IMPORTED_SEQS = {1, 2, 3}
 
 
 def load_long():
@@ -60,7 +66,105 @@ def load_long():
                 })
     df = pd.DataFrame(rows)
     df["date"] = pd.to_datetime(df["date"])
+    df["dateSource"] = "推定季末"
     return df, pj
+
+
+def load_long_from_export(xlsx):
+    """ForestMRV「匯出 → 逐棵逐期原始值」Excel → 與 load_long() 同欄位之長表。
+
+    日期：第 1–3 期（xlsx 匯入）沿用推定季末日；App 內實測之期別取「記錄時間」之樣區中位日，
+    缺記錄時間時退回「期別日期」（開期日），再退回推定季末日。來源記於 dateSource 欄。
+    """
+    raw = pd.read_excel(xlsx, sheet_name=0, dtype={"樣區": str})
+    num = lambda c: pd.to_numeric(raw[c], errors="coerce") if c in raw else np.nan
+    code = raw["樣區"].astype(str).str.strip()
+    site = pd.to_numeric(code.str.split("-").str[0], errors="coerce")
+    trt = code.str.split("-").str[1]
+    bad = sorted(set(trt.dropna()) - set(TRT_FACTORS))
+    if bad or site.isna().any():
+        raise ValueError(f"樣區代碼無法解析為「樣區-處理」：{bad or code[site.isna()].unique().tolist()}")
+    seq = num("期別").astype(int)
+    df = pd.DataFrame({
+        "plot": code, "site": site.astype(int), "treatment": trt,
+        "pruning": trt.map(lambda t: TRT_FACTORS[t][0]), "fertilizer": trt.map(lambda t: TRT_FACTORS[t][1]),
+        "diameterType": np.where(site == MATURE_SITE, "breast", "basal"),
+        "group": np.where(site == MATURE_SITE, "mature", "juvenile"),
+        "area_ha": np.nan, "treeNum": num("立木編號"), "treeCode": raw.get("treeCode"),
+        "seq": seq, "season": seq.map(lambda s: SEASON.get(s, (f"P{s}", None))[0]),
+        "D": num("DBH_cm"), "H": num("樹高_m"), "nstem": np.nan,
+        "BA": num("斷面積_m2"), "vol": num("材積_m3"), "carbon": num("碳_kg"),
+        "vitality": raw.get("活力"), "fate": raw["狀態"].fillna("alive") if "狀態" in raw else "alive",
+    })
+    rec = pd.to_datetime(raw.get("記錄時間"), errors="coerce").dt.normalize()
+    opened = pd.to_datetime(raw.get("期別日期"), errors="coerce")
+    season_end = pd.to_datetime(seq.map(lambda s: SEASON.get(s, (None, None))[1]))
+    imported = seq.isin(IMPORTED_SEQS)
+    # 同一樣區同一期取記錄日中位數，避免同批調查跨日造成同樣區期距不一
+    rec_med = rec.groupby([df["plot"], df["seq"]]).transform(lambda x: x.dropna().sort_values().iloc[len(x.dropna()) // 2] if x.notna().any() else pd.NaT)
+    df["date"] = np.where(imported, season_end, rec_med.fillna(opened).fillna(season_end))
+    df["date"] = pd.to_datetime(df["date"])
+    df["dateSource"] = np.where(imported, "推定季末", np.where(rec_med.notna(), "記錄時間", np.where(opened.notna(), "開期日", "推定季末")))
+    if df["date"].isna().any():
+        raise ValueError(f"有 {int(df['date'].isna().sum())} 筆無法決定調查日（期別 {sorted(df.loc[df['date'].isna(), 'seq'].unique())}）")
+    return df, {"source": os.path.basename(xlsx)}
+
+
+# ===================== Tier 0：最新一期資料檢核（期間比對） =====================
+def qa_latest_period(df, d_drop_pct=10.0, h_change_pct=30.0):
+    """最新一期逐株與前一有效期比對。門檻為篩檢用，非剔除依據；結果供人工覆核。"""
+    seqs = sorted(df["seq"].unique())
+    last = seqs[-1]
+    recs = []
+    for (plot, treeNum), g in df.groupby(["plot", "treeNum"]):
+        cur = g[g["seq"] == last]
+        prev = g[g["seq"] < last].sort_values("seq")
+        if cur.empty:
+            if not prev.empty and prev.iloc[-1]["fate"] in ALIVE_FATES:
+                recs.append({"樣區": plot, "立木編號": treeNum, "檢核": "最新一期無紀錄（前期存活）"})
+            continue
+        c = cur.iloc[0]
+        if prev.empty:
+            recs.append({"樣區": plot, "立木編號": treeNum, "檢核": "僅最新一期有紀錄（進界或新增）", "本期徑": c["D"], "本期高": c["H"]})
+            continue
+        p = prev.iloc[-1]
+        row = {"樣區": plot, "立木編號": treeNum, "前期": int(p["seq"]), "前期徑": p["D"], "本期徑": c["D"],
+               "前期高": p["H"], "本期高": c["H"], "前期狀態": p["fate"], "本期狀態": c["fate"]}
+        flags = []
+        c_alive, p_alive = c["fate"] in ALIVE_FATES, p["fate"] in ALIVE_FATES
+        if c_alive and not p_alive:
+            flags.append("前期枯死／失蹤、本期存活")
+        if c_alive and (pd.isna(c["D"]) or pd.isna(c["H"])):
+            flags.append("本期存活但徑或高缺值")
+        if c_alive and p_alive and pd.notna(c["D"]) and pd.notna(p["D"]) and p["D"] > 0:
+            if c["D"] == p["D"] and c["H"] == p["H"]:
+                flags.append("徑高與前期完全相同（疑未實測、沿用前期值）")
+            dd = 100 * (c["D"] - p["D"]) / p["D"]
+            row["徑變動%"] = round(dd, 1)
+            if dd < -d_drop_pct:
+                flags.append(f"徑倒退逾 {d_drop_pct:g}%")
+        if c_alive and p_alive and pd.notna(c["H"]) and pd.notna(p["H"]) and p["H"] > 0:
+            dh = 100 * (c["H"] - p["H"]) / p["H"]
+            row["高變動%"] = round(dh, 1)
+            if abs(dh) > h_change_pct:
+                flags.append(f"樹高變動逾 ±{h_change_pct:g}%")
+        for f in flags:
+            recs.append({**row, "檢核": f})
+    detail = pd.DataFrame(recs)
+    cur_all = df[df["seq"] == last]
+    summ = (cur_all.groupby("plot").agg(本期筆數=("treeNum", "count"),
+                                        存活=("fate", lambda x: int(x.isin(ALIVE_FATES).sum())),
+                                        調查日=("date", lambda x: x.iloc[0].date()),
+                                        日期來源=("dateSource", "first")).reset_index().rename(columns={"plot": "樣區"}))
+    if len(detail):
+        piv = detail.pivot_table(index="樣區", columns="檢核", values="立木編號", aggfunc="count", fill_value=0).reset_index()
+        summ = summ.merge(piv, on="樣區", how="left").fillna(0)
+    path = os.path.join(OUT, f"00_第{last}期資料檢核.xlsx")
+    with pd.ExcelWriter(path, engine="openpyxl") as xw:
+        summ.to_excel(xw, sheet_name="逐樣區摘要", index=False)
+        (detail if len(detail) else pd.DataFrame({"檢核": ["無異常"]})).to_excel(xw, sheet_name="逐株異常明細", index=False)
+    print(f"  ✓ Tier0: {path}（第 {last} 期 {len(cur_all)} 筆；異常旗標 {len(detail)} 項）")
+    return summ, detail
 
 
 # ===================== Tier 1：逐樣區各期原始資料 =====================
@@ -175,8 +279,21 @@ def tier2(df, inc):
 
 
 if __name__ == "__main__":
-    df, pj = load_long()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--export", help="ForestMRV 匯出之「逐棵逐期原始值」xlsx；未給則讀 ../dry-run/payload.json")
+    args = ap.parse_args()
+    df, pj = load_long_from_export(args.export) if args.export else load_long()
     print(f"載入：{df['plot'].nunique()} 樣區 / {df[['plot','treeNum']].drop_duplicates().shape[0]} 樹 / {len(df)} 筆期測值")
+    seqs = sorted(int(s) for s in df["seq"].unique())
+    print("各期筆數與日期來源：")
+    print(df.groupby(["seq", "dateSource"]).agg(n=("treeNum", "count"), 最早=("date", "min"), 最晚=("date", "max")).to_string())
+    if len(seqs) >= 2:
+        qa_latest_period(df)
+    json.dump({"seqs": seqs, "seasons": [SEASON.get(s, (f"P{s}",))[0] for s in seqs],
+               "source": args.export and os.path.basename(args.export) or "payload.json",
+               "lastDateSources": sorted(df[df["seq"] == seqs[-1]]["dateSource"].unique().tolist())},
+              open(os.path.join(OUT, "_meta.json"), "w", encoding="utf-8"), ensure_ascii=False)
     tier1(df)
     inc = compute_increments(df)
     print(f"可算增量樹數：{len(inc)}（成熟 {len(inc[inc.group=='mature'])} / 幼齡 {len(inc[inc.group=='juvenile'])}）")
